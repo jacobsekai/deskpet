@@ -83,9 +83,12 @@ jobs:
         continue-on-error: true
         shell: powershell
         run: |
-          $p = Start-Process dist\DeskPet-win32-x64\DeskPet.exe -ArgumentList '--self-test' -PassThru -RedirectStandardOutput self-test.txt
-          if (-not $p.WaitForExit(60000)) { $p.Kill(); throw "app didn't exit" }
-          Get-Content self-test.txt
+          $p = Start-Process dist\DeskPet-win32-x64\DeskPet.exe -ArgumentList '--self-test' -PassThru -RedirectStandardOutput self-test.txt -RedirectStandardError self-test-err.txt
+          $exited = $p.WaitForExit(60000)
+          if (-not $exited) { $p.Kill() }
+          '--- stdout'; Get-Content self-test.txt
+          '--- stderr'; Get-Content self-test-err.txt | Select-String -NotMatch 'gpu|GPU|DEP0169' | Select-Object -Last 40
+          if (-not $exited -or $p.ExitCode -ne 0) { throw "self-test failed (exited: $exited, code: $($p.ExitCode))" }
 
       - name: Zip
         shell: powershell

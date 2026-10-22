@@ -1216,6 +1216,14 @@ if (process.argv.includes('--snapshot')) {
 } else {
   if (process.platform === 'darwin') app.dock.hide();
   let pet;
+  const selfTest = process.argv.includes('--self-test');
+  if (selfTest) {
+    // Make startup failures visible (and fatal) when testing.
+    const fail = (e) => { console.error('self-test failed:', e && e.stack ? e.stack : e); app.exit(1); };
+    process.on('uncaughtException', fail);
+    process.on('unhandledRejection', fail);
+    setTimeout(() => { console.error('self-test timed out'); app.exit(2); }, 30000);
+  }
   app.whenReady().then(() => {
     pet = new Pet();
     ipcMain.on('press', () => pet.onPress());
@@ -1274,8 +1282,9 @@ if (process.argv.includes('--snapshot')) {
           mood: pet.mood, size: pet.size, bounds: pet.win.getBounds(), geometry: pet.geometry,
           sessions: pet.sessions.map((s) => `${s.name}: ${s.detail} [${s.precise ? 'hooks' : 'cpu'}]`),
           scans: pet.agents.scanCount, pack: pet.pack && pet.pack.name, menuItems: pet.buildMenu().items.length,
+          windowsToStandOn: pet.platforms.platforms.length, inCall: pet.agents.inCall, version: app.getVersion(),
         }, null, 2));
-        app.quit();
+        app.exit(0);
       }, 7000);
     }
   });
