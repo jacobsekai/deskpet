@@ -1630,6 +1630,9 @@ function runSnapshot() {
     width: 1200, height: 900, show: false, transparent: true, frame: false,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), offscreen: false },
   });
+  win.webContents.on('console-message', (e) => console.log('renderer:', e.message));
+  win.webContents.on('render-process-gone', (_e, d) => { console.error('renderer gone:', d.reason); app.exit(3); });
+  setTimeout(() => { console.error('snapshot timed out'); app.exit(2); }, 45000);
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'), { query: { snapshot: '1' } });
   ipcMain.once('snapshot-done', (_e, dataURL) => {
     const out = path.join(__dirname, '..', 'test-output');
@@ -1708,7 +1711,9 @@ if (process.argv.includes('--snapshot')) {
     }
     // `--panel-snapshot`: screenshot every control center page to test-output/, then quit.
     if (process.argv.includes('--panel-snapshot')) {
+      setTimeout(() => { console.error('panel snapshot timed out'); app.exit(2); }, 60000);
       pet.openPanel();
+      pet.panel.webContents.on('console-message', (e) => console.log('panel:', e.message));
       pet.panel.webContents.once('did-finish-load', async () => {
         const out = path.join(__dirname, '..', 'test-output');
         fs.mkdirSync(out, { recursive: true });

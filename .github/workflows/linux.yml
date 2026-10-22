@@ -41,9 +41,10 @@ jobs:
         run: xvfb-run -a npx electron . --self-test --no-sandbox | tee self-test.txt && grep -q '"version"' self-test.txt
 
       - name: Screenshots (pet and control center)
+        timeout-minutes: 5
         run: |
-          xvfb-run -a npx electron . --snapshot --no-sandbox
-          xvfb-run -a npx electron . --panel-snapshot --no-sandbox
+          timeout 90 xvfb-run -a npx electron . --snapshot --no-sandbox
+          timeout 120 xvfb-run -a npx electron . --panel-snapshot --no-sandbox
           ls test-output
 
       - uses: actions/upload-artifact@v4
