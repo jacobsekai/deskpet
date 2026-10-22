@@ -13,6 +13,8 @@ const EVENTS = {
 };
 
 const isOurs = (group) => (group.hooks || []).some((h) => /deskpet/i.test(h.command || '') && /hook\.ps1/i.test(h.command || ''));
+/** Any DeskPet hook, including the macOS app's. */
+const isAnyDeskPet = (group) => (group.hooks || []).some((h) => /deskpet/i.test(h.command || ''));
 
 function command() {
   // Forward slashes work in both cmd and Git Bash, whichever runs the hook.
@@ -22,11 +24,13 @@ function command() {
 
 function installed() {
   const settings = readJSON(SETTINGS, {});
-  return Object.values(settings.hooks || {}).some((groups) => (groups || []).some(isOurs));
+  const match = process.platform === 'win32' ? isOurs : isAnyDeskPet;
+  return Object.values(settings.hooks || {}).some((groups) => (groups || []).some(match));
 }
 
 /** @param {boolean} install false removes DeskPet's hooks */
 function setInstalled(install) {
+  if (process.platform !== 'win32') throw new Error('On macOS, use the native DeskPet app to connect Claude Code');
   fs.mkdirSync(paths.root, { recursive: true });
   // Read+write rather than copyFile: the source sits inside the app's asar archive.
   if (install) fs.writeFileSync(paths.hookScript, fs.readFileSync(path.join(__dirname, 'hook.ps1')));

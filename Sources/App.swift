@@ -1,10 +1,22 @@
 import AppKit
+import ServiceManagement
 
 struct Config {
     var ownerName: String
     var petName: String
     var spritePack: String
     var themeColor: String
+
+    /// Merges changes into config.json (shared with the Windows app).
+    static func save(_ changes: [String: Any]) {
+        var obj = (try? Data(contentsOf: DeskPetPaths.config))
+            .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+        obj.merge(changes) { _, new in new }
+        try? FileManager.default.createDirectory(at: DeskPetPaths.root, withIntermediateDirectories: true)
+        if let data = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]) {
+            try? data.write(to: DeskPetPaths.config, options: .atomic)
+        }
+    }
 
     static func load() -> Config {
         let obj = (try? Data(contentsOf: DeskPetPaths.config))
@@ -55,7 +67,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     private var petView: PetView!
     private var statusItem: NSStatusItem!
     private let agents = AgentMonitor()
-    private let config = Config.load()
+    private var config = Config.load()
+    private var wizard: WizardController?
     private let defaults = UserDefaults.standard
 
     private var lastTick = CACurrentMediaTime()
@@ -127,7 +140,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         setupStatusItem()
         observeWorkspace()
         accessory = Self.accessory(for: AppCategory(NSWorkspace.shared.frontmostApplication))
-        say("hi \(config.ownerName)! 👋", for: 4)
+        if CommandLine.arguments.contains("wizard-snapshot") {
+            openWizard()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.wizard?.snapshotSteps() }
+        } else if defaults.bool(forKey: "setupComplete") {
+            say("hi \(config.ownerName)! 👋", for: 4)
+        } else {
+            openWizard()
+        }
 
         let timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in self?.tick() }
         RunLoop.main.add(timer, forMode: .common)
@@ -607,6 +627,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         spritesItem.submenu = spritesMenu
         menu.addItem(spritesItem)
         menu.addItem(item(panel.isVisible ? "Hide \(config.petName)" : "Show \(config.petName)", #selector(toggleVisible)))
+        menu.addItem(item("Setup…", #selector(openWizard)))
         menu.addItem(.separator())
         menu.addItem(item("Quit DeskPet", #selector(quit), key: "q"))
     }
@@ -664,6 +685,109 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             say("back to classic 🐾", for: 2)
         default:
             break
+        }
+    }
+
+    // MARK: - Setup wizard (the shared HTML in electron/src/wizard)
+
+    @objc private func openWizard() {
+        if let wizard { return wizard.show() }
+        let controller = WizardController { [weak self] action, payload in self?.wizardCall(action, payload) }
+        controller.onClose = { [weak self] in
+            self?.defaults.set(true, forKey: "setupComplete")
+            self?.wizard = nil
+        }
+        wizard = controller
+        controller.show()
+    }
+
+    private func wizardStatus() -> [String: Any] {
+        let installed = HookInstaller.installed()
+        return [
+            "hooksInstalled": installed,
+            "hooksLive": installed && HookInstaller.live(),
+            "running": Array(Set(agents.procSessions.map(\.name))).sorted(),
+        ]
+    }
+
+    private func wizardCall(_ action: String, _ payload: [String: Any]) -> Any? {
+        switch action {
+        case "state":
+            return [
+                "platform": "mac", "chrome": "native",
+                "ownerName": config.ownerName, "petName": config.petName,
+                "packs": SpritePack.available(), "spritePack": spritePackName,
+                "themeColor": themeHex, "thoughtBubble": thoughtBubble.rawValue,
+                "wander": wander, "gravity": gravity,
+                "startAtLogin": SMAppService.mainApp.status == .enabled, "startAtLoginSupported": true,
+            ].merging(wizardStatus()) { a, _ in a }
+        case "status":
+            return wizardStatus()
+        case "pack":
+            let name = payload["name"] as? String ?? ""
+            let dir = SpritePack.root.appendingPathComponent(name)
+            let options = (try? Data(contentsOf: dir.appendingPathComponent("pack.json")))
+                .flatMap { try? JSONSerialization.jsonObject(with: $0) } ?? [String: Any]()
+            let images = ((try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? [])
+                .filter { ["png", "gif", "webp", "jpg", "jpeg"].contains($0.pathExtension.lowercased()) }
+            let files = images.compactMap { url -> [String: Any]? in
+                guard let data = try? Data(contentsOf: url) else { return nil }
+                return ["name": url.lastPathComponent, "data": data.base64EncodedString()]
+            }
+            return ["name": name, "options": options, "files": files]
+        case "save":
+            let owner = payload["ownerName"] as? String ?? config.ownerName
+            let pet = payload["petName"] as? String ?? config.petName
+            Config.save(["ownerName": owner, "petName": pet])
+            config.ownerName = owner
+            config.petName = pet
+            return ["ok": true]
+        case "set":
+            let value = payload["value"]
+            switch payload["key"] as? String ?? "" {
+            case "spritePack":
+                spritePackName = value as? String ?? ""
+                loadSprites(announce: false)
+            case "themeColor":
+                themeHex = value as? String ?? ""
+                petView.theme = Theme(hex: themeHex) ?? .default
+            case "thoughtBubble":
+                thoughtBubble = ThoughtBubbleSize(rawValue: value as? String ?? "") ?? .large
+                petView.thoughtBubble = thoughtBubble
+            case "wander":
+                wander = value as? Bool ?? true
+                walkTarget = nil
+            case "gravity":
+                gravity = value as? Bool ?? true
+            case "startAtLogin":
+                if value as? Bool == true { try? SMAppService.mainApp.register() } else { try? SMAppService.mainApp.unregister() }
+                return ["value": SMAppService.mainApp.status == .enabled]
+            default:
+                break
+            }
+            return ["value": value ?? NSNull()]
+        case "hooks":
+            do {
+                try HookInstaller.setInstalled(payload["install"] as? Bool ?? true)
+                return ["ok": true]
+            } catch {
+                return ["ok": false, "error": error.localizedDescription]
+            }
+        case "openSprites":
+            NSWorkspace.shared.open(SpritePack.root)
+            return ["ok": true]
+        case "finish":
+            _ = wizardCall("save", payload)
+            defaults.set(true, forKey: "setupComplete")
+            wizard?.close()
+            transient = (.done, CACurrentMediaTime() + 2.5)
+            say("hi \(config.ownerName)! I'm \(config.petName) 🐾", for: 4)
+            return ["ok": true]
+        case "close":
+            wizard?.close()
+            return ["ok": true]
+        default:
+            return nil
         }
     }
 

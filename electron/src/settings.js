@@ -53,4 +53,19 @@ function loadConfig() {
   };
 }
 
-module.exports = { paths, Settings, loadConfig, readJSON };
+/** Merges `changes` into config.json (shared with the macOS app). */
+function saveConfig(changes) {
+  const o = { ...readJSON(paths.config, {}), ...changes };
+  fs.mkdirSync(paths.root, { recursive: true });
+  fs.writeFileSync(paths.config, `${JSON.stringify(o, null, 2)}\n`);
+}
+
+/** Hooks are "live" once any agent has written session state recently. */
+function hooksLive() {
+  try {
+    const cutoff = Date.now() - 10 * 60 * 1000;
+    return fs.readdirSync(paths.sessions).some((f) => f.endsWith('.json') && fs.statSync(path.join(paths.sessions, f)).mtimeMs > cutoff);
+  } catch (_) { return false; }
+}
+
+module.exports = { paths, Settings, loadConfig, saveConfig, hooksLive, readJSON };

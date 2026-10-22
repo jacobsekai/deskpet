@@ -1,0 +1,100 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'">
+  <title>Welcome to DeskPet</title>
+  <link rel="stylesheet" href="wizard.css">
+</head>
+<body>
+  <div class="window">
+    <div class="glow g1"></div><div class="glow g2"></div><div class="glow g3"></div>
+    <header class="titlebar">
+      <div class="brand"><span class="paw">🐾</span> DeskPet</div>
+      <button class="close" id="close" title="Close">✕</button>
+    </header>
+
+    <main>
+      <section class="stage">
+        <canvas id="pet"></canvas>
+        <canvas id="confetti"></canvas>
+      </section>
+
+      <section class="panels" id="panels">
+        <!-- 0: welcome -->
+        <article class="panel" data-step="welcome">
+          <p class="eyebrow">Welcome</p>
+          <h1>Meet <span class="pet-name">Mochi</span></h1>
+          <p class="lead">A tiny desk buddy who keeps you company and keeps an eye on your AI agents: thinking when they think, typing when they code, waving when they need you.</p>
+          <button class="primary big" data-next>Get started <span class="arrow">→</span></button>
+        </article>
+
+        <!-- 1: names -->
+        <article class="panel" data-step="names">
+          <p class="eyebrow">Step 1 of 4</p>
+          <h2>First, introductions</h2>
+          <label class="field">
+            <span>What should <span class="pet-name">Mochi</span> call you?</span>
+            <input id="owner" type="text" maxlength="24" spellcheck="false" autocomplete="off">
+          </label>
+          <label class="field">
+            <span>And your pet's name?</span>
+            <input id="petName" type="text" maxlength="20" spellcheck="false" autocomplete="off">
+          </label>
+        </article>
+
+        <!-- 2: look -->
+        <article class="panel" data-step="look">
+          <p class="eyebrow">Step 2 of 4</p>
+          <h2>Pick a look</h2>
+          <div class="packs" id="packs"></div>
+          <div class="row">
+            <span class="label">Theme</span>
+            <div class="swatches" id="swatches"></div>
+          </div>
+          <div class="row">
+            <span class="label">Thought bubble</span>
+            <div class="segmented" id="bubble">
+              <button data-value="large">Large</button><button data-value="small">Small</button><button data-value="off">Off</button>
+            </div>
+          </div>
+        </article>
+
+        <!-- 3: agents -->
+        <article class="panel" data-step="agents">
+          <p class="eyebrow">Step 3 of 4</p>
+          <h2>Connect your AI agents</h2>
+          <p class="sub">Mochi reacts as they work. Claude Code connects for exact states; the others are noticed whenever they run.</p>
+          <div class="providers" id="providers"></div>
+        </article>
+
+        <!-- 4: touches -->
+        <article class="panel" data-step="touches">
+          <p class="eyebrow">Step 4 of 4</p>
+          <h2>Finishing touches</h2>
+          <div class="toggles" id="toggles"></div>
+        </article>
+
+        <!-- 5: done -->
+        <article class="panel" data-step="done">
+          <p class="eyebrow">All set</p>
+          <h1>You're all set, <span class="owner-name">friend</span>!</h1>
+          <ul class="tips" id="tips"></ul>
+          <button class="primary big" id="finish">Let's go! <span class="arrow">🐾</span></button>
+        </article>
+      </section>
+    </main>
+
+    <footer class="nav" id="nav">
+      <button class="ghost" id="back">Back</button>
+      <div class="dots" id="dots"></div>
+      <button class="primary" id="next">Continue <span class="arrow">→</span></button>
+    </footer>
+  </div>
+
+  <script src="../renderer/color.js"></script>
+  <script src="../renderer/pet.js"></script>
+  <script src="../renderer/sprites.js"></script>
+  <script src="wizard.js"></script>
+</body>
+</html>

@@ -6,7 +6,7 @@ const { app, BrowserWindow, Tray, Menu, nativeImage, screen, powerMonitor, ipcMa
 const fs = require('fs');
 const path = require('path');
 const { AgentMonitor, PRIORITY } = require('./agents');
-const { paths, Settings, loadConfig, readJSON } = require('./settings');
+const { paths, Settings, loadConfig, saveConfig, hooksLive, readJSON } = require('./settings');
 const hooks = require('./hooks');
 
 const GROUND = 34;
@@ -116,8 +116,9 @@ class Pet {
     this.agents.start();
     powerMonitor.on('resume', () => this.welcomeBack());
     powerMonitor.on('unlock-screen', () => this.welcomeBack());
-    this.say(`hi ${this.config.ownerName}! 👋`, 4);
     this.timer = setInterval(() => this.tick(), 1000 / 30);
+    if (this.settings.get('setupComplete', false)) this.say(`hi ${this.config.ownerName}! 👋`, 4);
+    else this.openWizard();
   }
 
   createWindow() {
@@ -613,6 +614,7 @@ class Pet {
         ],
       },
       { label: this.win.isVisible() ? `Hide ${this.config.petName}` : `Show ${this.config.petName}`, click: () => this.toggleVisible() },
+      { label: 'Setup…', click: () => this.openWizard() },
       { type: 'separator' },
     ];
     if (isWindows) {
@@ -696,6 +698,106 @@ class Pet {
     }
   }
 
+  // MARK: Setup wizard (shared HTML in src/wizard, also used by the macOS app)
+
+  openWizard() {
+    if (this.wizard && !this.wizard.isDestroyed()) return this.wizard.focus();
+    this.wizard = new BrowserWindow({
+      width: 780, height: 540, resizable: false, maximizable: false, fullscreenable: false, frame: false,
+      transparent: true, backgroundColor: '#00000000', show: false, title: 'Welcome to DeskPet',
+      icon: path.join(__dirname, '..', 'assets', 'icon.png'),
+      webPreferences: { preload: path.join(__dirname, 'preload-wizard.js') },
+    });
+    this.wizard.loadFile(path.join(__dirname, 'wizard', 'index.html'));
+    this.wizard.once('ready-to-show', () => this.wizard.show());
+    this.wizard.on('closed', () => {
+      this.wizard = null;
+      this.settings.set('setupComplete', true);
+    });
+  }
+
+  closeWizard() {
+    if (this.wizard && !this.wizard.isDestroyed()) this.wizard.close();
+  }
+
+  wizardStatus() {
+    return {
+      hooksInstalled: hooks.installed(),
+      hooksLive: hooks.installed() && hooksLive(),
+      running: [...new Set(this.agents.procSessions.map((s) => s.name))],
+    };
+  }
+
+  wizardCall(action, payload) {
+    const loginSupported = isWindows || process.platform === 'darwin';
+    switch (action) {
+      case 'state':
+        return {
+          platform: isWindows ? 'windows' : process.platform === 'darwin' ? 'mac' : 'other',
+          chrome: 'custom',
+          ownerName: this.config.ownerName,
+          petName: this.config.petName,
+          packs: listPacks(),
+          spritePack: this.spritePackName,
+          themeColor: this.themeHex,
+          thoughtBubble: this.thoughtBubble,
+          wander: this.wander,
+          gravity: this.gravity,
+          startAtLogin: loginSupported && app.getLoginItemSettings().openAtLogin,
+          startAtLoginSupported: loginSupported,
+          ...this.wizardStatus(),
+        };
+      case 'status':
+        return this.wizardStatus();
+      case 'pack': {
+        const dir = path.join(paths.sprites, payload.name);
+        return {
+          name: payload.name,
+          options: readJSON(path.join(dir, 'pack.json'), {}),
+          files: fs.readdirSync(dir).filter((f) => /\.(png|gif|webp|jpe?g)$/i.test(f)).map((f) => ({ name: f, data: fs.readFileSync(path.join(dir, f)) })),
+        };
+      }
+      case 'save':
+        saveConfig({ ownerName: payload.ownerName, petName: payload.petName });
+        this.config = { ...this.config, ownerName: payload.ownerName, petName: payload.petName };
+        return { ok: true };
+      case 'set':
+        switch (payload.key) {
+          case 'spritePack': this.chooseSprites(payload.value); break;
+          case 'themeColor': this.themeHex = payload.value; break;
+          case 'thoughtBubble': this.thoughtBubble = payload.value; break;
+          case 'wander': this.wander = !!payload.value; this.walkTarget = null; break;
+          case 'gravity': this.gravity = !!payload.value; break;
+          case 'startAtLogin':
+            app.setLoginItemSettings({ openAtLogin: !!payload.value });
+            return { value: app.getLoginItemSettings().openAtLogin };
+        }
+        return { value: payload.value };
+      case 'hooks':
+        try {
+          hooks.setInstalled(!!payload.install);
+          return { ok: true };
+        } catch (e) {
+          return { ok: false, error: e.message };
+        }
+      case 'openSprites':
+        shell.openPath(paths.sprites);
+        return { ok: true };
+      case 'finish':
+        if (payload.ownerName) this.wizardCall('save', payload);
+        this.settings.set('setupComplete', true);
+        this.closeWizard();
+        this.say(`hi ${this.config.ownerName}! I'm ${this.config.petName} 🐾`, 4);
+        this.transient = { mood: 'done', until: now() + 2.5 };
+        return { ok: true };
+      case 'close':
+        this.closeWizard();
+        return { ok: true };
+      default:
+        return null;
+    }
+  }
+
   toggleHooks(install) {
     try {
       hooks.setInstalled(install);
@@ -773,7 +875,26 @@ if (process.argv.includes('--snapshot')) {
     ipcMain.on('geometry', (_e, g) => { pet.geometry = g; });
     ipcMain.on('pack-loaded', (_e, result) => pet.onPackLoaded(result));
     ipcMain.on('theme-result', (_e, result) => pet.onThemeResult(result));
+    ipcMain.handle('wizard', (_e, action, payload) => pet.wizardCall(action, payload));
     pet.start();
+    // `--wizard-snapshot`: screenshot every setup step to test-output/, then quit.
+    if (process.argv.includes('--wizard-snapshot')) {
+      pet.openWizard();
+      pet.wizard.webContents.once('did-finish-load', async () => {
+        const out = path.join(__dirname, '..', 'test-output');
+        fs.mkdirSync(out, { recursive: true });
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        await wait(1200);
+        for (let i = 0; i < 6; i++) {
+          await pet.wizard.webContents.executeJavaScript(`window.__wizardGo(${i})`);
+          await wait(i === 5 ? 700 : 1100);
+          const image = await pet.wizard.webContents.capturePage();
+          fs.writeFileSync(path.join(out, `wizard-${i}.png`), image.toPNG());
+        }
+        console.log('wizard screenshots written');
+        app.quit();
+      });
+    }
     // `--self-test`: run normally for a few seconds, print what was detected, then quit.
     if (process.argv.includes('--self-test')) {
       setTimeout(() => {
