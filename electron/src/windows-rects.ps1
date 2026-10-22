@@ -1,6 +1,6 @@
 # Long-running helper for DeskPet on Windows: prints the visible top-level windows, front to back,
 # as JSON [[hwnd, x, y, width, height], ...] in physical pixels whenever they change.
-# Used for walking on windows. __SKIP_PID__ is replaced with DeskPet's own process id.
+# Used for walking on windows. The quoted SKIP_PID placeholder is replaced with DeskPet's own process id.
 $ErrorActionPreference = 'SilentlyContinue'
 Add-Type -TypeDefinition @'
 using System;
@@ -49,7 +49,7 @@ public static class DeskPetRects {
 [void][DeskPetRects]::SetProcessDpiAwarenessContext([IntPtr](-4)) # per-monitor aware: physical pixels
 $last = ''
 while ($true) {
-  $json = [DeskPetRects]::Scan([uint32]__SKIP_PID__)
+  $json = [DeskPetRects]::Scan([uint32]'__SKIP_PID__')
   if ($json -ne $last) {
     [Console]::Out.WriteLine($json)
     [Console]::Out.Flush()
