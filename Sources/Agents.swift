@@ -32,6 +32,7 @@ private struct HookState {
     let subagents: Int
     let pid: pid_t
     let cwd: String
+    let transcript: String
 }
 
 /// Executable basename -> display name for agent CLIs detected by process scanning.
@@ -126,7 +127,8 @@ final class AgentMonitor {
                 ts: obj["ts"] as? Double ?? 0,
                 subagents: obj["subagents"] as? Int ?? 0,
                 pid: pid_t(obj["pid"] as? Int ?? 0),
-                cwd: obj["cwd"] as? String ?? "")
+                cwd: obj["cwd"] as? String ?? "",
+                transcript: obj["transcript"] as? String ?? "")
         }
     }
 
@@ -144,8 +146,10 @@ final class AgentMonitor {
         case "PreCompact": activity = .tidying
         default: activity = .idle
         }
-        // No "interrupted" hook exists, so a busy state with no new events and a quiet process is stale.
+        // Interrupting Claude (Esc) sends no hook at all, so check how the transcript ends,
+        // and fall back to "no events for a while and a quiet process".
         let working: Set<AgentActivity> = [.thinking, .typing, .reading, .searching, .delegating, .tidying]
+        if working.contains(activity) && age > 2 && turnEnded(transcript: hook.transcript) { activity = .idle }
         if working.contains(activity) && age > 120 && !procBusy { activity = .idle }
         if activity == .needsYou && age > 3600 { activity = .idle }
 
@@ -153,6 +157,39 @@ final class AgentMonitor {
             id: id, name: name, project: (hook.cwd as NSString).lastPathComponent,
             activity: activity, detail: Self.detail(activity, tool: hook.tool),
             subagents: hook.subagents, precise: true)
+    }
+
+    private var transcriptCache: [String: (modified: Date, size: Int, ended: Bool)] = [:]
+
+    /// True when the transcript's last turn finished (a final reply) or was interrupted.
+    private func turnEnded(transcript path: String) -> Bool {
+        guard !path.isEmpty, let attrs = try? FileManager.default.attributesOfItem(atPath: path),
+              let modified = attrs[.modificationDate] as? Date, let size = (attrs[.size] as? NSNumber)?.intValue else { return false }
+        if let cached = transcriptCache[path], cached.modified == modified, cached.size == size { return cached.ended }
+
+        var ended = false
+        if let handle = FileHandle(forReadingAtPath: path) {
+            let chunk = 256 * 1024
+            handle.seek(toFileOffset: UInt64(max(0, size - chunk)))
+            let data = handle.readDataToEndOfFile()
+            handle.closeFile()
+            // Walk back to the latest user or assistant record; other record types are bookkeeping.
+            for line in data.split(separator: UInt8(ascii: "\n")).reversed() {
+                guard let record = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
+                      let type = record["type"] as? String, type == "assistant" || type == "user" else { continue }
+                let message = record["message"] as? [String: Any] ?? [:]
+                if type == "assistant" {
+                    ended = message["stop_reason"] as? String == "end_turn"
+                } else {
+                    let content = message["content"]
+                    let text = (content as? String) ?? ((content as? [[String: Any]])?.compactMap { $0["text"] as? String }.joined() ?? "")
+                    ended = text.contains("[Request interrupted by user")
+                }
+                break
+            }
+        }
+        transcriptCache[path] = (modified, size, ended)
+        return ended
     }
 
     private static func activity(forTool tool: String) -> AgentActivity {

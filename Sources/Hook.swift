@@ -52,6 +52,7 @@ func runHook(_ args: [String]) -> Never {
     ]
     if let tool = payload["tool_name"] as? String { state["tool"] = tool }
     if let cwd = payload["cwd"] as? String { state["cwd"] = cwd }
+    if let transcript = payload["transcript_path"] as? String { state["transcript"] = transcript }
     if let out = try? JSONSerialization.data(withJSONObject: state) {
         try? out.write(to: file, options: .atomic)
     }

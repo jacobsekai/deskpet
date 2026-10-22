@@ -166,7 +166,10 @@ class AgentMonitor {
       const file = path.join(paths.sessions, f);
       const o = readJSON(file);
       if (!o) return null;
-      return { file, id: f, event: o.event || '', tool: o.tool || '', ts: +o.ts || 0, subagents: +o.subagents || 0, pid: +o.pid || 0, cwd: o.cwd || '' };
+      return {
+        file, id: f, event: o.event || '', tool: o.tool || '', ts: +o.ts || 0, subagents: +o.subagents || 0,
+        pid: +o.pid || 0, cwd: o.cwd || '', transcript: o.transcript || '',
+      };
     }).filter(Boolean);
   }
 
@@ -197,6 +200,42 @@ class AgentMonitor {
     return result;
   }
 
+  /** True when the transcript's last turn finished (a final reply) or was interrupted. */
+  turnEnded(file) {
+    if (!file) return false;
+    let stat;
+    try { stat = fs.statSync(file); } catch (_) { return false; }
+    this.transcriptCache = this.transcriptCache || new Map();
+    const cached = this.transcriptCache.get(file);
+    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) return cached.ended;
+
+    let ended = false;
+    try {
+      const length = Math.min(stat.size, 256 * 1024);
+      const buffer = Buffer.alloc(length);
+      const fd = fs.openSync(file, 'r');
+      fs.readSync(fd, buffer, 0, length, stat.size - length);
+      fs.closeSync(fd);
+      // Walk back to the latest user or assistant record; other record types are bookkeeping.
+      const lines = buffer.toString('utf8').split('\n').reverse();
+      for (const line of lines) {
+        let record;
+        try { record = JSON.parse(line); } catch (_) { continue; }
+        if (record.type !== 'assistant' && record.type !== 'user') continue;
+        const message = record.message || {};
+        if (record.type === 'assistant') ended = message.stop_reason === 'end_turn';
+        else {
+          const content = message.content;
+          const text = typeof content === 'string' ? content : (Array.isArray(content) ? content.map((c) => c.text || '').join('') : '');
+          ended = text.includes('[Request interrupted by user');
+        }
+        break;
+      }
+    } catch (_) { /* unreadable transcript: keep the hook's state */ }
+    this.transcriptCache.set(file, { mtimeMs: stat.mtimeMs, size: stat.size, ended });
+    return ended;
+  }
+
   fromHook(hook, id, name, procBusy, now) {
     const age = now - hook.ts;
     let activity;
@@ -211,8 +250,10 @@ class AgentMonitor {
       case 'PreCompact': activity = 'tidying'; break;
       default: activity = 'idle';
     }
-    // There's no "interrupted" hook, so a busy state with no new events and a quiet process is stale.
+    // Interrupting Claude (Esc) sends no hook at all, so check how the transcript ends,
+    // and fall back to "no events for a while and a quiet process".
     const working = ['thinking', 'typing', 'reading', 'searching', 'delegating', 'tidying'];
+    if (working.includes(activity) && age > 2 && this.turnEnded(hook.transcript)) activity = 'idle';
     if (working.includes(activity) && age > 120 && !procBusy) activity = 'idle';
     if (activity === 'needsYou' && age > 3600) activity = 'idle';
     return {

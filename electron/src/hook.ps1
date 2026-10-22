@@ -53,6 +53,7 @@ $state = [ordered]@{
 }
 if ($payload.tool_name) { $state.tool = [string]$payload.tool_name }
 if ($payload.cwd) { $state.cwd = [string]$payload.cwd }
+if ($payload.transcript_path) { $state.transcript = [string]$payload.transcript_path }
 
 $tmp = "$file.tmp"
 [IO.File]::WriteAllText($tmp, ($state | ConvertTo-Json -Compress))
