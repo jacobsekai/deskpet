@@ -1,0 +1,10 @@
+# macOS build output
+build/
+DeskPet.app/
+
+# Electron
+electron/node_modules/
+electron/dist/
+electron/test-output/
+
+.DS_Store

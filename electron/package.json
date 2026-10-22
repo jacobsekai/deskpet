@@ -1,0 +1,19 @@
+{
+  "name": "deskpet",
+  "productName": "DeskPet",
+  "version": "1.0.0",
+  "description": "A desktop pet that reacts to you and your AI agents",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "snapshot": "electron . --snapshot",
+    "package:win": "electron-packager . DeskPet --platform=win32 --arch=x64 --out=dist --overwrite --icon=assets/icon.ico --ignore=^/dist --ignore=^/test-output",
+    "package:mac": "electron-packager . DeskPet --platform=darwin --arch=arm64 --out=dist --overwrite --ignore=^/dist --ignore=^/test-output"
+  },
+  "private": true,
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "electron": "^45.0.0",
+    "@electron/packager": "^20.3.0"
+  }
+}

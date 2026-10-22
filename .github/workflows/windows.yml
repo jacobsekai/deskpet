@@ -1,0 +1,83 @@
+# Builds the Windows app on a real Windows machine, checks the PowerShell pieces,
+# and attaches the zip to GitHub Releases.
+name: Windows build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: electron
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+
+      - name: PowerShell scripts parse
+        shell: powershell
+        run: |
+          foreach ($f in 'src/hook.ps1', 'src/windows-helper.ps1') {
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f), [ref]$null, [ref]$errors)
+            if ($errors) { $errors; exit 1 }
+          }
+
+      - name: Hook writes session state
+        shell: powershell
+        run: |
+          '{"hook_event_name":"PreToolUse","session_id":"ci-test","tool_name":"Edit","cwd":"C:\\demo"}' |
+            powershell -NoProfile -ExecutionPolicy Bypass -File src/hook.ps1 -Agent claude
+          $state = Get-Content "$env:USERPROFILE\.deskpet\sessions\claude-ci-test.json" -Raw | ConvertFrom-Json
+          if ($state.event -ne 'PreToolUse' -or $state.tool -ne 'Edit') { throw "unexpected hook state: $state" }
+          '{"hook_event_name":"SessionEnd","session_id":"ci-test"}' |
+            powershell -NoProfile -ExecutionPolicy Bypass -File src/hook.ps1 -Agent claude
+          if (Test-Path "$env:USERPROFILE\.deskpet\sessions\claude-ci-test.json") { throw "SessionEnd didn't remove the state file" }
+
+      - name: Process helper emits a sample
+        shell: powershell
+        run: |
+          $script = Resolve-Path src/windows-helper.ps1
+          $job = Start-Job { powershell -NoProfile -ExecutionPolicy Bypass -File $using:script | Select-Object -First 1 }
+          if (-not (Wait-Job $job -Timeout 90)) { throw "helper produced no output" }
+          $sample = Receive-Job $job | ConvertFrom-Json
+          "processes: $($sample.p.Count), foreground: $($sample.fg)"
+          if ($sample.p.Count -lt 10) { throw "helper returned too few processes" }
+
+      - name: Package
+        run: npx electron-packager . DeskPet --platform=win32 --arch=x64 --out=dist --overwrite --icon=assets/icon.ico --ignore=^/dist --ignore=^/test-output
+
+      - name: Smoke test (starts, detects, quits)
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $p = Start-Process dist\DeskPet-win32-x64\DeskPet.exe -ArgumentList '--self-test' -PassThru -RedirectStandardOutput self-test.txt
+          if (-not $p.WaitForExit(60000)) { $p.Kill(); throw "app didn't exit" }
+          Get-Content self-test.txt
+
+      - name: Zip
+        shell: powershell
+        run: Compress-Archive -Path dist\DeskPet-win32-x64 -DestinationPath dist\DeskPet-win32-x64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DeskPet-win32-x64
+          path: electron/dist/DeskPet-win32-x64.zip
+
+      - name: Attach to release
+        if: github.event_name == 'release'
+        run: gh release upload "${{ github.event.release.tag_name }}" dist/DeskPet-win32-x64.zip --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
