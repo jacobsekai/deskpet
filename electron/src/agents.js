@@ -193,6 +193,7 @@ class AgentMonitor {
     const args = new Map(Object.entries(sample.c || {}).map(([k, v]) => [Number(k), v || '']));
     this.update(procs, args);
     this.foregroundPid = sample.fgPid || 0;
+    this.foregroundTitle = sample.fgTitle || '';
     this.inCall = !!(sample.mic || sample.cam);
     const fg = sample.fg ? String(sample.fg) : null;
     if (fg !== this.foreground) {

@@ -201,6 +201,15 @@ button { font: inherit; }
 .tips .tip-icon { width: 34px; height: 34px; border-radius: 11px; display: grid; place-items: center; background: var(--card); border: 1px solid var(--line); font-size: 17px; flex: none; }
 .tips kbd { font: inherit; font-weight: 700; }
 
+.link { align-self: flex-start; border: none; background: none; padding: 4px 0; color: var(--muted); font-size: 12.5px; text-decoration: underline; cursor: pointer; }
+.transfer { display: flex; flex-direction: column; gap: 8px; max-width: 400px; }
+.transfer[hidden] { display: none; }
+.transfer textarea { font: 11.5px ui-monospace, Menlo, Consolas, monospace; padding: 8px 10px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); resize: none; outline: none; }
+.transfer textarea:focus { border-color: var(--accent); }
+.transfer-row { display: flex; align-items: center; gap: 10px; justify-content: space-between; }
+.transfer-note { font-size: 12px; color: var(--muted); }
+.transfer-note.error { color: #d63b2f; }
+
 .nav {
   position: relative; z-index: 2; display: flex; align-items: center; justify-content: space-between;
   padding: 14px 32px 22px; transition: opacity 0.3s;

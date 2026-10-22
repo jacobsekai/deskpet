@@ -121,6 +121,8 @@ final class Stats {
         /// XP earned from playing today (capped so it can't be farmed).
         var playXP = 0
         var greeted = false
+        /// Blocklisted sites caught during focus sessions.
+        var blocked = 0
 
         init() {}
 
@@ -136,6 +138,7 @@ final class Stats {
             openMinutes = try c.decodeIfPresent(Int.self, forKey: .openMinutes) ?? 0
             playXP = try c.decodeIfPresent(Int.self, forKey: .playXP) ?? 0
             greeted = try c.decodeIfPresent(Bool.self, forKey: .greeted) ?? false
+            blocked = try c.decodeIfPresent(Int.self, forKey: .blocked) ?? 0
         }
     }
 
@@ -189,6 +192,22 @@ final class Stats {
         file.xp += gained
         dirty = true
         return level > before ? level : nil
+    }
+
+    /// The whole stats file as JSON, for transfer keys.
+    var exported: [String: Any] {
+        (try? JSONEncoder().encode(file)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+    }
+
+    /// Replaces all stats (from a transfer key), keeping a backup of the old file.
+    func replace(with json: [String: Any]) throws {
+        let data = try JSONSerialization.data(withJSONObject: json)
+        let incoming = try JSONDecoder().decode(File.self, from: data)
+        try? FileManager.default.removeItem(at: url.appendingPathExtension("bak"))
+        try? FileManager.default.copyItem(at: url, to: url.appendingPathExtension("bak"))
+        file = incoming
+        dirty = true
+        saveIfNeeded()
     }
 
     func saveIfNeeded() {

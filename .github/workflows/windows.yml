@@ -53,7 +53,7 @@ jobs:
           $job = Start-Job { powershell -NoProfile -ExecutionPolicy Bypass -File $using:script | Select-Object -First 1 }
           if (-not (Wait-Job $job -Timeout 90)) { throw "helper produced no output" }
           $sample = Receive-Job $job | ConvertFrom-Json
-          "processes: $($sample.p.Count), foreground: $($sample.fg)"
+          "processes: $($sample.p.Count), foreground: $($sample.fg) / $($sample.fgTitle)"
           if ($sample.p.Count -lt 10) { throw "helper returned too few processes" }
 
       - name: Window helper lists windows

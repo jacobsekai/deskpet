@@ -78,6 +78,12 @@
     $('#back').addEventListener('click', () => go(step - 1));
     $('#finish').addEventListener('click', () => call('finish', names()));
     $('#close').addEventListener('click', () => call('close'));
+    $('#have-key').addEventListener('click', () => {
+      $('#transfer').hidden = !$('#transfer').hidden;
+      if (!$('#transfer').hidden) $('#transfer-key').focus();
+    });
+    $('#transfer-key').addEventListener('keydown', (e) => e.stopPropagation()); // Enter shouldn't advance the wizard
+    $('#transfer-apply').addEventListener('click', importKey);
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && step < STEPS.length - 1) next();
       if (e.key === 'Enter' && step === STEPS.length - 1) call('finish', names());
@@ -92,6 +98,27 @@
     go(0);
     requestAnimationFrame(frame);
     setInterval(poll, 1500);
+  }
+
+  /** Moves everything over from another device, then skips to the end. */
+  async function importKey() {
+    const note = $('#transfer-note');
+    note.className = 'transfer-note';
+    note.textContent = 'Importing…';
+    const r = await call('transfer-import', { key: $('#transfer-key').value });
+    if (!r || !r.ok) {
+      note.className = 'transfer-note error';
+      note.textContent = (r && r.error) || "Couldn't read that key";
+      return;
+    }
+    state = await call('state');
+    $('#owner').value = state.ownerName;
+    $('#petName').value = state.petName;
+    updateNames();
+    applyAccent();
+    buildPacks();
+    note.textContent = r.note || `Welcome back: ${r.summary}`;
+    setTimeout(() => go(STEPS.length - 1), r.note ? 2500 : 900);
   }
 
   function names() {

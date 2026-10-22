@@ -2,11 +2,14 @@
 //
 // The main process owns all behavior: agent detection, moods, walking, throwing, resizing, and menus.
 // The renderer only draws the pose it's sent and reports where the pet is for hit testing.
-const { app, BrowserWindow, Tray, Menu, nativeImage, screen, powerMonitor, ipcMain, shell, dialog, Notification } = require('electron');
+const { app, BrowserWindow, Tray, Menu, nativeImage, screen, powerMonitor, ipcMain, shell, dialog, Notification, clipboard } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const { AgentMonitor, PRIORITY, TranscriptTokens, codexState } = require('./agents');
-const { Stats, FocusTimer, Updater, importPack, exportPack, kiroHooks, jumpTo, WindowPlatforms } = require('./extras');
+const {
+  Stats, FocusTimer, Updater, importPack, exportPack, kiroHooks, jumpTo, WindowPlatforms,
+  BLOCK_DEFAULTS, BROWSERS, TITLE_WORDS, parseBlocklist, matchTitle, closeBlockedTab, transferKey, TRANSFER_SETTINGS,
+} = require('./extras');
 const { paths, Settings, loadConfig, saveConfig, hooksLive, readJSON } = require('./settings');
 const hooks = require('./hooks');
 
@@ -102,6 +105,8 @@ class Pet {
     this.lastKiroCheck = 0;
     this.updateAnnounced = false;
     this.xpPopup = null;
+    this.lastBrowserCheck = 0;
+    this.lastBlockNag = 0;
   }
 
   // MARK: Settings
@@ -123,6 +128,9 @@ class Pet {
   get quietInCalls() { return this.settings.get('quietInCalls', true); }
   get autoUpdate() { return this.settings.get('autoUpdate', true); }
   get kiroHooksOn() { return this.settings.get('kiroHooks', false); }
+  get blocklist() { return this.settings.get('blocklist', BLOCK_DEFAULTS); }
+  get blockDuringFocus() { return this.settings.get('blockDuringFocus', true); }
+  get strictBlock() { return this.settings.get('strictBlock', false); }
   toggle(key, fallback) { this.settings.set(key, !this.settings.get(key, fallback)); }
   /** On a call: no sounds and no chatty remarks. */
   get quiet() { return this.quietInCalls && this.agents.inCall; }
@@ -258,6 +266,10 @@ class Pet {
     } else if (finished === 'rest') {
       this.say("break's over! ready for another round? 💪", 5);
       this.notify("Break's over", 'Ready for another focus session?', 0);
+    }
+    if (this.focus.phase === 'focus' && this.blockDuringFocus && this.blocklist.length && t - this.lastBrowserCheck > 2) {
+      this.lastBrowserCheck = t;
+      this.checkForDistraction(t);
     }
     if (t - this.lastMinute >= 60) {
       this.lastMinute = t;
@@ -740,8 +752,12 @@ class Pet {
       {
         label: this.focus.phase === 'off' ? 'Focus timer' : this.focus.label,
         submenu: [
-          ...[15, 25, 50].map((m) => ({ label: `Focus for ${m} minutes`, click: () => { this.focus.start(m); this.say(`focus mode: ${m} minutes. you got this! 🍅`, 3); } })),
+          ...[15, 25, 50].map((m) => ({ label: `Focus for ${m} minutes`, click: () => this.startFocus(m) })),
           ...(this.focus.phase !== 'off' ? [{ label: 'Stop timer', click: () => this.focus.stop() }] : []),
+          { type: 'separator' },
+          check('Block distracting sites', 'blockDuringFocus', true),
+          check('Strict: close blocked tabs', 'strictBlock', false),
+          { label: `Edit blocklist… (${this.blocklist.length})`, click: () => this.openDialog('blocklist.html', {}, { width: 420, height: 440 }) },
         ],
       },
       { label: `Bring ${this.config.petName} here`, click: () => this.bringHere() },
@@ -799,6 +815,13 @@ class Pet {
       { type: 'separator' },
       { label: this.win.isVisible() ? `Hide ${this.config.petName}` : `Show ${this.config.petName}`, click: () => this.toggleVisible() },
       { label: 'Setup…', click: () => this.openWizard() },
+      {
+        label: 'Move to another device',
+        submenu: [
+          { label: 'Export transfer key…', click: () => this.openDialog('transfer.html', { tab: 'export' }) },
+          { label: 'Import transfer key…', click: () => this.openDialog('transfer.html', { tab: 'import' }) },
+        ],
+      },
       this.updater.available
         ? { label: `Update to v${this.updater.available.version}…`, click: () => this.installUpdate() }
         : { label: 'Check for updates…', click: () => this.checkForUpdates(true) },
@@ -867,7 +890,8 @@ class Pet {
   todaySummary() {
     const d = this.stats.today;
     const hm = (m) => (m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`);
-    return `⌨️ ${hm(d.activeMinutes)} you · 🤖 ${hm(d.agentMinutes)} agents · ✅ ${d.tasks} task${d.tasks === 1 ? '' : 's'}`;
+    const blocked = d.blocked ? ` · 🍅 ${d.blocked} blocked` : '';
+    return `⌨️ ${hm(d.activeMinutes)} you · 🤖 ${hm(d.agentMinutes)} agents · ✅ ${d.tasks} task${d.tasks === 1 ? '' : 's'}${blocked}`;
   }
 
   // MARK: Hover card
@@ -990,6 +1014,126 @@ class Pet {
       this.say('packed up! 📦', 2);
     } catch (e) {
       this.say(`couldn't export: ${e.message}`, 4);
+    }
+  }
+
+  // MARK: Focus blocklist
+
+  checkForDistraction(t) {
+    if (!BROWSERS.test(this.agents.foreground || '')) return;
+    const domain = matchTitle(this.agents.foregroundTitle, this.blocklist);
+    if (!domain) return;
+    if (this.strictBlock) {
+      const label = domain.split('.').slice(-2, -1)[0] || domain;
+      closeBlockedTab((TITLE_WORDS[domain] || [label.length >= 4 ? label : domain])[0]);
+      this.say(`closed ${domain}. focus! 🍅`, 3);
+    } else if (t - this.lastBlockNag > 15) {
+      this.lastBlockNag = t;
+      this.say(`🍅 ${domain} is on your blocklist!`, 4);
+    } else {
+      return;
+    }
+    this.transient = { mood: 'startled', until: t + 1.2 };
+    this.playSound('needs-you');
+    this.stats.record(0, (d) => { d.blocked = (d.blocked || 0) + 1; });
+  }
+
+  startFocus(minutes) {
+    this.focus.start(minutes);
+    const blocking = this.blockDuringFocus && this.blocklist.length ? `, blocking ${this.blocklist.length} sites` : '';
+    this.say(`focus mode: ${minutes} minutes${blocking}. you got this! 🍅`, 3.5);
+  }
+
+  // MARK: Small dialog windows
+
+  openDialog(page, query = {}, size = { width: 420, height: 420 }) {
+    if (this.dialogWin && !this.dialogWin.isDestroyed()) this.dialogWin.close();
+    this.dialogWin = new BrowserWindow({
+      ...size, resizable: false, minimizable: false, maximizable: false, alwaysOnTop: true, autoHideMenuBar: true,
+      icon: path.join(__dirname, '..', 'assets', 'icon.png'), webPreferences: { preload: path.join(__dirname, 'preload-dialog.js') },
+    });
+    this.dialogWin.loadFile(path.join(__dirname, 'dialogs', page), { query });
+  }
+
+  closeDialog() {
+    if (this.dialogWin && !this.dialogWin.isDestroyed()) this.dialogWin.close();
+  }
+
+  // MARK: Transfer key
+
+  transferPayload() {
+    const settings = {};
+    for (const key of TRANSFER_SETTINGS) if (key in this.settings.values) settings[key] = this.settings.values[key];
+    settings.scales = Object.fromEntries(Object.entries(this.settings.values).filter(([k]) => k.startsWith('scale.')).map(([k, v]) => [k.slice(6), v]));
+    return {
+      app: 'deskpet', v: 1, exported: new Date().toISOString(), from: isWindows ? 'Windows' : process.platform,
+      config: { ownerName: this.config.ownerName, petName: this.config.petName }, settings, stats: this.stats.data,
+    };
+  }
+
+  /** Applies an imported key; returns a note about anything that didn't come along. */
+  applyTransfer(payload) {
+    const c = payload.config || {};
+    const ownerName = c.ownerName || this.config.ownerName, petName = c.petName || this.config.petName;
+    saveConfig({ ownerName, petName });
+    this.config = { ...this.config, ownerName, petName };
+    const s = payload.settings || {};
+    for (const key of TRANSFER_SETTINGS) if (key in s && s[key] !== null) this.settings.set(key, s[key]);
+    for (const [name, value] of Object.entries(s.scales || {})) this.settings.set(`scale.${name}`, value);
+    if (payload.stats) this.stats.replace(payload.stats);
+    this.settings.set('setupComplete', true);
+    let note = '';
+    if (this.spritePackName && !listPacks().includes(this.spritePackName)) {
+      note = `the ${this.spritePackName} sprite pack isn't on this device: export it as a zip and drop it on me`;
+      this.spritePackName = '';
+    }
+    this.loadSprites(false);
+    this.transient = { mood: 'done', until: now() + 3 };
+    this.say(note || `welcome home, ${ownerName}! everything's here ✨`, 5);
+    return note;
+  }
+
+  async dialogCall(action, payload) {
+    switch (action) {
+      case 'blocklist-get':
+        return { list: this.blocklist, enabled: this.blockDuringFocus, strict: this.strictBlock, defaults: BLOCK_DEFAULTS };
+      case 'blocklist-save': {
+        const list = parseBlocklist(payload.text);
+        this.settings.set('blocklist', list);
+        this.settings.set('blockDuringFocus', !!payload.enabled);
+        this.settings.set('strictBlock', !!payload.strict);
+        this.say(`blocklist saved: ${list.length} site${list.length === 1 ? '' : 's'} 🍅`, 2.5);
+        this.closeDialog();
+        return { ok: true };
+      }
+      case 'transfer-export': return { key: transferKey.encode(this.transferPayload()) };
+      case 'copy':
+        clipboard.writeText(payload.text || '');
+        this.say('transfer key copied! 📋', 2.5);
+        return { ok: true };
+      case 'save-key': {
+        const r = await dialog.showSaveDialog(this.dialogWin, { defaultPath: 'DeskPet transfer key.txt', filters: [{ name: 'Text', extensions: ['txt'] }] });
+        if (r.canceled || !r.filePath) return { ok: false };
+        fs.writeFileSync(r.filePath, payload.key);
+        return { ok: true };
+      }
+      case 'open-key': {
+        const r = await dialog.showOpenDialog(this.dialogWin, { filters: [{ name: 'Text', extensions: ['txt'] }], properties: ['openFile'] });
+        return r.canceled || !r.filePaths.length ? {} : { key: fs.readFileSync(r.filePaths[0], 'utf8') };
+      }
+      case 'transfer-preview':
+        try { return { ok: true, summary: transferKey.summary(transferKey.decode(payload.key)) }; } catch (e) { return { ok: false, error: e.message }; }
+      case 'transfer-import':
+        try {
+          this.applyTransfer(transferKey.decode(payload.key));
+          this.closeDialog();
+          return { ok: true };
+        } catch (e) { return { ok: false, error: e.message }; }
+      case 'close':
+        this.closeDialog();
+        return { ok: true };
+      default:
+        return null;
     }
   }
 
@@ -1160,6 +1304,12 @@ class Pet {
       case 'openSprites':
         shell.openPath(paths.sprites);
         return { ok: true };
+      case 'transfer-import':
+        try {
+          const p = transferKey.decode(payload.key);
+          const note = this.applyTransfer(p);
+          return { ok: true, summary: transferKey.summary(p), note };
+        } catch (e) { return { ok: false, error: e.message }; }
       case 'kiro': {
         const changed = this.setKiroHooks(!!payload.install);
         return { ok: !payload.install || changed > 0 || kiroHooks.installed(), changed };
@@ -1271,6 +1421,7 @@ if (process.argv.includes('--snapshot')) {
     ipcMain.on('pack-loaded', (_e, result) => pet.onPackLoaded(result));
     ipcMain.on('theme-result', (_e, result) => pet.onThemeResult(result));
     ipcMain.handle('wizard', (_e, action, payload) => pet.wizardCall(action, payload));
+    ipcMain.handle('dialog', (_e, action, payload) => pet.dialogCall(action, payload));
     ipcMain.on('drop-files', (_e, files) => pet.onDropFiles(files));
     ipcMain.on('drag-hover', () => { pet.transient = { mood: 'startled', until: now() + 1 }; pet.say("ooh, what's that? 👀", 1.5); });
     ipcMain.on('card-size', (_e, size) => { pet.cardSize = size; if (pet.card.isVisible()) pet.positionCard(); });

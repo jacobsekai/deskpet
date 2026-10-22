@@ -5,6 +5,7 @@ $ErrorActionPreference = 'SilentlyContinue'
 Add-Type -Namespace DeskPet -Name Win -MemberDefinition @'
 [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
 [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+[DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder text, int max);
 '@
 $agents = '^(claude|codex|kiro-cli|kiro-cli-chat|qchat|q|gemini|cursor-agent|goose|opencode|aider|amp|node)\.exe$'
 while ($true) {
@@ -16,7 +17,10 @@ while ($true) {
     if ($p.Name -match $agents) { $cmd["$($p.ProcessId)"] = $p.CommandLine }
   }
   $fgPid = [uint32]0
-  [void][DeskPet.Win]::GetWindowThreadProcessId([DeskPet.Win]::GetForegroundWindow(), [ref]$fgPid)
+  $fgWindow = [DeskPet.Win]::GetForegroundWindow()
+  [void][DeskPet.Win]::GetWindowThreadProcessId($fgWindow, [ref]$fgPid)
+  $titleBuffer = New-Object System.Text.StringBuilder 512
+  [void][DeskPet.Win]::GetWindowText($fgWindow, $titleBuffer, 512)
   $fg = (Get-Process -Id $fgPid).ProcessName
   # Microphone/camera in use by any app (for quiet mode): Windows records LastUsedTimeStop = 0 while in use.
   $inUse = @{}
@@ -28,7 +32,7 @@ while ($true) {
       if ($stop -ne $null -and $stop -eq 0) { $inUse[$cap] = $true; break }
     }
   }
-  [Console]::Out.WriteLine((@{ p = $list; c = $cmd; fg = $fg; fgPid = $fgPid; mic = $inUse.microphone; cam = $inUse.webcam } | ConvertTo-Json -Compress -Depth 4))
+  [Console]::Out.WriteLine((@{ p = $list; c = $cmd; fg = $fg; fgPid = $fgPid; fgTitle = $titleBuffer.ToString(); mic = $inUse.microphone; cam = $inUse.webcam } | ConvertTo-Json -Compress -Depth 4))
   [Console]::Out.Flush()
   Start-Sleep -Milliseconds 2000
 }

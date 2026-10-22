@@ -82,8 +82,12 @@ Right-click Mochi or use the 🐾 menu (system tray on Windows) for every option
 
   Today's stats are in the menu and hover card (`~/.deskpet/stats.json`).
 - **Focus timer:** 15/25/50-minute sessions with a break afterwards (🐾 → Focus timer).
+  - **Blocklist:** during focus, the pet calls you out when you open a listed site, or closes the tab in strict mode (🐾 → Focus timer → Edit blocklist…). On macOS it reads the active tab in Safari, Chrome, Edge, Brave, Arc, Vivaldi, and Opera (macOS asks once per browser); on Windows it matches the browser window's title.
 - **Quiet during calls:** no sounds or chatty remarks while any app uses the microphone or camera.
 - **Sounds:** system sounds on macOS, synthesized ones on Windows; a sprite pack can bring its own as `sounds/<event>.(wav|mp3|m4a|aiff|caf|ogg)` with events `pet`, `done`, `needs-you`, `bounce`, `wake`, `level-up`, `focus-done`.
+
+### Moving to another device
+🐾 → Move to another device → Export transfer key… gives you one pasteable code (`DESKPET-1:…`) with your names, level and stats, look, size, and settings. Import it on the other machine from the same menu, or with "Have a transfer key?" in setup. Keys work between macOS and Windows. Sprite pack images aren't in the key: move packs with Sprites → Export.
 
 ### Updates
 DeskPet checks GitHub Releases every 6 hours (🐾 → Check for updates…) and can update itself in place. On macOS, move the app to Applications first.

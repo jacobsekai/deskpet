@@ -49,7 +49,7 @@ class Stats {
   }
   get xpToNext() { return Stats.xpNeeded(this.level + 1) - this.data.xp; }
   get today() {
-    return { activeMinutes: 0, agentMinutes: 0, tasks: 0, pets: 0, throwsCount: 0, focusSessions: 0, openMinutes: 0, playXP: 0, greeted: false, ...(this.data.days[Stats.dayKey()] || {}) };
+    return { activeMinutes: 0, agentMinutes: 0, tasks: 0, pets: 0, throwsCount: 0, focusSessions: 0, openMinutes: 0, playXP: 0, greeted: false, blocked: 0, ...(this.data.days[Stats.dayKey()] || {}) };
   }
 
   /** Updates today's counters; returns the new level if this XP gain leveled up. */
@@ -328,4 +328,79 @@ class WindowPlatforms {
   }
 }
 
-module.exports = { Stats, FocusTimer, Updater, importPack, exportPack, kiroHooks, jumpTo, WindowPlatforms, isNewer };
+// MARK: - Focus blocklist (Windows: matched against the browser's window title)
+
+const BLOCK_DEFAULTS = ['youtube.com', 'reddit.com', 'x.com', 'twitter.com', 'instagram.com', 'tiktok.com', 'facebook.com', 'netflix.com', 'twitch.tv'];
+const BROWSERS = /^(chrome|msedge|firefox|brave|opera|vivaldi|arc|librewolf|waterfox)$/i;
+// Window titles show page titles, not addresses, so each domain maps to words its titles contain.
+const TITLE_WORDS = { 'x.com': [' / x'], 'twitter.com': ['twitter'], 'youtube.com': ['youtube'] };
+
+function parseBlocklist(text) {
+  const seen = new Set();
+  return String(text).split(/[\s,]+/).map((raw) => {
+    let s = raw.trim().toLowerCase();
+    try { s = new URL(s.includes('://') ? s : `https://${s}`).hostname; } catch (_) { /* keep as typed */ }
+    return s.replace(/^www\./, '');
+  }).filter((s) => s.includes('.') && !seen.has(s) && seen.add(s));
+}
+
+/** The blocklisted domain a browser window title points to, if any. */
+function matchTitle(title, list) {
+  const t = ` ${String(title).toLowerCase()} `;
+  for (const domain of list) {
+    const label = domain.split('.').slice(-2, -1)[0] || domain;
+    const words = TITLE_WORDS[domain] || [domain, ...(label.length >= 4 ? [label] : [])];
+    if (words.some((w) => t.includes(w))) return domain;
+  }
+  return null;
+}
+
+/** Strict mode: close the tab with Ctrl+W if the foreground window still shows the blocked site. */
+function closeBlockedTab(word) {
+  if (!isWindows) return;
+  runPowerShell(`Add-Type -Namespace DP -Name W -MemberDefinition '[DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow(); [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, System.Text.StringBuilder s, int n);'
+    $b = New-Object System.Text.StringBuilder 512; [void][DP.W]::GetWindowText([DP.W]::GetForegroundWindow(), $b, 512)
+    if ($b.ToString().ToLower().Contains(${psQuote(word)})) { (New-Object -ComObject WScript.Shell).SendKeys('^w') }`);
+}
+
+// MARK: - Transfer key ("DESKPET-1:" + base64url(raw DEFLATE(JSON)), same as the macOS app)
+
+const zlib = require('zlib');
+const TRANSFER_PREFIX = 'DESKPET-1:';
+const TRANSFER_SETTINGS = ['spritePack', 'themeColor', 'thoughtBubble', 'wander', 'gravity', 'walkOnWindows', 'quietInCalls', 'notifications', 'sounds', 'autoUpdate', 'blocklist', 'strictBlock'];
+
+const transferKey = {
+  encode(payload) {
+    return TRANSFER_PREFIX + zlib.deflateRawSync(Buffer.from(JSON.stringify(payload))).toString('base64')
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  },
+  decode(key) {
+    const clean = String(key).replace(/\s+/g, '');
+    if (!clean.startsWith(TRANSFER_PREFIX)) throw new Error("that doesn't look like a DeskPet transfer key");
+    try {
+      const b64 = clean.slice(TRANSFER_PREFIX.length).replace(/-/g, '+').replace(/_/g, '/');
+      const payload = JSON.parse(zlib.inflateRawSync(Buffer.from(b64, 'base64')).toString('utf8'));
+      if (payload.app !== 'deskpet') throw new Error('wrong app');
+      return payload;
+    } catch (_) {
+      throw new Error('the key is incomplete or mistyped; copy it again');
+    }
+  },
+  summary(payload) {
+    const xp = (payload.stats && payload.stats.xp) || 0;
+    const days = Object.keys((payload.stats && payload.stats.days) || {}).length;
+    return `${(payload.config && payload.config.petName) || 'Mochi'} · Lv ${Stats.levelFor(xp)} (${xp} XP) · ${days} day${days === 1 ? '' : 's'} of stats`;
+  },
+};
+
+Stats.prototype.replace = function replace(data) {
+  if (fs.existsSync(this.file)) fs.copyFileSync(this.file, `${this.file}.bak`);
+  this.data = { xp: data.xp || 0, days: data.days || {} };
+  this.dirty = true;
+  this.saveIfNeeded();
+};
+
+module.exports = {
+  Stats, FocusTimer, Updater, importPack, exportPack, kiroHooks, jumpTo, WindowPlatforms, isNewer,
+  BLOCK_DEFAULTS, BROWSERS, TITLE_WORDS, parseBlocklist, matchTitle, closeBlockedTab, transferKey, TRANSFER_SETTINGS,
+};

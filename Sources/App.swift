@@ -115,6 +115,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     private var lastStatsSave = 0.0
     private var lastKiroCheck = 0.0
     private var updateAnnounced = false
+    private var lastBrowserCheck = 0.0
+    private var lastBlockNag = 0.0
     /// Recent XP gain shown floating above the pet.
     private var xpPopup: (amount: Int, at: Double)?
     /// The window the pet is standing on, and where it was last seen.
@@ -151,6 +153,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     private var quietInCalls: Bool { get { flag("quietInCalls", true) } set { defaults.set(newValue, forKey: "quietInCalls") } }
     private var autoUpdate: Bool { get { flag("autoUpdate", true) } set { defaults.set(newValue, forKey: "autoUpdate") } }
     private var kiroHooksOn: Bool { get { flag("kiroHooks", false) } set { defaults.set(newValue, forKey: "kiroHooks") } }
+    private var blockDuringFocus: Bool { get { flag("blockDuringFocus", true) } set { defaults.set(newValue, forKey: "blockDuringFocus") } }
+    private var strictBlock: Bool { get { flag("strictBlock", false) } set { defaults.set(newValue, forKey: "strictBlock") } }
+    private var blocklist: [String] {
+        get { defaults.stringArray(forKey: "blocklist") ?? Blocklist.defaults }
+        set { defaults.set(newValue, forKey: "blocklist") }
+    }
     /// On a call: no sounds and no chatty remarks.
     private var quiet: Bool { quietInCalls && inCall }
 
@@ -313,6 +321,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
                 say("break's over! ready for another round? 💪", for: 5)
                 post("Break's over", "Ready for another focus session?", pid: 0)
             }
+        }
+        if focus.phase == .focus && blockDuringFocus && !blocklist.isEmpty && now - lastBrowserCheck > 2 {
+            lastBrowserCheck = now
+            checkForDistraction()
         }
         if now - lastMinute >= 60 {
             lastMinute = now
@@ -785,7 +797,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     private func todaySummary() -> String {
         let d = stats.today
         func hm(_ minutes: Int) -> String { minutes >= 60 ? "\(minutes / 60)h \(minutes % 60)m" : "\(minutes)m" }
-        return "⌨️ \(hm(d.activeMinutes)) you · 🤖 \(hm(d.agentMinutes)) agents · ✅ \(d.tasks) task\(d.tasks == 1 ? "" : "s")"
+        let blocked = d.blocked > 0 ? " · 🍅 \(d.blocked) blocked" : ""
+        return "⌨️ \(hm(d.activeMinutes)) you · 🤖 \(hm(d.agentMinutes)) agents · ✅ \(d.tasks) task\(d.tasks == 1 ? "" : "s")\(blocked)"
     }
 
     /// Shows the card after hovering the pet for a moment; keeps it while the mouse is on the pet or the card.
@@ -918,8 +931,185 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
 
     @objc private func startFocus(_ sender: NSMenuItem) {
         focus.start(minutes: sender.tag)
-        say("focus mode: \(sender.tag) minutes. you got this! 🍅", for: 3)
+        let blocking = blockDuringFocus && !blocklist.isEmpty ? ", blocking \(blocklist.count) sites" : ""
+        say("focus mode: \(sender.tag) minutes\(blocking). you got this! 🍅", for: 3.5)
     }
+
+    // MARK: - Focus blocklist
+
+    private func checkForDistraction() {
+        guard let app = NSWorkspace.shared.frontmostApplication, BrowserWatcher.isBrowser(app) else { return }
+        let list = blocklist
+        BrowserWatcher.activeURL(of: app) { [weak self] url in
+            guard let self, self.focus.phase == .focus, let url, let domain = Blocklist.match(url: url, in: list) else { return }
+            let now = CACurrentMediaTime()
+            if self.strictBlock {
+                BrowserWatcher.closeActiveTab(of: app)
+                self.say("closed \(domain). focus! 🍅", for: 3)
+            } else if now - self.lastBlockNag > 15 {
+                self.lastBlockNag = now
+                self.say("🍅 \(domain) is on your blocklist!", for: 4)
+            } else {
+                return
+            }
+            self.transient = (.startled, now + 1.2)
+            self.sounds.play(.needsYou)
+            self.stats.record { $0.blocked += 1 }
+        }
+    }
+
+    @objc private func toggleBlockDuringFocus() { blockDuringFocus.toggle() }
+    @objc private func toggleStrictBlock() { strictBlock.toggle() }
+
+    @objc private func editBlocklist() {
+        let alert = NSAlert()
+        alert.messageText = "Focus blocklist"
+        alert.informativeText = "One site per line. During focus sessions \(config.petName) calls you out on these, or closes the tab in strict mode. Works in Safari, Chrome, Edge, Brave, Arc, Vivaldi, and Opera."
+        let scroll = NSTextView.scrollableTextView()
+        scroll.frame = NSRect(x: 0, y: 0, width: 320, height: 170)
+        scroll.borderType = .bezelBorder
+        let text = scroll.documentView as! NSTextView
+        text.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        text.string = blocklist.joined(separator: "\n")
+        text.isAutomaticSpellingCorrectionEnabled = false
+        alert.accessoryView = scroll
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Reset to defaults")
+        alert.window.initialFirstResponder = text
+        NSApp.activate(ignoringOtherApps: true)
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            blocklist = Blocklist.parse(text.string)
+            say("blocklist saved: \(blocklist.count) site\(blocklist.count == 1 ? "" : "s") 🍅", for: 2.5)
+        case .alertThirdButtonReturn:
+            blocklist = Blocklist.defaults
+            say("blocklist reset 🍅", for: 2)
+        default:
+            break
+        }
+    }
+
+    // MARK: - Transfer key
+
+    private func transferPayload() -> [String: Any] {
+        var settings: [String: Any] = [:]
+        for key in TransferKey.settingKeys { if let v = defaults.object(forKey: key) { settings[key] = v } }
+        var scales: [String: Any] = [:]
+        for (key, value) in defaults.dictionaryRepresentation() where key.hasPrefix("scale.") { scales[String(key.dropFirst(6))] = value }
+        settings["scales"] = scales
+        let iso = ISO8601DateFormatter().string(from: Date())
+        return ["app": "deskpet", "v": 1, "exported": iso, "from": "macOS",
+                "config": ["ownerName": config.ownerName, "petName": config.petName],
+                "settings": settings, "stats": stats.exported]
+    }
+
+    /// Applies an imported key. Returns a note about anything that didn't come along.
+    @discardableResult
+    private func applyTransfer(_ payload: [String: Any]) throws -> String {
+        let incoming = payload["config"] as? [String: Any] ?? [:]
+        let owner = incoming["ownerName"] as? String ?? config.ownerName
+        let pet = incoming["petName"] as? String ?? config.petName
+        Config.save(["ownerName": owner, "petName": pet])
+        config.ownerName = owner
+        config.petName = pet
+        let settings = payload["settings"] as? [String: Any] ?? [:]
+        for key in TransferKey.settingKeys { if let v = settings[key], !(v is NSNull) { defaults.set(v, forKey: key) } }
+        for (name, value) in settings["scales"] as? [String: Any] ?? [:] { defaults.set(value, forKey: "scale." + name) }
+        if let s = payload["stats"] as? [String: Any] { try stats.replace(with: s) }
+        defaults.set(true, forKey: "setupComplete")
+
+        var note = ""
+        if !spritePackName.isEmpty && !SpritePack.available().contains(spritePackName) {
+            note = "the \(spritePackName) sprite pack isn't on this Mac: export it as a zip and drop it on me"
+            spritePackName = ""
+        }
+        loadSprites(announce: false)
+        petView.theme = Theme(hex: themeHex) ?? .default
+        petView.thoughtBubble = thoughtBubble
+        sounds.enabled = soundsOn
+        transient = (.done, CACurrentMediaTime() + 3)
+        say(note.isEmpty ? "welcome home, \(owner)! everything's here ✨" : note, for: 5)
+        return note
+    }
+
+    @objc private func exportTransferKey() {
+        guard let key = try? TransferKey.encode(transferPayload()) else { return say("couldn't make a transfer key 😵", for: 3) }
+        let alert = NSAlert()
+        alert.messageText = "Your transfer key"
+        alert.informativeText = "On the other device, open the 🐾 menu (system tray on Windows) → Import transfer key…, or use \"Have a transfer key?\" in setup. It holds your names, level and stats, look, and settings. Sprite pack images aren't included: export packs as zips."
+        let scroll = NSTextView.scrollableTextView()
+        scroll.frame = NSRect(x: 0, y: 0, width: 360, height: 110)
+        scroll.borderType = .bezelBorder
+        let text = scroll.documentView as! NSTextView
+        text.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
+        text.string = key
+        text.isEditable = false
+        alert.accessoryView = scroll
+        alert.addButton(withTitle: "Copy")
+        alert.addButton(withTitle: "Save as File…")
+        alert.addButton(withTitle: "Done")
+        NSApp.activate(ignoringOtherApps: true)
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(key, forType: .string)
+            say("transfer key copied! 📋", for: 2.5)
+        case .alertSecondButtonReturn:
+            let save = NSSavePanel()
+            save.nameFieldStringValue = "DeskPet transfer key.txt"
+            save.allowedContentTypes = [.plainText]
+            if save.runModal() == .OK, let url = save.url {
+                try? key.write(to: url, atomically: true, encoding: .utf8)
+                say("saved your transfer key 💾", for: 2.5)
+            }
+        default:
+            break
+        }
+    }
+
+    @objc private func importTransferKey() {
+        let alert = NSAlert()
+        alert.messageText = "Import a transfer key"
+        alert.informativeText = "Paste the key from your other device. This replaces your names, level, stats, and settings here."
+        let scroll = NSTextView.scrollableTextView()
+        scroll.frame = NSRect(x: 0, y: 0, width: 360, height: 110)
+        scroll.borderType = .bezelBorder
+        let text = scroll.documentView as! NSTextView
+        text.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
+        alert.accessoryView = scroll
+        alert.addButton(withTitle: "Import")
+        alert.addButton(withTitle: "Open File…")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = text
+        NSApp.activate(ignoringOtherApps: true)
+        var key = ""
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            key = text.string
+        case .alertSecondButtonReturn:
+            let open = NSOpenPanel()
+            open.allowedContentTypes = [.plainText]
+            guard open.runModal() == .OK, let url = open.url, let contents = try? String(contentsOf: url) else { return }
+            key = contents
+        default:
+            return
+        }
+        do {
+            let payload = try TransferKey.decode(key)
+            let confirm = NSAlert()
+            confirm.messageText = "Bring over \(TransferKey.summary(payload))?"
+            confirm.informativeText = "Your current level, stats, and settings on this Mac will be replaced (a backup of the stats is kept)."
+            confirm.addButton(withTitle: "Import")
+            confirm.addButton(withTitle: "Cancel")
+            guard confirm.runModal() == .alertFirstButtonReturn else { return }
+            try applyTransfer(payload)
+        } catch {
+            say("hmm: \(error.localizedDescription)", for: 4)
+        }
+    }
+
+
 
     @objc private func stopFocus() { focus.stop() }
     @objc private func toggleWalkOnWindows() { walkOnWindows.toggle() }
@@ -989,6 +1179,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             focusMenu.addItem(i)
         }
         if focus.phase != .off { focusMenu.addItem(item("Stop timer", #selector(stopFocus))) }
+        focusMenu.addItem(.separator())
+        focusMenu.addItem(item("Block distracting sites", #selector(toggleBlockDuringFocus), checked: blockDuringFocus))
+        focusMenu.addItem(item("Strict: close blocked tabs", #selector(toggleStrictBlock), checked: strictBlock))
+        focusMenu.addItem(item("Edit blocklist… (\(blocklist.count))", #selector(editBlocklist)))
         menu.addItem(submenu(focus.phase == .off ? "Focus timer" : focus.label, focusMenu))
         menu.addItem(item("Bring \(config.petName) here", #selector(bringHere)))
 
@@ -1048,6 +1242,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         menu.addItem(.separator())
         menu.addItem(item(panel.isVisible ? "Hide \(config.petName)" : "Show \(config.petName)", #selector(toggleVisible)))
         menu.addItem(item("Setup…", #selector(openWizard)))
+        let transferMenu = NSMenu()
+        transferMenu.addItem(item("Export transfer key…", #selector(exportTransferKey)))
+        transferMenu.addItem(item("Import transfer key…", #selector(importTransferKey)))
+        menu.addItem(submenu("Move to another device", transferMenu))
         if let update = updater.available {
             menu.addItem(item("Update to v\(update.version)…", #selector(installUpdate)))
         } else {
@@ -1219,6 +1417,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         case "openSprites":
             NSWorkspace.shared.open(SpritePack.root)
             return ["ok": true]
+        case "transfer-import":
+            do {
+                let payload = try TransferKey.decode(payload["key"] as? String ?? "")
+                let note = try applyTransfer(payload)
+                return ["ok": true, "summary": TransferKey.summary(payload), "note": note]
+            } catch {
+                return ["ok": false, "error": error.localizedDescription]
+            }
         case "kiro":
             let install = payload["install"] as? Bool ?? true
             kiroHooksOn = install

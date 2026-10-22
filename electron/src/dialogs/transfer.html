@@ -1,0 +1,22 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'">
+<title>Move to another device</title><link rel="stylesheet" href="dialog.css"></head>
+<body>
+  <div class="tabs"><button id="tab-export" class="on">Export</button><button id="tab-import">Import</button></div>
+  <section id="export">
+    <h1>Your transfer key</h1>
+    <p>On the other device, open the pet's menu → Move to another device → Import, or use "Have a transfer key?" in setup. It holds your names, level and stats, look, and settings. Sprite pack images aren't included: export packs as zips.</p>
+    <textarea id="key" rows="6" readonly></textarea>
+    <div class="note" id="export-note"></div>
+    <div class="buttons"><button id="save">Save as File…</button><span class="spacer"></span><button id="done">Done</button><button id="copy" class="primary">Copy</button></div>
+  </section>
+  <section id="import" hidden>
+    <h1>Import a transfer key</h1>
+    <p>Paste the key from your other device. This replaces your names, level, stats, and settings here (a backup of the stats is kept).</p>
+    <textarea id="paste" rows="6" spellcheck="false" placeholder="DESKPET-1:…"></textarea>
+    <div class="note" id="import-note"></div>
+    <div class="buttons"><button id="open">Open File…</button><span class="spacer"></span><button id="cancel">Cancel</button><button id="apply" class="primary">Import</button></div>
+  </section>
+  <script src="transfer.js"></script>
+</body></html>

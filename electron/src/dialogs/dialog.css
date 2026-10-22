@@ -1,0 +1,15 @@
+body { font: 13px -apple-system, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif; margin: 18px; color: #222; }
+h1 { font-size: 15px; margin: 0 0 6px; }
+p { margin: 0 0 12px; color: #555; line-height: 1.45; }
+textarea { width: 100%; box-sizing: border-box; font: 12px ui-monospace, Consolas, monospace; padding: 8px; border: 1px solid #bbb; border-radius: 8px; resize: none; }
+label.check { display: flex; gap: 8px; align-items: center; margin: 10px 0 0; }
+.buttons { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+.buttons .spacer { flex: 1; }
+button { font: inherit; padding: 6px 14px; border-radius: 6px; border: 1px solid #bbb; background: #f5f5f5; cursor: pointer; }
+button.primary { background: #007aff; border-color: #007aff; color: #fff; }
+.tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+.tabs button.on { background: #222; color: #fff; border-color: #222; }
+.note { margin-top: 8px; font-size: 12px; min-height: 16px; }
+.note.error { color: #d63b2f; }
+.note.ok { color: #1f8f4e; }
+[hidden] { display: none !important; }
