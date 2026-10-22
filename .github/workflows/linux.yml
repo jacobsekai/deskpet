@@ -56,7 +56,11 @@ jobs:
           path: electron/test-output/*.png
 
       - name: Package AppImage and tar.gz (x64, ARM64)
-        run: npx electron-builder --linux AppImage tar.gz --x64 --arm64 --publish never
+        run: |
+          npx electron-builder --linux AppImage tar.gz --x64 --arm64 --publish never
+          # electron-builder names x64 AppImages "x86_64"; the updater looks for Node's arch name.
+          mv dist/DeskPet-linux-x86_64.AppImage dist/DeskPet-linux-x64.AppImage
+          ls -la dist/*.AppImage dist/*.tar.gz
 
       - uses: actions/upload-artifact@v4
         with:
