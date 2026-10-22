@@ -81,7 +81,21 @@ Right-click Mochi or use the 🐾 menu (system tray on Windows) for every option
   - *Agents:* +10 per finished task, +15 per focus session, +1 per minute agents are working.
 
   Today's stats are in the menu and hover card (`~/.deskpet/stats.json`).
-- **Level rewards:** milestones unlock cosmetics, worn automatically when unlocked and mixed and matched in 🐾 → Rewards: 🎀 bow (Lv 2), ✨ sparkle trail (3), 🎉 party hat (5), 🧣 scarf (7), 👑 crown (10), 🌟 golden aura (12), 🌈 rainbow trail (15), 🏆 golden fur (20). Trails and the aura work with sprite packs too; hats, the scarf, and fur are drawn on the built-in cat.
+- **Levels and prestige:** levels run 1–100 (about 7,900 XP to level 100). At 100 you can **prestige** (🐾 → Rewards → Prestige): back to level 1 with a prestige badge (🥉 1–3, 🥈 4–6, 🥇 7–9) and every reward kept. Prestige 10 is **💎 Prestige Master**, which keeps leveling all the way to 1000.
+- **Rewards:** worn automatically when unlocked, mixed and matched in 🐾 → Rewards. All of them work on the built-in cat and on sprite packs (hats find the character's head in each frame):
+
+  | Lv | Reward | Lv | Reward |
+  |---|---|---|---|
+  | 2 | 🎀 Bow | 35 | 💜 Purple aura |
+  | 3 | ✨ Sparkle trail | 40 | 🎩 Top hat |
+  | 5 | 🎉 Party hat | 45 | ⭐ Star buddy |
+  | 8 | 🎈 Balloon | 50 | 🌈 Rainbow trail |
+  | 10 | 🌸 Petal trail | 60 | 😇 Halo |
+  | 12 | 🧢 Cap | 70 | ❄️ Snow aura |
+  | 15 | 🌟 Golden aura | 80 | 🪐 Orbiting planets |
+  | 20 | 👑 Crown | 90 | 💎 Diamond crown |
+  | 25 | 🦋 Butterfly | 100 | 🏆 Golden shimmer |
+  | 30 | 🔥 Fire trail | | |
 - **Rename:** 🐾 → Rename… changes the pet's name or yours any time.
 - **Focus timer:** 15/25/50-minute sessions with a break afterwards (🐾 → Focus timer).
   - **Blocklist:** during focus, the pet calls you out when you open a listed site, or closes the tab in strict mode (🐾 → Focus timer → Edit blocklist…). On macOS it reads the active tab in Safari, Chrome, Edge, Brave, Arc, Vivaldi, and Opera (macOS asks once per browser); on Windows it matches the browser window's title.

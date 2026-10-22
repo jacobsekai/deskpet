@@ -72,7 +72,7 @@ enum TransferKey {
     /// Settings that make sense on another machine (no window positions, hooks, or login items).
     static let settingKeys = ["spritePack", "themeColor", "thoughtBubble", "wander", "gravity", "walkOnWindows",
                               "quietInCalls", "notifications", "sounds", "autoUpdate", "blocklist", "strictBlock",
-                              "hat", "trail", "scarf", "aura", "goldenFur", "blockDuringFocus"]
+                              "hat", "trail", "auraStyle", "companion", "goldenFur", "showPrestigeBadge", "blockDuringFocus"]
 
     static func encode(_ payload: [String: Any]) throws -> String {
         let json = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
@@ -101,8 +101,11 @@ enum TransferKey {
         let config = payload["config"] as? [String: Any] ?? [:]
         let stats = payload["stats"] as? [String: Any] ?? [:]
         let xp = stats["xp"] as? Int ?? 0
+        let prestige = stats["prestige"] as? Int ?? 0
+        let level = Stats.level(for: xp - (stats["prestigeBase"] as? Int ?? 0), cap: prestige >= Prestige.maxRank ? Prestige.masterCap : Prestige.levelCap)
+        let rank = prestige > 0 ? "\(Prestige.title(prestige)) · " : ""
         let days = (stats["days"] as? [String: Any])?.count ?? 0
-        return "\(config["petName"] as? String ?? "Mochi") · Lv \(Stats.level(for: xp)) (\(xp) XP) · \(days) day\(days == 1 ? "" : "s") of stats"
+        return "\(config["petName"] as? String ?? "Mochi") · \(rank)Lv \(level) (\(xp) XP) · \(days) day\(days == 1 ? "" : "s") of stats"
     }
 
     private static func error(_ message: String) -> NSError {

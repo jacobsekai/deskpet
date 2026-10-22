@@ -58,6 +58,8 @@ final class HoverModel: ObservableObject {
 
     @Published var petName = "Mochi"
     @Published var level = 1
+    @Published var rank = "Lv 1"
+    @Published var atMax = false
     @Published var progress = 0.0
     @Published var xpToNext = 0
     @Published var today = ""
@@ -76,13 +78,13 @@ private struct HoverCardView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Text(model.petName).font(.system(size: 13, weight: .bold))
-                Text("Lv \(model.level)")
+                Text(model.rank)
                     .font(.system(size: 10.5, weight: .heavy))
                     .padding(.horizontal, 6).padding(.vertical, 2)
                     .background(Capsule().fill(model.accent.opacity(0.18)))
                     .foregroundColor(model.accent)
                 Spacer()
-                Text("\(model.xpToNext) XP to Lv \(model.level + 1)").font(.system(size: 10)).foregroundColor(.secondary)
+                Text(model.atMax ? "max level" : "\(model.xpToNext) XP to Lv \(model.level + 1)").font(.system(size: 10)).foregroundColor(.secondary)
             }
             ProgressView(value: model.progress).tint(model.accent)
             Text(model.today).font(.system(size: 11)).foregroundColor(.secondary)

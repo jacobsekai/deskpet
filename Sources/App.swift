@@ -155,14 +155,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     private var kiroHooksOn: Bool { get { flag("kiroHooks", false) } set { defaults.set(newValue, forKey: "kiroHooks") } }
     private var blockDuringFocus: Bool { get { flag("blockDuringFocus", true) } set { defaults.set(newValue, forKey: "blockDuringFocus") } }
     private var strictBlock: Bool { get { flag("strictBlock", false) } set { defaults.set(newValue, forKey: "strictBlock") } }
-    // Worn rewards (only ones you've unlocked take effect).
-    private var hat: String { get { defaults.string(forKey: "hat") ?? "" } set { defaults.set(newValue, forKey: "hat") } }
-    private var trail: String { get { defaults.string(forKey: "trail") ?? "" } set { defaults.set(newValue, forKey: "trail") } }
+    // MARK: Rewards state
+
+    /// Rewards stay unlocked forever once you've prestiged.
+    private func isUnlocked(_ reward: Reward) -> Bool { stats.prestige > 0 || stats.level >= reward.level }
     private func wearing(_ reward: Reward) -> Bool {
-        let s = reward.setting
-        if let v = s.value as? String { return defaults.string(forKey: s.key) == v }
-        return defaults.bool(forKey: s.key)
+        reward.slot == .golden ? defaults.bool(forKey: reward.slot.key) : defaults.string(forKey: reward.slot.key) == reward.value
     }
+    private func worn(_ slot: Reward.Slot) -> Reward? { Reward.allCases.first { $0.slot == slot && isUnlocked($0) && wearing($0) } }
+    private var showPrestigeBadge: Bool { get { flag("showPrestigeBadge", true) } set { defaults.set(newValue, forKey: "showPrestigeBadge") } }
     private var blocklist: [String] {
         get { defaults.stringArray(forKey: "blocklist") ?? Blocklist.defaults }
         set { defaults.set(newValue, forKey: "blocklist") }
@@ -452,17 +453,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         }
         if let s = speech, s.until > now { p.bubble = s.text }
         if let popup = xpPopup, now - popup.at < 1.4 { p.xpText = "+\(popup.amount) XP"; p.xpAge = now - popup.at }
-        let level = stats.level
-        for reward in Reward.unlocked(at: level) where wearing(reward) {
-            switch reward.setting.key {
-            case "hat": p.hat = hat
-            case "trail": p.trail = trail
-            case "scarf": p.scarf = true
-            case "aura": p.aura = true
-            case "goldenFur": p.goldenFur = true
-            default: break
-            }
-        }
+        p.hat = worn(.hat)?.value
+        p.trail = worn(.trail)?.value
+        p.aura = worn(.aura)?.value
+        p.companion = worn(.companion)?.value
+        p.golden = worn(.golden) != nil
+        p.prestige = showPrestigeBadge ? stats.prestige : 0
         return p
     }
 
@@ -811,45 +807,81 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         guard let newLevel else { return }
         transient = (.done, CACurrentMediaTime() + 3)
         sounds.play(.levelUp)
-        // New rewards are worn right away, so you see them.
-        let fresh = Reward.allCases.filter { $0.level == newLevel }
+        if stats.prestige >= Prestige.maxRank {
+            let big = newLevel % 100 == 0
+            say(big ? "Prestige Master level \(newLevel)! 💎" : "level \(newLevel)! 💎", for: big ? 5 : 3)
+            if big { post("Level \(newLevel)!", "\(config.petName) is a level \(newLevel) Prestige Master 💎", pid: 0) }
+            return
+        }
+        if stats.canPrestige {
+            say("MAX LEVEL! prestige from 🐾 → Rewards ⭐", for: 6)
+            post("Level 100!", "\(config.petName) can prestige now: 🐾 → Rewards → Prestige", pid: 0)
+            return
+        }
+        // First time through, new rewards are worn right away so you see them.
+        let fresh = stats.prestige == 0 ? Reward.allCases.filter { $0.level == newLevel } : []
         for reward in fresh { wear(reward) }
         if let reward = fresh.first {
             say("level \(newLevel)! unlocked \(reward.title) ✨", for: 5)
             post("Level \(newLevel)!", "\(config.petName) unlocked \(reward.title). Change rewards in the 🐾 menu.", pid: 0)
         } else {
-            say("level up! I'm level \(newLevel) now ✨", for: 4)
+            say("level up! \(stats.rankTitle) ✨", for: 4)
         }
     }
 
     private func wear(_ reward: Reward) {
-        let s = reward.setting
-        defaults.set(s.value, forKey: s.key)
+        if reward.slot == .golden { defaults.set(true, forKey: reward.slot.key) } else { defaults.set(reward.value, forKey: reward.slot.key) }
     }
 
-    /// Wears rewards already earned before rewards existed, once.
+    /// One-time setup when the reward track changes: carry over what you wore, then point at the menu.
     private func wearEarnedRewardsOnce() {
-        guard !defaults.bool(forKey: "rewardsIntroduced") else { return }
-        defaults.set(true, forKey: "rewardsIntroduced")
-        let earned = Reward.unlocked(at: stats.level)
+        if defaults.object(forKey: "aura") as? Bool == true, defaults.string(forKey: "auraStyle") == nil {
+            defaults.set("golden", forKey: "auraStyle")   // the old Lv 12 aura
+        }
+        guard defaults.integer(forKey: "rewardsVersion") < 2 else { return }
+        defaults.set(2, forKey: "rewardsVersion")
+        let earned = Reward.allCases.filter(isUnlocked)
         guard !earned.isEmpty else { return }
-        if hat.isEmpty, let h = earned.last(where: { $0.setting.key == "hat" }) { wear(h) }
-        if trail.isEmpty, let t = earned.last(where: { $0.setting.key == "trail" }) { wear(t) }
-        say("you've unlocked \(earned.count) reward\(earned.count == 1 ? "" : "s")! see 🐾 → Rewards ✨", for: 5)
+        for slot in [Reward.Slot.hat, .trail, .companion] where worn(slot) == nil {
+            if let best = earned.last(where: { $0.slot == slot }) { wear(best) }
+        }
+        say("\(earned.count) reward\(earned.count == 1 ? "" : "s") unlocked so far! see 🐾 → Rewards ✨", for: 5)
     }
 
     @objc private func chooseReward(_ sender: NSMenuItem) {
         guard let reward = Reward(rawValue: sender.representedObject as? String ?? "") else { return }
-        let s = reward.setting
-        if s.value is Bool {
-            defaults.set(!defaults.bool(forKey: s.key), forKey: s.key)
+        if reward.slot == .golden {
+            defaults.set(!defaults.bool(forKey: reward.slot.key), forKey: reward.slot.key)
         } else {
-            defaults.set(wearing(reward) ? "" : s.value, forKey: s.key)
+            defaults.set(wearing(reward) ? "" : reward.value, forKey: reward.slot.key)
         }
     }
 
-    @objc private func removeHat() { hat = "" }
-    @objc private func removeTrail() { trail = "" }
+    @objc private func clearSlot(_ sender: NSMenuItem) {
+        guard let slot = Reward.Slot(rawValue: sender.representedObject as? String ?? "") else { return }
+        defaults.set("", forKey: slot.key)
+    }
+
+    @objc private func togglePrestigeBadge() { showPrestigeBadge.toggle() }
+
+    @objc private func prestigeNow() {
+        guard stats.canPrestige else { return }
+        let next = stats.prestige + 1
+        let alert = NSAlert()
+        alert.messageText = "Enter \(Prestige.title(next))?"
+        alert.informativeText = next == Prestige.maxRank
+            ? "\(config.petName) goes back to level 1 as a Prestige Master and can then level all the way to 1000. Every reward stays unlocked."
+            : "\(config.petName) goes back to level 1 and earns a \(Prestige.emblem(next)) prestige badge. Every reward stays unlocked."
+        alert.addButton(withTitle: "Prestige")
+        alert.addButton(withTitle: "Not yet")
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        stats.doPrestige()
+        transient = (.done, CACurrentMediaTime() + 4)
+        sounds.play(.levelUp)
+        say("\(Prestige.title(next).uppercased())! back to level 1 ⭐", for: 6)
+        post(Prestige.title(next), "\(config.petName) prestiged! Every reward stays unlocked.", pid: 0)
+    }
 
     // MARK: - Rename
 
@@ -926,12 +958,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         let model = hoverCard.model
         model.petName = config.petName
         model.level = stats.level
+        model.rank = stats.rankTitle
+        model.atMax = stats.atMax
         model.progress = stats.progress
         model.xpToNext = stats.xpToNext
         model.today = todaySummary()
         model.focus = focus.phase == .off ? "" : focus.label
         model.quiet = quiet
-        model.nextReward = Reward.next(after: stats.level).map { "Next reward: \($0.title) at Lv \($0.level)" } ?? "🏆 Every reward unlocked"
+        model.nextReward = stats.canPrestige ? "⭐ Ready to prestige! (🐾 → Rewards)"
+            : stats.prestige > 0 ? "" : Reward.next(after: stats.level).map { "Next reward: \($0.title) at Lv \($0.level)" } ?? ""
         model.accent = Color(nsColor: petView.theme.accent ?? .systemOrange)
         model.rows = sessions.sorted { $0.activity.rawValue > $1.activity.rawValue }.map { s in
             let elapsed: String
@@ -1248,7 +1283,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
 
     private func fill(_ menu: NSMenu) {
         menu.removeAllItems()
-        menu.addItem(disabled("\(config.petName) · Lv \(stats.level) — \(String(describing: mood))"))
+        menu.addItem(disabled("\(config.petName) · \(stats.rankTitle) — \(String(describing: mood))"))
         menu.addItem(disabled("Today: \(todaySummary())"))
         if quiet { menu.addItem(disabled("🤫 Quiet: a mic or camera is in use")) }
         menu.addItem(.separator())
@@ -1281,7 +1316,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         menu.addItem(submenu(focus.phase == .off ? "Focus timer" : focus.label, focusMenu))
         menu.addItem(item("Bring \(config.petName) here", #selector(bringHere)))
         menu.addItem(item("Rename…", #selector(rename)))
-        menu.addItem(submenu("Rewards (Lv \(stats.level))", rewardsMenu()))
+        menu.addItem(submenu("Rewards (\(stats.rankTitle))", rewardsMenu()))
 
         let sizeMenu = NSMenu()
         sizeMenu.addItem(item(petView.resizing ? "Finish resizing" : "Resize…", #selector(toggleResizing)))
@@ -1355,25 +1390,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
 
     private func rewardsMenu() -> NSMenu {
         let menu = NSMenu()
-        let level = stats.level
-        if let next = Reward.next(after: level) {
-            menu.addItem(disabled("Next: \(next.title) at Lv \(next.level) (\(Stats.xpNeeded(next.level) - stats.xp) XP to go)"))
-        } else {
-            menu.addItem(disabled("Every reward unlocked! 🏆"))
+        menu.addItem(disabled(stats.rankTitle + (stats.atMax ? " · max" : " · \(stats.xpToNext) XP to next level")))
+        if stats.canPrestige {
+            menu.addItem(item("⭐ Prestige now → \(Prestige.title(stats.prestige + 1))", #selector(prestigeNow)))
+        } else if stats.prestige == 0, let next = Reward.next(after: stats.level) {
+            menu.addItem(disabled("Next: \(next.title) at Lv \(next.level) (\(Stats.xpNeeded(next.level) - stats.levelXP) XP to go)"))
+        } else if stats.prestige < Prestige.maxRank {
+            menu.addItem(disabled("Reach level 100 to prestige (\(Stats.xpNeeded(Prestige.levelCap) - stats.levelXP) XP to go)"))
         }
-        if petView.sprites != nil { menu.addItem(disabled("Hats, scarf, and fur show on the built-in cat")) }
-        menu.addItem(.separator())
-        for reward in Reward.allCases {
-            let unlocked = level >= reward.level
-            let i = item(unlocked ? reward.title : "🔒 \(reward.title) · Lv \(reward.level)", #selector(chooseReward(_:)),
-                         checked: unlocked && wearing(reward))
-            i.representedObject = reward.rawValue
-            i.isEnabled = unlocked
-            menu.addItem(i)
+        for slot in Reward.Slot.allCases {
+            menu.addItem(.separator())
+            menu.addItem(disabled(slot.title))
+            for reward in Reward.allCases where reward.slot == slot {
+                let unlocked = isUnlocked(reward)
+                let i = item(unlocked ? reward.title : "🔒 \(reward.title) · Lv \(reward.level)", #selector(chooseReward(_:)),
+                             checked: unlocked && wearing(reward))
+                i.representedObject = reward.rawValue
+                i.isEnabled = unlocked
+                menu.addItem(i)
+            }
+            if slot != .golden {
+                let none = item("None", #selector(clearSlot(_:)), checked: worn(slot) == nil)
+                none.representedObject = slot.rawValue
+                menu.addItem(none)
+            }
         }
-        menu.addItem(.separator())
-        menu.addItem(item("No hat", #selector(removeHat), checked: hat.isEmpty))
-        menu.addItem(item("No trail", #selector(removeTrail), checked: trail.isEmpty))
+        if stats.prestige > 0 {
+            menu.addItem(.separator())
+            menu.addItem(item("Show prestige badge", #selector(togglePrestigeBadge), checked: showPrestigeBadge))
+        }
         return menu
     }
 

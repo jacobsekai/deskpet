@@ -7,7 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const { AgentMonitor, PRIORITY, TranscriptTokens, codexState } = require('./agents');
 const {
-  REWARDS, Stats, FocusTimer, Updater, importPack, exportPack, kiroHooks, jumpTo, WindowPlatforms,
+  REWARDS, SLOTS, PRESTIGE, Stats, FocusTimer, Updater, importPack, exportPack, kiroHooks, jumpTo, WindowPlatforms,
   BLOCK_DEFAULTS, BROWSERS, TITLE_WORDS, parseBlocklist, matchTitle, closeBlockedTab, transferKey, TRANSFER_SETTINGS,
 } = require('./extras');
 const { paths, Settings, loadConfig, saveConfig, hooksLive, readJSON } = require('./settings');
@@ -365,12 +365,13 @@ class Pet {
     }
     if (this.speech && this.speech.until > t) p.bubble = this.speech.text;
     if (this.xpPopup && t - this.xpPopup.at < 1.4) { p.xpText = `+${this.xpPopup.amount} XP`; p.xpAge = t - this.xpPopup.at; }
-    for (const r of REWARDS) {
-      if (this.stats.level < r.level || !this.wearing(r)) continue;
-      if (r.key === 'hat') p.hat = r.value;
-      else if (r.key === 'trail') p.trail = r.value;
-      else p[r.key] = true;
-    }
+    const worn = (slot) => this.worn(slot);
+    p.hat = (worn('hat') || {}).value || null;
+    p.trail = (worn('trail') || {}).value || null;
+    p.aura = (worn('aura') || {}).value || null;
+    p.companion = (worn('companion') || {}).value || null;
+    p.golden = !!worn('golden');
+    p.prestige = this.settings.get('showPrestigeBadge', true) ? this.stats.prestige : 0;
     return p;
   }
 
@@ -750,7 +751,7 @@ class Pet {
       click: () => { this.toggle(key, fallback); if (after) after(); },
     });
     const template = [
-      { label: `${this.config.petName} · Lv ${this.stats.level} — ${this.mood}`, enabled: false },
+      { label: `${this.config.petName} · ${this.stats.rankTitle} — ${this.mood}`, enabled: false },
       { label: `Today: ${today}`, enabled: false },
       ...(this.quiet ? [{ label: '🤫 Quiet: a mic or camera is in use', enabled: false }] : []),
       { type: 'separator' },
@@ -769,7 +770,7 @@ class Pet {
       },
       { label: `Bring ${this.config.petName} here`, click: () => this.bringHere() },
       { label: 'Rename…', click: () => this.openDialog('rename.html', {}, { width: 360, height: 270 }) },
-      { label: `Rewards (Lv ${this.stats.level})`, submenu: this.rewardsMenu() },
+      { label: `Rewards (${this.stats.rankTitle})`, submenu: this.rewardsMenu() },
       {
         label: `Size (${pct}%)`,
         submenu: [
@@ -893,47 +894,94 @@ class Pet {
     if (!level) return;
     this.transient = { mood: 'done', until: now() + 3 };
     this.playSound('level-up');
-    // New rewards are worn right away, so you see them.
-    const fresh = REWARDS.filter((r) => r.level === level);
+    if (this.stats.prestige >= PRESTIGE.maxRank) {
+      const big = level % 100 === 0;
+      this.say(big ? `Prestige Master level ${level}! 💎` : `level ${level}! 💎`, big ? 5 : 3);
+      if (big) this.notify(`Level ${level}!`, `${this.config.petName} is a level ${level} Prestige Master 💎`, 0);
+      return;
+    }
+    if (this.stats.canPrestige) {
+      this.say('MAX LEVEL! prestige from the tray menu → Rewards ⭐', 6);
+      this.notify('Level 100!', `${this.config.petName} can prestige now: tray menu → Rewards → Prestige`, 0);
+      return;
+    }
+    // First time through, new rewards are worn right away so you see them.
+    const fresh = this.stats.prestige === 0 ? REWARDS.filter((r) => r.level === level) : [];
     for (const r of fresh) this.settings.set(r.key, r.value);
     if (fresh.length) {
       this.say(`level ${level}! unlocked ${fresh[0].title} ✨`, 5);
       this.notify(`Level ${level}!`, `${this.config.petName} unlocked ${fresh[0].title}. Change rewards in the tray menu.`, 0);
     } else {
-      this.say(`level up! I'm level ${level} now ✨`, 4);
+      this.say(`level up! ${this.stats.rankTitle} ✨`, 4);
     }
   }
 
-  wearing(r) { return this.settings.get(r.key, r.key === 'hat' || r.key === 'trail' ? '' : false) === r.value; }
+  /** Rewards stay unlocked forever once you've prestiged. */
+  isUnlocked(r) { return this.stats.prestige > 0 || this.stats.level >= r.level; }
+  wearing(r) { return r.slot === 'golden' ? this.settings.get(r.key, false) === true : this.settings.get(r.key, '') === r.value; }
+  worn(slot) { return REWARDS.find((r) => r.slot === slot && this.isUnlocked(r) && this.wearing(r)); }
 
-  /** Wears rewards already earned before rewards existed, once. */
+  /** One-time setup when the reward track changes: carry over what you wore, then point at the menu. */
   wearEarnedRewardsOnce() {
-    if (this.settings.get('rewardsIntroduced', false)) return;
-    this.settings.set('rewardsIntroduced', true);
-    const earned = REWARDS.filter((r) => r.level <= this.stats.level);
+    if (this.settings.get('aura', false) === true && !this.settings.get('auraStyle', '')) this.settings.set('auraStyle', 'golden');
+    if (this.settings.get('rewardsVersion', 0) >= 2) return;
+    this.settings.set('rewardsVersion', 2);
+    const earned = REWARDS.filter((r) => this.isUnlocked(r));
     if (!earned.length) return;
-    const last = (key) => [...earned].reverse().find((r) => r.key === key);
-    if (!this.settings.get('hat', '') && last('hat')) this.settings.set('hat', last('hat').value);
-    if (!this.settings.get('trail', '') && last('trail')) this.settings.set('trail', last('trail').value);
-    this.say(`you've unlocked ${earned.length} reward${earned.length === 1 ? '' : 's'}! see the tray menu → Rewards ✨`, 5);
+    for (const slot of ['hat', 'trail', 'companion']) {
+      if (this.worn(slot)) continue;
+      const best = [...earned].reverse().find((r) => r.slot === slot);
+      if (best) this.settings.set(best.key, best.value);
+    }
+    this.say(`${earned.length} reward${earned.length === 1 ? '' : 's'} unlocked so far! see the tray menu → Rewards ✨`, 5);
+  }
+
+  async prestigeNow() {
+    if (!this.stats.canPrestige) return;
+    const next = this.stats.prestige + 1;
+    const { response } = await dialog.showMessageBox({
+      type: 'question', buttons: ['Prestige', 'Not yet'], defaultId: 0, cancelId: 1,
+      message: `Enter ${PRESTIGE.title(next)}?`,
+      detail: next === PRESTIGE.maxRank
+        ? `${this.config.petName} goes back to level 1 as a Prestige Master and can then level all the way to 1000. Every reward stays unlocked.`
+        : `${this.config.petName} goes back to level 1 and earns a ${PRESTIGE.emblem(next)} prestige badge. Every reward stays unlocked.`,
+    });
+    if (response !== 0) return;
+    this.stats.doPrestige();
+    this.transient = { mood: 'done', until: now() + 4 };
+    this.playSound('level-up');
+    this.say(`${PRESTIGE.title(next).toUpperCase()}! back to level 1 ⭐`, 6);
+    this.notify(PRESTIGE.title(next), `${this.config.petName} prestiged! Every reward stays unlocked.`, 0);
   }
 
   rewardsMenu() {
-    const level = this.stats.level;
-    const next = REWARDS.find((r) => r.level > level);
-    return [
-      { label: next ? `Next: ${next.title} at Lv ${next.level} (${Stats.xpNeeded(next.level) - this.stats.xp} XP to go)` : 'Every reward unlocked! 🏆', enabled: false },
-      ...(this.pack ? [{ label: 'Hats, scarf, and fur show on the built-in cat', enabled: false }] : []),
-      { type: 'separator' },
-      ...REWARDS.map((r) => ({
-        label: level >= r.level ? r.title : `🔒 ${r.title} · Lv ${r.level}`, type: 'checkbox', enabled: level >= r.level,
-        checked: level >= r.level && this.wearing(r),
-        click: () => this.settings.set(r.key, typeof r.value === 'boolean' ? !this.wearing(r) : (this.wearing(r) ? '' : r.value)),
-      })),
-      { type: 'separator' },
-      { label: 'No hat', type: 'checkbox', checked: !this.settings.get('hat', ''), click: () => this.settings.set('hat', '') },
-      { label: 'No trail', type: 'checkbox', checked: !this.settings.get('trail', ''), click: () => this.settings.set('trail', '') },
-    ];
+    const st = this.stats;
+    const items = [{ label: st.rankTitle + (st.atMax ? ' · max' : ` · ${st.xpToNext} XP to next level`), enabled: false }];
+    if (st.canPrestige) items.push({ label: `⭐ Prestige now → ${PRESTIGE.title(st.prestige + 1)}`, click: () => this.prestigeNow() });
+    else if (st.prestige === 0) {
+      const next = REWARDS.find((r) => r.level > st.level);
+      if (next) items.push({ label: `Next: ${next.title} at Lv ${next.level} (${Stats.xpNeeded(next.level) - st.levelXP} XP to go)`, enabled: false });
+    } else if (st.prestige < PRESTIGE.maxRank) {
+      items.push({ label: `Reach level 100 to prestige (${Stats.xpNeeded(100) - st.levelXP} XP to go)`, enabled: false });
+    }
+    for (const slot of SLOTS) {
+      items.push({ type: 'separator' }, { label: slot.title, enabled: false });
+      for (const r of REWARDS.filter((x) => x.slot === slot.id)) {
+        const unlocked = this.isUnlocked(r);
+        items.push({
+          label: unlocked ? r.title : `🔒 ${r.title} · Lv ${r.level}`, type: 'checkbox', enabled: unlocked, checked: unlocked && this.wearing(r),
+          click: () => this.settings.set(r.key, r.slot === 'golden' ? !this.wearing(r) : (this.wearing(r) ? '' : r.value)),
+        });
+      }
+      if (slot.id !== 'golden') items.push({ label: 'None', type: 'checkbox', checked: !this.worn(slot.id), click: () => this.settings.set(slot.key, '') });
+    }
+    if (st.prestige > 0) {
+      items.push({ type: 'separator' }, {
+        label: 'Show prestige badge', type: 'checkbox', checked: this.settings.get('showPrestigeBadge', true),
+        click: () => this.toggle('showPrestigeBadge', true),
+      });
+    }
+    return items;
   }
 
   applyNames(petName, ownerName) {
@@ -972,7 +1020,9 @@ class Pet {
     return {
       petName: this.config.petName, level: this.stats.level, progress: this.stats.progress, xpToNext: this.stats.xpToNext,
       today: this.todaySummary(), focus: this.focus.phase === 'off' ? '' : this.focus.label, quiet: this.quiet,
-      nextReward: (() => { const n = REWARDS.find((r) => r.level > this.stats.level); return n ? `Next reward: ${n.title} at Lv ${n.level}` : '🏆 Every reward unlocked'; })(),
+      rank: this.stats.rankTitle, atMax: this.stats.atMax,
+      nextReward: this.stats.canPrestige ? '⭐ Ready to prestige! (tray menu → Rewards)'
+        : this.stats.prestige ? '' : (() => { const n = REWARDS.find((r) => r.level > this.stats.level); return n ? `Next reward: ${n.title} at Lv ${n.level}` : ''; })(),
       accent: this.themeHex || '#FF9500',
       rows: [...this.sessions].sort((a, b) => PRIORITY.indexOf(b.activity) - PRIORITY.indexOf(a.activity)).map((s) => {
         const secs = Math.round(t - (this.busySince.get(s.id) || t));

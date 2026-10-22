@@ -145,8 +145,22 @@ final class Stats {
     static let dailyPlayCap = 100
 
     private struct File: Codable {
+        /// Lifetime XP.
         var xp = 0
         var days: [String: Day] = [:]
+        var prestige = 0
+        /// Lifetime XP at the last prestige; levels count from here.
+        var prestigeBase = 0
+
+        init() {}
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            xp = try c.decodeIfPresent(Int.self, forKey: .xp) ?? 0
+            days = try c.decodeIfPresent([String: Day].self, forKey: .days) ?? [:]
+            prestige = try c.decodeIfPresent(Int.self, forKey: .prestige) ?? 0
+            prestigeBase = try c.decodeIfPresent(Int.self, forKey: .prestigeBase) ?? 0
+        }
     }
 
     private var file: File
@@ -158,19 +172,44 @@ final class Stats {
     }
 
     var xp: Int { file.xp }
-    var level: Int { Self.level(for: file.xp) }
-    /// XP progress within the current level, 0...1.
+    var prestige: Int { file.prestige }
+    /// XP earned since the last prestige.
+    var levelXP: Int { file.xp - file.prestigeBase }
+    var maxLevel: Int { file.prestige >= Prestige.maxRank ? Prestige.masterCap : Prestige.levelCap }
+    var level: Int { Self.level(for: levelXP, cap: maxLevel) }
+    var atMax: Bool { level >= maxLevel }
+    var canPrestige: Bool { level >= Prestige.levelCap && file.prestige < Prestige.maxRank }
+    /// XP progress within the current level, 0...1 (1 at the cap).
     var progress: Double {
+        guard !atMax else { return 1 }
         let lo = Self.xpNeeded(level), hi = Self.xpNeeded(level + 1)
-        return Double(file.xp - lo) / Double(max(1, hi - lo))
+        return Double(levelXP - lo) / Double(max(1, hi - lo))
     }
-    var xpToNext: Int { Self.xpNeeded(level + 1) - file.xp }
+    var xpToNext: Int { atMax ? 0 : Self.xpNeeded(level + 1) - levelXP }
+    /// "Lv 42", "Prestige 3 · Lv 42", "💎 Prestige Master · Lv 345"
+    var rankTitle: String { file.prestige == 0 ? "Lv \(level)" : "\(Prestige.title(file.prestige)) · Lv \(level)" }
 
-    static func xpNeeded(_ level: Int) -> Int { 25 * level * (level - 1) }
-    static func level(for xp: Int) -> Int {
+    /// XP needed (since the last prestige) to reach `level`. Each level costs 30 + its number,
+    /// so level 100 takes about 7,900 XP; Prestige Master levels past 100 cost 300 each.
+    static func xpNeeded(_ level: Int) -> Int {
+        let n = min(level, Prestige.levelCap) - 1
+        let base = 30 * n + n * (n + 1) / 2
+        return base + max(0, level - Prestige.levelCap) * 300
+    }
+
+    static func level(for xp: Int, cap: Int = Prestige.levelCap) -> Int {
         var n = 1
-        while xpNeeded(n + 1) <= xp { n += 1 }
+        while n < cap && xpNeeded(n + 1) <= xp { n += 1 }
         return n
+    }
+
+    /// Resets to level 1 and raises the prestige rank. Rewards stay unlocked.
+    func doPrestige() {
+        guard canPrestige else { return }
+        file.prestige += 1
+        file.prestigeBase = file.xp
+        dirty = true
+        saveIfNeeded()
     }
 
     private static let dayFormatter: DateFormatter = {

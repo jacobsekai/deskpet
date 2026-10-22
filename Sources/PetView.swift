@@ -21,12 +21,14 @@ struct PetPose {
     /// "+3 XP" floating up from the pet, and how long it's been showing.
     var xpText: String?
     var xpAge: Double = 0
-    /// Level rewards (see Rewards.swift). Hats, scarf, and golden fur draw on the built-in cat only.
+    /// Level rewards (see Rewards.swift), drawn on the cat and on sprite packs alike.
     var hat: String?
-    var scarf = false
     var trail: String?
-    var aura = false
-    var goldenFur = false
+    var aura: String?
+    var companion: String?
+    var golden = false
+    /// Prestige rank badge (0 = none).
+    var prestige = 0
     var captionColor: NSColor = .systemGray
     var bubble: String?
 }
@@ -247,8 +249,8 @@ final class PetView: NSView {
         dirtyRect.fill(using: .copy)
 
         let t = CACurrentMediaTime() - start
-        fur = pose.goldenFur ? goldFur : baseFur
-        furLight = pose.goldenFur ? goldFurLight : baseFurLight
+        fur = pose.golden ? goldFur : baseFur
+        furLight = pose.golden ? goldFurLight : baseFurLight
         NSGraphicsContext.saveGraphicsState()
         let tf = NSAffineTransform()
         tf.translateX(by: 0, yBy: Self.ground * (1 - scale))
@@ -296,6 +298,8 @@ final class PetView: NSView {
 
         drawProps(m, t, cx: cx, g: g, base: base)
         drawEffects(m, t, cx: cx, base: base)
+        drawCompanion(m, t, NSRect(x: cx - 42, y: base, width: 84, height: 82))
+        drawBadge(NSRect(x: cx - 42, y: base, width: 84, height: 82))
 
         if pose.bubble == nil { drawThoughts(m, t, cx: cx, base: base) }
         return NSPoint(x: cx, y: base + 92)
@@ -371,8 +375,18 @@ final class PetView: NSView {
             tf.translateX(by: rect.midX, yBy: rect.midY); tf.rotate(byRadians: pose.spin); tf.translateX(by: -rect.midX, yBy: -rect.midY)
             tf.concat()
         }
-        drawImage(image, in: rect, pack: pack, flip: pack.facesLeft ? movingRight : movingLeft)
+        let flipped = pack.facesLeft ? movingRight : movingLeft
+        drawImage(image, in: rect, pack: pack, flip: flipped, golden: pose.golden, t: t)
+        if let hat = pose.hat {
+            // Sit the hat on the top of the head found in this frame, sized to the head.
+            let head = pack.head(for: m, at: t)
+            let hx = flipped ? rect.maxX - head.x * rect.width : rect.minX + head.x * rect.width
+            let scale = min(2.6, max(0.45, head.width * rect.width / 56))
+            draw(at: hx, rect.maxY - head.top * rect.height - 3 * scale, scale: scale) { drawHatShape(hat, t) }
+        }
         NSGraphicsContext.restoreGraphicsState()
+        drawCompanion(m, t, rect)
+        drawBadge(rect)
 
         let k = spriteScale
         if pack.effects {
@@ -384,14 +398,30 @@ final class PetView: NSView {
         return NSPoint(x: cx, y: rect.maxY + 8)
     }
 
-    private func drawImage(_ image: CGImage, in rect: NSRect, pack: SpritePack, flip: Bool) {
+    private func drawImage(_ image: CGImage, in rect: NSRect, pack: SpritePack, flip: Bool, golden: Bool = false, t: Double = 0) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         ctx.saveGState()
         ctx.interpolationQuality = pack.pixelated ? .none : .high
         if flip {
             ctx.translateBy(x: rect.midX, y: 0); ctx.scaleBy(x: -1, y: 1); ctx.translateBy(x: -rect.midX, y: 0)
         }
-        ctx.draw(image, in: rect)
+        if golden {
+            // Golden shimmer: tint only the sprite's own pixels, plus a moving shine.
+            ctx.beginTransparencyLayer(auxiliaryInfo: nil)
+            ctx.draw(image, in: rect)
+            ctx.setBlendMode(.sourceAtop)
+            ctx.setFillColor(NSColor(calibratedRed: 1, green: 0.78, blue: 0.2, alpha: 0.38).cgColor)
+            ctx.fill(rect)
+            let sweep = CGFloat(fmod(t * 0.45, 1.6)) - 0.3
+            let x = rect.minX + sweep * rect.width
+            ctx.setFillColor(NSColor(white: 1, alpha: 0.35).cgColor)
+            ctx.move(to: CGPoint(x: x, y: rect.minY)); ctx.addLine(to: CGPoint(x: x + rect.width * 0.12, y: rect.minY))
+            ctx.addLine(to: CGPoint(x: x + rect.width * 0.32, y: rect.maxY)); ctx.addLine(to: CGPoint(x: x + rect.width * 0.2, y: rect.maxY))
+            ctx.closePath(); ctx.fillPath()
+            ctx.endTransparencyLayer()
+        } else {
+            ctx.draw(image, in: rect)
+        }
         ctx.restoreGState()
     }
 
@@ -508,7 +538,7 @@ final class PetView: NSView {
             }
         case .none: break
         }
-        drawHat(t)
+        if let hat = pose.hat { draw(at: 0, 62) { drawHatShape(hat, t) } }
         if pose.nightcap && pose.hat == nil {
             let cap = NSBezierPath()
             cap.move(to: pt(-26, 58)); cap.curve(to: pt(26, 60), controlPoint1: pt(-10, 66), controlPoint2: pt(10, 68))
@@ -522,14 +552,30 @@ final class PetView: NSView {
 
     // MARK: Level rewards
 
-    /// Aura and trail, drawn behind the character (works for sprite packs too).
+    /// Aura and trail, drawn behind the character.
     private func drawRewardsBehind(_ m: Mood, _ t: Double, cx: CGFloat, base: CGFloat, height: CGFloat) {
-        if pose.aura {
+        if let aura = pose.aura {
             let pulse = 1 + CGFloat(sin(t * 2.2)) * 0.06
             let r = max(64, height * 0.75) * pulse
-            let glow = NSGradient(colors: [NSColor(calibratedRed: 1, green: 0.82, blue: 0.3, alpha: 0.42),
-                                           NSColor(calibratedRed: 1, green: 0.82, blue: 0.3, alpha: 0)])
-            glow?.draw(in: oval(cx, base + height * 0.45, r * 2, r * 1.7), relativeCenterPosition: .zero)
+            let color: NSColor
+            switch aura {
+            case "purple": color = NSColor(calibratedRed: 0.66, green: 0.42, blue: 1, alpha: 1)
+            case "snow": color = NSColor(calibratedRed: 0.6, green: 0.85, blue: 1, alpha: 1)
+            default: color = NSColor(calibratedRed: 1, green: 0.82, blue: 0.3, alpha: 1)
+            }
+            NSGradient(colors: [color.withAlphaComponent(0.42), color.withAlphaComponent(0)])?
+                .draw(in: oval(cx, base + height * 0.45, r * 2, r * 1.7), relativeCenterPosition: .zero)
+            if aura == "snow" {
+                for i in 0..<10 {
+                    let phase = CGFloat(fmod(t * 0.25 + Double(i) * 0.137, 1))
+                    let x = cx + CGFloat(sin(Double(i) * 2.4 + t * 0.8)) * r * 0.8
+                    let y = base + height * 1.15 - phase * height * 1.2
+                    NSColor(white: 1, alpha: 0.9 * (1 - phase)).setFill()
+                    oval(x, y, 4, 4).fill()
+                    NSColor(calibratedRed: 0.55, green: 0.75, blue: 0.95, alpha: 0.6 * (1 - phase)).setStroke()
+                    let flake = oval(x, y, 4, 4); flake.lineWidth = 0.8; flake.stroke()
+                }
+            }
         }
         guard let trail = pose.trail, [.walking, .flying, .dragged].contains(m) else { return }
         // Trails stream out behind the direction of travel.
@@ -539,64 +585,153 @@ final class PetView: NSView {
             let x = cx + dir * (28 + k * 13)
             let y = base + height * 0.35 + CGFloat(sin(t * 7 + Double(i))) * 6
             let alpha = 1 - k / 7
-            if trail == "rainbow" {
+            switch trail {
+            case "rainbow":
                 NSColor(calibratedHue: CGFloat(fmod(t * 0.4 + Double(i) / 6, 1)), saturation: 0.75, brightness: 1, alpha: alpha).setFill()
                 oval(x, y, 11 - k, 11 - k).fill()
-            } else {
+            case "petal":
+                NSGraphicsContext.saveGraphicsState()
+                let tf = NSAffineTransform(); tf.translateX(by: x, yBy: y); tf.rotate(byRadians: CGFloat(t * 3 + Double(i))); tf.concat()
+                NSColor(calibratedRed: 1, green: 0.66, blue: 0.78, alpha: alpha).setFill()
+                oval(0, 0, 9 - k * 0.6, 5 - k * 0.3).fill()
+                NSGraphicsContext.restoreGraphicsState()
+            case "fire":
+                let flicker = CGFloat(abs(sin(t * 13 + Double(i) * 1.7)))
+                NSColor(calibratedRed: 1, green: 0.35 + 0.4 * (1 - k / 6), blue: 0.1, alpha: alpha).setFill()
+                oval(x, y + k * 2, (12 - k) * (0.8 + flicker * 0.3), (12 - k) * (0.8 + flicker * 0.3)).fill()
+            default:
                 NSColor(calibratedRed: 1, green: 0.85, blue: 0.25, alpha: alpha).setFill()
                 star(pt(x, y), 7 - k * 0.7).fill()
             }
         }
     }
 
-    /// Hats and scarf on the built-in cat (local coordinates).
-    private func drawHat(_ t: Double) {
-        if pose.scarf {
-            let band = NSBezierPath(roundedRect: NSRect(x: -39, y: 10, width: 78, height: 10), xRadius: 5, yRadius: 5)
-            fillStroke(band, NSColor(calibratedRed: 0.91, green: 0.31, blue: 0.36, alpha: 1), width: 2)
-            let tail = NSBezierPath(roundedRect: NSRect(x: 16, y: -6, width: 10, height: 20), xRadius: 4, yRadius: 4)
-            fillStroke(tail, NSColor(calibratedRed: 0.85, green: 0.25, blue: 0.3, alpha: 1), width: 2)
-            NSColor(white: 1, alpha: 0.5).setFill()
-            for x in stride(from: -28, through: 28, by: 14) { NSRect(x: CGFloat(x), y: 12, width: 3, height: 6).fill() }
-        }
-        switch pose.hat {
+    /// Hats in head space: origin at the top-center of the head, sized for the cat (head ≈ 56 wide).
+    private func drawHatShape(_ hat: String, _ t: Double) {
+        let ink = NSColor(calibratedRed: 0.29, green: 0.19, blue: 0.15, alpha: 1)
+        switch hat {
         case "bow":
             let pinkBow = NSColor(calibratedRed: 1, green: 0.31, blue: 0.55, alpha: 1)
             for side in [-1.0, 1.0] as [CGFloat] {
                 let loop = NSBezierPath()
-                loop.move(to: pt(24, 66)); loop.line(to: pt(24 + side * 12, 74)); loop.line(to: pt(24 + side * 12, 58)); loop.close()
+                loop.move(to: pt(22, 4)); loop.line(to: pt(22 + side * 12, 12)); loop.line(to: pt(22 + side * 12, -4)); loop.close()
                 loop.lineJoinStyle = .round
                 fillStroke(loop, pinkBow, width: 2)
             }
-            fillStroke(oval(24, 66, 8, 8), pinkBow, width: 2)
+            fillStroke(oval(22, 4, 8, 8), pinkBow, width: 2)
         case "partyHat":
             let cone = NSBezierPath()
-            cone.move(to: pt(-14, 60)); cone.line(to: pt(14, 60)); cone.line(to: pt(2, 96)); cone.close()
+            cone.move(to: pt(-14, -2)); cone.line(to: pt(14, -2)); cone.line(to: pt(2, 34)); cone.close()
             cone.lineJoinStyle = .round
             fillStroke(cone, NSColor(calibratedRed: 0.6, green: 0.48, blue: 1, alpha: 1))
             NSGraphicsContext.saveGraphicsState()
             cone.addClip()
             NSColor.systemYellow.setFill()
-            for y in stride(from: 64, through: 92, by: 10) { NSBezierPath(rect: NSRect(x: -16, y: CGFloat(y), width: 32, height: 4)).fill() }
+            for y in stride(from: 2, through: 30, by: 10) { NSBezierPath(rect: NSRect(x: -16, y: CGFloat(y), width: 32, height: 4)).fill() }
             NSGraphicsContext.restoreGraphicsState()
-            cone.lineWidth = 2.5; NSColor(calibratedRed: 0.29, green: 0.19, blue: 0.15, alpha: 1).setStroke(); cone.stroke()
-            fillStroke(oval(2, 97, 9, 9), .systemPink, width: 2)
-        case "crown":
-            let gold = NSColor(calibratedRed: 1, green: 0.78, blue: 0.24, alpha: 1)
+            cone.lineWidth = 2.5; ink.setStroke(); cone.stroke()
+            fillStroke(oval(2, 35, 9, 9), .systemPink, width: 2)
+        case "cap":
+            let dome = NSBezierPath()
+            dome.appendArc(withCenter: pt(0, -1), radius: 22, startAngle: 0, endAngle: 180)
+            dome.close()
+            fillStroke(dome, NSColor(calibratedRed: 0.24, green: 0.48, blue: 1, alpha: 1))
+            let brim = NSBezierPath(roundedRect: NSRect(x: 2, y: -4, width: 34, height: 7), xRadius: 3.5, yRadius: 3.5)
+            fillStroke(brim, NSColor(calibratedRed: 0.17, green: 0.38, blue: 0.9, alpha: 1))
+            fillStroke(oval(0, 21, 6, 5), .white, width: 1.5)
+        case "topHat":
+            fillStroke(NSBezierPath(roundedRect: NSRect(x: -26, y: -4, width: 52, height: 8), xRadius: 4, yRadius: 4), NSColor(white: 0.16, alpha: 1))
+            fillStroke(NSBezierPath(rect: NSRect(x: -16, y: 2, width: 32, height: 32)), NSColor(white: 0.16, alpha: 1))
+            NSColor(calibratedRed: 0.86, green: 0.2, blue: 0.3, alpha: 1).setFill()
+            NSRect(x: -15, y: 6, width: 30, height: 6).fill()
+            NSColor(white: 1, alpha: 0.18).setFill()
+            NSRect(x: -12, y: 14, width: 4, height: 18).fill()
+        case "halo":
+            let bob = CGFloat(sin(t * 2)) * 2
+            let ring = oval(0, 24 + bob, 42, 12)
+            ring.lineWidth = 7; NSColor(calibratedRed: 1, green: 0.85, blue: 0.3, alpha: 0.35).setStroke(); ring.stroke()
+            ring.lineWidth = 3.5; NSColor(calibratedRed: 1, green: 0.8, blue: 0.2, alpha: 1).setStroke(); ring.stroke()
+        case "crown", "diamondCrown":
+            let diamond = hat == "diamondCrown"
+            let body = diamond ? NSColor(calibratedRed: 0.62, green: 0.9, blue: 1, alpha: 1) : NSColor(calibratedRed: 1, green: 0.78, blue: 0.24, alpha: 1)
             let crown = NSBezierPath()
-            crown.move(to: pt(-18, 60)); crown.line(to: pt(18, 60)); crown.line(to: pt(20, 80)); crown.line(to: pt(10, 70))
-            crown.line(to: pt(0, 84)); crown.line(to: pt(-10, 70)); crown.line(to: pt(-20, 80)); crown.close()
+            crown.move(to: pt(-18, -2)); crown.line(to: pt(18, -2)); crown.line(to: pt(20, 18)); crown.line(to: pt(10, 8))
+            crown.line(to: pt(0, 22)); crown.line(to: pt(-10, 8)); crown.line(to: pt(-20, 18)); crown.close()
             crown.lineJoinStyle = .round
-            fillStroke(crown, gold)
-            fillStroke(oval(0, 65, 6, 6), .systemRed, width: 1.5)
-            for x in [-20.0, 0.0, 20.0] as [CGFloat] { fillStroke(oval(x, x == 0 ? 85 : 81, 5, 5), gold, width: 1.5) }
-            // A little glint
-            let shine = 0.5 + 0.5 * sin(t * 3)
-            NSColor(white: 1, alpha: 0.6 * shine).setFill()
-            star(pt(12, 76), 3.5).fill()
+            fillStroke(crown, body)
+            fillStroke(oval(0, 3, 6, 6), diamond ? .white : .systemRed, width: 1.5)
+            for x in [-20.0, 0.0, 20.0] as [CGFloat] { fillStroke(oval(x, x == 0 ? 23 : 19, 5, 5), diamond ? .white : body, width: 1.5) }
+            let shine = 0.5 + 0.5 * sin(t * (diamond ? 5 : 3))
+            NSColor(white: 1, alpha: 0.75 * shine).setFill()
+            star(pt(12, 14), diamond ? 5 : 3.5).fill()
+            if diamond { star(pt(-11, 11), 3 * (1 - shine) + 1).fill() }
         default:
             break
         }
+    }
+
+    /// Companions float around the character's bounding box.
+    private func drawCompanion(_ m: Mood, _ t: Double, _ r: NSRect) {
+        guard let companion = pose.companion, m != .sleeping else { return }
+        switch companion {
+        case "balloon":
+            let bx = r.maxX + 20 + CGFloat(sin(t * 1.1)) * 3, by = r.maxY + 22 + CGFloat(sin(t * 1.4)) * 4
+            let string = NSBezierPath()
+            string.move(to: pt(r.maxX - 8, r.minY + r.height * 0.45))
+            string.curve(to: pt(bx, by - 14), controlPoint1: pt(r.maxX + 10, r.minY + r.height * 0.6), controlPoint2: pt(bx - 6, by - 30))
+            string.lineWidth = 1.2; NSColor(white: 0.35, alpha: 1).setStroke(); string.stroke()
+            fillStroke(oval(bx, by, 22, 27), NSColor(calibratedRed: 1, green: 0.3, blue: 0.38, alpha: 1), width: 2)
+            NSColor(white: 1, alpha: 0.55).setFill(); oval(bx - 5, by + 6, 5, 8).fill()
+        case "butterfly":
+            let x = r.midX + CGFloat(cos(t * 0.9)) * r.width * 0.6, y = r.maxY + 10 + CGFloat(sin(t * 1.7)) * 12
+            let flap = 0.35 + 0.65 * CGFloat(abs(sin(t * 12)))
+            for side in [-1.0, 1.0] as [CGFloat] {
+                NSColor(calibratedRed: 0.72, green: 0.45, blue: 1, alpha: 0.95).setFill()
+                oval(x + side * 5 * flap, y + 2, 10 * flap, 11).fill()
+                NSColor(calibratedRed: 1, green: 0.55, blue: 0.8, alpha: 0.95).setFill()
+                oval(x + side * 4 * flap, y - 4, 7 * flap, 7).fill()
+            }
+            NSColor(white: 0.2, alpha: 1).setFill(); NSRect(x: x - 1, y: y - 7, width: 2, height: 12).fill()
+        case "star":
+            let a = t * 1.6
+            let x = r.midX + CGFloat(cos(a)) * (r.width * 0.6 + 12), y = r.minY + r.height * 0.55 + CGFloat(sin(a)) * r.height * 0.35
+            fillStroke(star(pt(x, y), 8), NSColor(calibratedRed: 1, green: 0.85, blue: 0.2, alpha: 1), width: 1.5)
+            NSColor(white: 0.25, alpha: 1).setFill(); oval(x - 2, y + 1, 1.8, 2.2).fill(); oval(x + 2, y + 1, 1.8, 2.2).fill()
+        case "planets":
+            for (i, p) in [(4.0, CGFloat(0.62), NSColor.systemBlue, CGFloat(10)), (6.5, CGFloat(0.8), NSColor.systemOrange, CGFloat(8))].enumerated() {
+                let a = t * (2 * .pi / p.0) + Double(i) * 2
+                let x = r.midX + CGFloat(cos(a)) * r.width * p.1, y = r.minY + r.height * 0.5 + CGFloat(sin(a)) * r.height * 0.22
+                fillStroke(oval(x, y, p.3, p.3), p.2, width: 1.5)
+                if i == 1 {
+                    let ring = oval(x, y, p.3 * 1.9, p.3 * 0.55)
+                    ring.lineWidth = 1.5; NSColor(calibratedRed: 1, green: 0.85, blue: 0.6, alpha: 1).setStroke(); ring.stroke()
+                }
+            }
+        default:
+            break
+        }
+    }
+
+    /// Prestige emblem beside the feet: bronze, silver, gold, then diamond at Prestige Master.
+    private func drawBadge(_ r: NSRect) {
+        let rank = pose.prestige
+        guard rank > 0 else { return }
+        let color: NSColor
+        switch rank {
+        case 1...3: color = NSColor(calibratedRed: 0.8, green: 0.5, blue: 0.25, alpha: 1)
+        case 4...6: color = NSColor(calibratedRed: 0.75, green: 0.78, blue: 0.82, alpha: 1)
+        case 7...9: color = NSColor(calibratedRed: 1, green: 0.78, blue: 0.2, alpha: 1)
+        default: color = NSColor(calibratedRed: 0.55, green: 0.88, blue: 1, alpha: 1)
+        }
+        let c = pt(r.minX - 2, r.minY + 14)
+        let shield = NSBezierPath()
+        shield.move(to: pt(c.x - 9, c.y + 9)); shield.line(to: pt(c.x + 9, c.y + 9)); shield.line(to: pt(c.x + 9, c.y - 1))
+        shield.curve(to: pt(c.x, c.y - 11), controlPoint1: pt(c.x + 9, c.y - 6), controlPoint2: pt(c.x + 4, c.y - 9))
+        shield.curve(to: pt(c.x - 9, c.y - 1), controlPoint1: pt(c.x - 4, c.y - 9), controlPoint2: pt(c.x - 9, c.y - 6))
+        shield.close()
+        shield.lineJoinStyle = .round
+        fillStroke(shield, color, width: 2)
+        text(rank >= Prestige.maxRank ? "★" : "\(rank)", at: pt(c.x, c.y), size: rank >= Prestige.maxRank ? 11 : 10, color: NSColor(calibratedRed: 0.29, green: 0.19, blue: 0.15, alpha: 1))
     }
 
     private func drawEyes(_ style: EyeStyle, t: Double, dx: CGFloat, dy: CGFloat) {

@@ -101,7 +101,29 @@
       }
     }
     if (maxX < minX) return null;
-    return { canvas, bounds: { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 } };
+    // The head: the first row from the top that's wide (raised hands, ears, and stray hairs are
+    // narrow), then the widest solid span across the next ~12% of the character.
+    const longestRun = (y) => {
+      let best = null, start = -1;
+      for (let x = minX; x <= maxX + 1; x++) {
+        const solid = x <= maxX && px[(y * w + x) * 4 + 3] > 100;
+        if (solid && start < 0) start = x;
+        if (!solid && start >= 0) { if (!best || x - 1 - start > best[1] - best[0]) best = [start, x - 1]; start = -1; }
+      }
+      return best;
+    };
+    const widthNeeded = Math.max(3, Math.floor((maxX - minX + 1) * 0.25));
+    let headTop = minY;
+    for (let y = minY; y <= maxY; y++) { const run = longestRun(y); if (run && run[1] - run[0] + 1 >= widthNeeded) { headTop = y; break; } }
+    const headRows = Math.max(2, Math.floor((maxY - minY) * 0.12));
+    let hMin = maxX, hMax = minX;
+    for (let y = headTop; y <= Math.min(maxY, headTop + headRows); y++) { const run = longestRun(y); if (run) { hMin = Math.min(hMin, run[0]); hMax = Math.max(hMax, run[1]); } }
+    if (hMax < hMin) { hMin = minX; hMax = maxX; }
+    return {
+      canvas,
+      bounds: { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 },
+      head: { x: hMin, y: headTop, width: hMax - hMin + 1 },
+    };
   }
 
   /** Ranges where counts exceed `noise`, merging ranges closer than `minGap` and dropping short specks. */
@@ -261,7 +283,10 @@
         });
         pack.animations[mood] = await Promise.all(processed.map(async (p) => {
           const b = sameSize ? u : p.bounds;
-          return { image: await createImageBitmap(p.canvas, b.x, b.y, b.width, b.height), duration: p.duration };
+          return {
+            image: await createImageBitmap(p.canvas, b.x, b.y, b.width, b.height), duration: p.duration,
+            head: { x: (p.head.x + p.head.width / 2 - b.x) / b.width, width: p.head.width / b.width, top: Math.max(0, p.head.y - b.y) / b.height },
+          };
         }));
       }
 
@@ -293,6 +318,7 @@
       const s = this.settings[resolved] || { scale: 1, offset: { x: 0, y: 0 } };
       return {
         image: frame.image,
+        head: frame.head || { x: 0.5, width: 0.5, top: 0 },
         width: frame.image.width * this.pointsPerPixel * s.scale,
         height: frame.image.height * this.pointsPerPixel * s.scale,
         offset: s.offset,

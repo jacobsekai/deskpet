@@ -34,20 +34,41 @@ class Stats {
     this.dirty = false;
   }
 
-  static xpNeeded(level) { return 25 * level * (level - 1); }
-  static levelFor(xp) { let n = 1; while (Stats.xpNeeded(n + 1) <= xp) n++; return n; }
+  /** Each level costs 30 + its number (level 100 ≈ 7,900 XP); Prestige Master levels past 100 cost 300. */
+  static xpNeeded(level) {
+    const n = Math.min(level, 100) - 1;
+    return 30 * n + (n * (n + 1)) / 2 + Math.max(0, level - 100) * 300;
+  }
+  static levelFor(xp, cap = 100) { let n = 1; while (n < cap && Stats.xpNeeded(n + 1) <= xp) n++; return n; }
   static dayKey() {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   }
 
   get xp() { return this.data.xp; }
-  get level() { return Stats.levelFor(this.data.xp); }
+  get prestige() { return this.data.prestige || 0; }
+  /** XP earned since the last prestige. */
+  get levelXP() { return this.data.xp - (this.data.prestigeBase || 0); }
+  get maxLevel() { return this.prestige >= 10 ? 1000 : 100; }
+  get level() { return Stats.levelFor(this.levelXP, this.maxLevel); }
+  get atMax() { return this.level >= this.maxLevel; }
+  get canPrestige() { return this.level >= 100 && this.prestige < 10; }
   get progress() {
+    if (this.atMax) return 1;
     const lo = Stats.xpNeeded(this.level), hi = Stats.xpNeeded(this.level + 1);
-    return (this.data.xp - lo) / Math.max(1, hi - lo);
+    return (this.levelXP - lo) / Math.max(1, hi - lo);
   }
-  get xpToNext() { return Stats.xpNeeded(this.level + 1) - this.data.xp; }
+  get xpToNext() { return this.atMax ? 0 : Stats.xpNeeded(this.level + 1) - this.levelXP; }
+  get rankTitle() { return this.prestige ? `${PRESTIGE.title(this.prestige)} · Lv ${this.level}` : `Lv ${this.level}`; }
+
+  doPrestige() {
+    if (!this.canPrestige) return;
+    this.data.prestige = this.prestige + 1;
+    this.data.prestigeBase = this.data.xp;
+    this.dirty = true;
+    this.saveIfNeeded();
+  }
+
   get today() {
     return { activeMinutes: 0, agentMinutes: 0, tasks: 0, pets: 0, throwsCount: 0, focusSessions: 0, openMinutes: 0, playXP: 0, greeted: false, blocked: 0, ...(this.data.days[Stats.dayKey()] || {}) };
   }
@@ -368,7 +389,7 @@ function closeBlockedTab(word) {
 const zlib = require('zlib');
 const TRANSFER_PREFIX = 'DESKPET-1:';
 const TRANSFER_SETTINGS = ['spritePack', 'themeColor', 'thoughtBubble', 'wander', 'gravity', 'walkOnWindows', 'quietInCalls', 'notifications', 'sounds', 'autoUpdate', 'blocklist', 'strictBlock',
-  'hat', 'trail', 'scarf', 'aura', 'goldenFur', 'blockDuringFocus'];
+  'hat', 'trail', 'auraStyle', 'companion', 'goldenFur', 'showPrestigeBadge', 'blockDuringFocus'];
 
 const transferKey = {
   encode(payload) {
@@ -388,34 +409,52 @@ const transferKey = {
     }
   },
   summary(payload) {
-    const xp = (payload.stats && payload.stats.xp) || 0;
+    const st = payload.stats || {};
+    const xp = st.xp || 0;
+    const prestige = st.prestige || 0;
+    const level = Stats.levelFor(xp - (st.prestigeBase || 0), prestige >= 10 ? 1000 : 100);
+    const rank = prestige ? `${PRESTIGE.title(prestige)} · ` : '';
     const days = Object.keys((payload.stats && payload.stats.days) || {}).length;
-    return `${(payload.config && payload.config.petName) || 'Mochi'} · Lv ${Stats.levelFor(xp)} (${xp} XP) · ${days} day${days === 1 ? '' : 's'} of stats`;
+    return `${(payload.config && payload.config.petName) || 'Mochi'} · ${rank}Lv ${level} (${xp} XP) · ${days} day${days === 1 ? '' : 's'} of stats`;
   },
 };
 
 Stats.prototype.replace = function replace(data) {
   if (fs.existsSync(this.file)) fs.copyFileSync(this.file, `${this.file}.bak`);
-  this.data = { xp: data.xp || 0, days: data.days || {} };
+  this.data = { xp: data.xp || 0, days: data.days || {}, prestige: data.prestige || 0, prestigeBase: data.prestigeBase || 0 };
   this.dirty = true;
   this.saveIfNeeded();
 };
 
-// MARK: - Level rewards (same table as Rewards.swift)
+// MARK: - Level rewards and prestige (same as Rewards.swift)
 
-const REWARDS = [
-  { id: 'bow', level: 2, title: '🎀 Bow', key: 'hat', value: 'bow', catOnly: true },
-  { id: 'sparkleTrail', level: 3, title: '✨ Sparkle trail', key: 'trail', value: 'sparkle' },
-  { id: 'partyHat', level: 5, title: '🎉 Party hat', key: 'hat', value: 'partyHat', catOnly: true },
-  { id: 'scarf', level: 7, title: '🧣 Scarf', key: 'scarf', value: true, catOnly: true },
-  { id: 'crown', level: 10, title: '👑 Crown', key: 'hat', value: 'crown', catOnly: true },
-  { id: 'aura', level: 12, title: '🌟 Golden aura', key: 'aura', value: true },
-  { id: 'rainbowTrail', level: 15, title: '🌈 Rainbow trail', key: 'trail', value: 'rainbow' },
-  { id: 'goldenFur', level: 20, title: '🏆 Golden fur', key: 'goldenFur', value: true, catOnly: true },
+const SLOTS = [
+  { id: 'hat', title: 'Hats', key: 'hat' }, { id: 'trail', title: 'Trails', key: 'trail' },
+  { id: 'aura', title: 'Auras', key: 'auraStyle' }, { id: 'companion', title: 'Companions', key: 'companion' },
+  { id: 'golden', title: 'Finish', key: 'goldenFur' },
 ];
+const REWARDS = [
+  ['bow', 2, '🎀 Bow', 'hat', 'bow'], ['sparkleTrail', 3, '✨ Sparkle trail', 'trail', 'sparkle'],
+  ['partyHat', 5, '🎉 Party hat', 'hat', 'partyHat'], ['balloon', 8, '🎈 Balloon', 'companion', 'balloon'],
+  ['petalTrail', 10, '🌸 Petal trail', 'trail', 'petal'], ['cap', 12, '🧢 Cap', 'hat', 'cap'],
+  ['goldenAura', 15, '🌟 Golden aura', 'aura', 'golden'], ['crown', 20, '👑 Crown', 'hat', 'crown'],
+  ['butterfly', 25, '🦋 Butterfly', 'companion', 'butterfly'], ['fireTrail', 30, '🔥 Fire trail', 'trail', 'fire'],
+  ['purpleAura', 35, '💜 Purple aura', 'aura', 'purple'], ['topHat', 40, '🎩 Top hat', 'hat', 'topHat'],
+  ['starBuddy', 45, '⭐ Star buddy', 'companion', 'star'], ['rainbowTrail', 50, '🌈 Rainbow trail', 'trail', 'rainbow'],
+  ['halo', 60, '😇 Halo', 'hat', 'halo'], ['snowAura', 70, '❄️ Snow aura', 'aura', 'snow'],
+  ['planets', 80, '🪐 Orbiting planets', 'companion', 'planets'], ['diamondCrown', 90, '💎 Diamond crown', 'hat', 'diamondCrown'],
+  ['golden', 100, '🏆 Golden shimmer', 'golden', true],
+].map(([id, level, title, slot, value]) => ({ id, level, title, slot, key: SLOTS.find((s) => s.id === slot).key, value }));
+
+/** Call of Duty style: max level 100, prestige back to 1 (rewards stay), Prestige 10 levels to 1000. */
+const PRESTIGE = {
+  maxRank: 10, levelCap: 100, masterCap: 1000,
+  emblem: (r) => (r >= 10 ? '💎' : r >= 7 ? '🥇' : r >= 4 ? '🥈' : r >= 1 ? '🥉' : ''),
+  title: (r) => (r >= 10 ? '💎 Prestige Master' : r > 0 ? `${PRESTIGE.emblem(r)} Prestige ${r}` : ''),
+};
 
 module.exports = {
-  REWARDS,
+  REWARDS, SLOTS, PRESTIGE,
   Stats, FocusTimer, Updater, importPack, exportPack, kiroHooks, jumpTo, WindowPlatforms, isNewer,
   BLOCK_DEFAULTS, BROWSERS, TITLE_WORDS, parseBlocklist, matchTitle, closeBlockedTab, transferKey, TRANSFER_SETTINGS,
 };

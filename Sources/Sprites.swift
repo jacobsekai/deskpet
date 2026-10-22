@@ -10,6 +10,11 @@ final class SpritePack {
     struct Frame {
         let image: CGImage
         let duration: Double
+        /// Top of the head: center x and width as fractions of the image width (for hats).
+        var headX: CGFloat = 0.5
+        var headWidth: CGFloat = 0.5
+        /// How far down from the top of the image the head starts (fraction of the height).
+        var headTop: CGFloat = 0
     }
 
     struct MoodSettings {
@@ -100,11 +105,11 @@ final class SpritePack {
 
         for (mood, entries) in grouped {
             let moodFPS = settings[mood]?.fps ?? fps
-            var processed: [(CGImage, CGRect, Double)] = []
+            var processed: [(CGImage, CGRect, Double, CGRect)] = []
             for entry in entries.sorted(by: { $0.index < $1.index }) {
                 for f in entry.frames {
                     guard let p = Self.process(f.image, removeBackground: entry.removeBackground, tolerance: tolerance) else { continue }
-                    processed.append((p.image, p.bounds, f.duration ?? 1 / moodFPS))
+                    processed.append((p.image, p.bounds, f.duration ?? 1 / moodFPS, p.head))
                 }
             }
             guard !processed.isEmpty else { continue }
@@ -114,9 +119,12 @@ final class SpritePack {
             // Crop every frame to the union of their content so animations don't jitter.
             let sameSize = Set(processed.map { "\($0.0.width)x\($0.0.height)" }).count == 1
             let union = processed.map(\.1).reduce(processed[0].1) { $0.union($1) }
-            animations[mood] = processed.compactMap { image, bounds, duration in
-                guard let cropped = image.cropping(to: sameSize ? union : bounds) else { return nil }
-                return Frame(image: cropped, duration: duration)
+            animations[mood] = processed.compactMap { image, bounds, duration, head in
+                let crop = sameSize ? union : bounds
+                guard let cropped = image.cropping(to: crop) else { return nil }
+                return Frame(image: cropped, duration: duration,
+                             headX: (head.midX - crop.minX) / crop.width, headWidth: head.width / crop.width,
+                             headTop: max(0, head.minY - crop.minY) / crop.height)
             }
         }
 
@@ -127,17 +135,27 @@ final class SpritePack {
         pointsPerPixel = height / CGFloat(idle.image.height)
     }
 
-    /// The image to show for a mood at time `t`, with its size and offset in points.
-    func frame(for mood: Mood, at t: Double) -> (image: CGImage, size: NSSize, offset: CGPoint) {
-        let resolved = resolve(mood)
+    private func currentFrame(_ resolved: Mood, at t: Double) -> Frame {
         let frames = animations[resolved]!
         let total = frames.reduce(0) { $0 + $1.duration }
         var remaining = fmod(t, max(total, 0.001))
-        var frame = frames[0]
         for f in frames {
-            if remaining < f.duration { frame = f; break }
+            if remaining < f.duration { return f }
             remaining -= f.duration
         }
+        return frames[0]
+    }
+
+    /// Where the head is in the current frame (fractions of the frame width), for placing hats.
+    func head(for mood: Mood, at t: Double) -> (x: CGFloat, width: CGFloat, top: CGFloat) {
+        let f = currentFrame(resolve(mood), at: t)
+        return (f.headX, f.headWidth, f.headTop)
+    }
+
+    /// The image to show for a mood at time `t`, with its size and offset in points.
+    func frame(for mood: Mood, at t: Double) -> (image: CGImage, size: NSSize, offset: CGPoint) {
+        let resolved = resolve(mood)
+        let frame = currentFrame(resolved, at: t)
         let s = settings[resolved] ?? MoodSettings()
         let size = NSSize(width: CGFloat(frame.image.width) * pointsPerPixel * s.scale,
                           height: CGFloat(frame.image.height) * pointsPerPixel * s.scale)
@@ -206,7 +224,7 @@ final class SpritePack {
     }
 
     /// Optionally flood-fills the background (from the image edges) to transparent, and finds the content bounds.
-    static func process(_ image: CGImage, removeBackground: Bool, tolerance: Int) -> (image: CGImage, bounds: CGRect)? {
+    static func process(_ image: CGImage, removeBackground: Bool, tolerance: Int) -> (image: CGImage, bounds: CGRect, head: CGRect)? {
         let w = image.width, h = image.height
         guard let (ctx, px) = rgba(image) else { return nil }
 
@@ -240,7 +258,33 @@ final class SpritePack {
             }
         }
         guard maxX >= minX, let result = ctx.makeImage() else { return nil }
-        return (result, CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1))
+        // The head: the first row from the top that's wide (raised hands, ears, and stray hairs are
+        // narrow), then the widest solid span across the next ~12% of the character.
+        func longestRun(_ y: Int) -> (start: Int, end: Int)? {
+            var best: (Int, Int)?, start = -1
+            for x in minX...(maxX + 1) {
+                let solid = x <= maxX && px[(y * w + x) * 4 + 3] > 100
+                if solid && start < 0 { start = x }
+                if !solid && start >= 0 {
+                    if best == nil || x - 1 - start > best!.1 - best!.0 { best = (start, x - 1) }
+                    start = -1
+                }
+            }
+            return best
+        }
+        let widthNeeded = max(3, Int(Double(maxX - minX + 1) * 0.25))
+        var headTop = minY
+        for y in minY...maxY {
+            if let run = longestRun(y), run.end - run.start + 1 >= widthNeeded { headTop = y; break }
+        }
+        let headRows = max(2, Int(Double(maxY - minY) * 0.12))
+        var hMin = maxX, hMax = minX
+        for y in headTop...min(maxY, headTop + headRows) {
+            if let run = longestRun(y) { hMin = min(hMin, run.start); hMax = max(hMax, run.end) }
+        }
+        if hMax < hMin { (hMin, hMax) = (minX, maxX) }
+        return (result, CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1),
+                CGRect(x: hMin, y: headTop, width: hMax - hMin + 1, height: headRows))
     }
 }
 

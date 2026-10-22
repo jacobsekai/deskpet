@@ -11,8 +11,8 @@ window.deskpetCard.onModel((m) => {
     : '<div class="muted">No AI agents running</div>';
   card.innerHTML = `
     <div class="head"><span class="name">${esc(m.petName)}</span>
-      <span class="lv" style="color:${m.accent};background:${m.accent}2e">Lv ${m.level}</span>
-      <span class="next">${m.xpToNext} XP to Lv ${m.level + 1}</span></div>
+      <span class="lv" style="color:${m.accent};background:${m.accent}2e">${esc(m.rank || `Lv ${m.level}`)}</span>
+      <span class="next">${m.atMax ? 'max level' : `${m.xpToNext} XP to Lv ${m.level + 1}`}</span></div>
     <div class="bar"><div style="width:${Math.round(m.progress * 100)}%;background:${m.accent}"></div></div>
     <div class="muted">${esc(m.today)}</div>
     ${m.nextReward ? `<div class="muted">${esc(m.nextReward)}</div>` : ''}

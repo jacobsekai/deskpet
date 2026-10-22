@@ -46,8 +46,8 @@
       this.scale = pose.scale || 1;
       this.theme = pose.theme ? Theme.fromHex(pose.theme) : new Theme();
       this.lastSpriteRect = pack ? this.lastSpriteRect : null;
-      fur = pose.goldenFur ? GOLD_FUR : BASE_FUR;
-      furLight = pose.goldenFur ? GOLD_FUR_LIGHT : BASE_FUR_LIGHT;
+      fur = pose.golden ? GOLD_FUR : BASE_FUR;
+      furLight = pose.golden ? GOLD_FUR_LIGHT : BASE_FUR_LIGHT;
 
       ctx.save();
       ctx.clearRect(0, 0, width, height);
@@ -169,6 +169,8 @@
 
       this.drawProps(m, t, cx, g, base);
       this.drawEffects(m, t, cx, base);
+      this.drawCompanion(m, t, rect(cx - 42, base, 84, 82));
+      this.drawBadge(rect(cx - 42, base, 84, 82));
       if (!this.pose.bubble) this.drawThoughts(m, t, cx, base);
       return { x: cx, y: base + 92 };
     }
@@ -210,8 +212,19 @@
       if (m === 'dragged') pivot(cx, r.y + r.height, sin(t * 4) * 0.1);
       else if (m === 'walking' && !pack.hasArt('walking')) pivot(r.x + r.width / 2, r.y, sin(t * 9) * 0.07); // waddle
       else if (m === 'flying') pivot(r.x + r.width / 2, r.y + r.height / 2, this.pose.spin);
-      this.image(frame.image, r, pack.facesLeft ? movingRight : movingLeft, pack.pixelated);
+      const flipped = pack.facesLeft ? movingRight : movingLeft;
+      if (this.pose.golden) this.goldenImage(frame.image, r, flipped, pack.pixelated, t);
+      else this.image(frame.image, r, flipped, pack.pixelated);
+      if (this.pose.hat) {
+        // Sit the hat on the top of the head found in this frame, sized to the head.
+        const head = frame.head;
+        const hx = flipped ? r.x + r.width - head.x * r.width : r.x + head.x * r.width;
+        const scale = min(2.6, max(0.45, (head.width * r.width) / 56));
+        this.at(hx, r.y + r.height - head.top * r.height - 3 * scale, { scale }, () => this.drawHatShape(this.pose.hat, t));
+      }
       ctx.restore();
+      this.drawCompanion(m, t, r);
+      this.drawBadge(r);
 
       const k = min(1.8, max(0.7, pack.height / 82));
       if (pack.effects) {
@@ -326,7 +339,7 @@
           this.fillStroke(cup, SYS.pink);
         }
       }
-      this.drawHat(t);
+      if (this.pose.hat) this.at(0, 62, {}, () => this.drawHatShape(this.pose.hat, t));
       if (this.pose.nightcap && !this.pose.hat) {
         const cap = new Path2D();
         cap.moveTo(-26, 58);
@@ -342,74 +355,178 @@
 
     // MARK: Level rewards
 
-    /** Aura and trail, drawn behind the character (works for sprite packs too). */
+    /** Aura and trail, drawn behind the character. */
     drawRewardsBehind(m, t, cx, base, height) {
       const ctx = this.ctx;
-      if (this.pose.aura) {
+      const aura = this.pose.aura;
+      if (aura) {
         const r = Math.max(64, height * 0.75) * (1 + sin(t * 2.2) * 0.06);
-        const cy = base + height * 0.45;
+        const rgb = aura === 'purple' ? '168,107,255' : aura === 'snow' ? '153,217,255' : '255,209,77';
         ctx.save();
-        ctx.translate(cx, cy);
+        ctx.translate(cx, base + height * 0.45);
         ctx.scale(1, 0.85);
         const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
-        glow.addColorStop(0, 'rgba(255,209,77,0.42)');
-        glow.addColorStop(1, 'rgba(255,209,77,0)');
+        glow.addColorStop(0, `rgba(${rgb},0.42)`);
+        glow.addColorStop(1, `rgba(${rgb},0)`);
         ctx.fillStyle = glow;
         ctx.beginPath();
         ctx.arc(0, 0, r, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
+        if (aura === 'snow') {
+          for (let i = 0; i < 10; i++) {
+            const phase = fmod(t * 0.25 + i * 0.137, 1);
+            const x = cx + sin(i * 2.4 + t * 0.8) * r * 0.8;
+            const y = base + height * 1.15 - phase * height * 1.2;
+            this.fill(this.oval(x, y, 4, 4), new Color(1, 1, 1, 0.9 * (1 - phase)));
+            this.strokePath(this.oval(x, y, 4, 4), new Color(0.55, 0.75, 0.95, 0.6 * (1 - phase)), 0.8);
+          }
+        }
       }
-      if (!this.pose.trail || !['walking', 'flying', 'dragged'].includes(m)) return;
+      const trail = this.pose.trail;
+      if (!trail || !['walking', 'flying', 'dragged'].includes(m)) return;
       // Trails stream out behind the direction of travel.
       const dir = this.pose.facingLeft ? 1 : -1;
       for (let i = 1; i <= 6; i++) {
         const x = cx + dir * (28 + i * 13);
         const y = base + height * 0.35 + sin(t * 7 + i) * 6;
         const alpha = 1 - i / 7;
-        if (this.pose.trail === 'rainbow') {
-          const hue = ((t * 0.4 + i / 6) % 1) * 360;
-          ctx.fillStyle = `hsla(${hue}, 85%, 62%, ${alpha})`;
+        if (trail === 'rainbow') {
+          ctx.fillStyle = `hsla(${((t * 0.4 + i / 6) % 1) * 360}, 85%, 62%, ${alpha})`;
           ctx.fill(this.oval(x, y, 11 - i, 11 - i));
+        } else if (trail === 'petal') {
+          this.at(x, y, { rotate: t * 3 + i, pivotY: 0 }, () => this.fill(this.oval(0, 0, 9 - i * 0.6, 5 - i * 0.3), new Color(1, 0.66, 0.78, alpha)));
+        } else if (trail === 'fire') {
+          const flicker = abs(sin(t * 13 + i * 1.7));
+          const d = (12 - i) * (0.8 + flicker * 0.3);
+          this.fill(this.oval(x, y + i * 2, d, d), new Color(1, 0.35 + 0.4 * (1 - i / 6), 0.1, alpha));
         } else {
           this.fill(this.star(x, y, 7 - i * 0.7), new Color(1, 0.85, 0.25, alpha));
         }
       }
     }
 
-    /** Hats and scarf on the built-in cat (local coordinates). */
-    drawHat(t) {
-      if (this.pose.scarf) {
-        const band = new Path2D();
-        band.roundRect(-39, 10, 78, 10, 5);
-        this.fillStroke(band, new Color(0.91, 0.31, 0.36), 2);
-        const tail = new Path2D();
-        tail.roundRect(16, -6, 10, 20, 4);
-        this.fillStroke(tail, new Color(0.85, 0.25, 0.3), 2);
-        for (let x = -28; x <= 28; x += 14) this.fillRect(rect(x, 12, 3, 6), new Color(1, 1, 1, 0.5));
-      }
-      const hat = this.pose.hat;
+    /** Hats in head space: origin at the top-center of the head, sized for the cat (head ≈ 56 wide). */
+    drawHatShape(hat, t) {
       if (hat === 'bow') {
         const pinkBow = new Color(1, 0.31, 0.55);
-        for (const side of [-1, 1]) this.fillStroke(this.poly([[24, 66], [24 + side * 12, 74], [24 + side * 12, 58]]), pinkBow, 2, 'round');
-        this.fillStroke(this.oval(24, 66, 8, 8), pinkBow, 2);
+        for (const side of [-1, 1]) this.fillStroke(this.poly([[22, 4], [22 + side * 12, 12], [22 + side * 12, -4]]), pinkBow, 2, 'round');
+        this.fillStroke(this.oval(22, 4, 8, 8), pinkBow, 2);
       } else if (hat === 'partyHat') {
-        const cone = this.poly([[-14, 60], [14, 60], [2, 96]]);
+        const cone = this.poly([[-14, -2], [14, -2], [2, 34]]);
         this.fill(cone, new Color(0.6, 0.48, 1));
         const ctx = this.ctx;
         ctx.save();
         ctx.clip(cone);
-        for (let y = 64; y <= 92; y += 10) this.fillRect(rect(-16, y, 32, 4), SYS.yellow);
+        for (let y = 2; y <= 30; y += 10) this.fillRect(rect(-16, y, 32, 4), SYS.yellow);
         ctx.restore();
         this.strokePath(cone, outline, 2.5, 'butt', 'round');
-        this.fillStroke(this.oval(2, 97, 9, 9), SYS.pink, 2);
-      } else if (hat === 'crown') {
-        const gold = new Color(1, 0.78, 0.24);
-        this.fillStroke(this.poly([[-18, 60], [18, 60], [20, 80], [10, 70], [0, 84], [-10, 70], [-20, 80]]), gold, 2.5, 'round');
-        this.fillStroke(this.oval(0, 65, 6, 6), SYS.red, 1.5);
-        for (const x of [-20, 0, 20]) this.fillStroke(this.oval(x, x === 0 ? 85 : 81, 5, 5), gold, 1.5);
-        this.fill(this.star(12, 76, 3.5), new Color(1, 1, 1, 0.6 * (0.5 + 0.5 * sin(t * 3))));
+        this.fillStroke(this.oval(2, 35, 9, 9), SYS.pink, 2);
+      } else if (hat === 'cap') {
+        const dome = new Path2D();
+        dome.arc(0, -1, 22, 0, Math.PI, false);
+        dome.closePath();
+        this.fillStroke(dome, new Color(0.24, 0.48, 1));
+        const brim = new Path2D();
+        brim.roundRect(2, -4, 34, 7, 3.5);
+        this.fillStroke(brim, new Color(0.17, 0.38, 0.9));
+        this.fillStroke(this.oval(0, 21, 6, 5), Color.white, 1.5);
+      } else if (hat === 'topHat') {
+        const brim = new Path2D();
+        brim.roundRect(-26, -4, 52, 8, 4);
+        this.fillStroke(brim, new Color(0.16, 0.16, 0.16));
+        const tube = new Path2D();
+        tube.rect(-16, 2, 32, 32);
+        this.fillStroke(tube, new Color(0.16, 0.16, 0.16));
+        this.fillRect(rect(-15, 6, 30, 6), new Color(0.86, 0.2, 0.3));
+        this.fillRect(rect(-12, 14, 4, 18), new Color(1, 1, 1, 0.18));
+      } else if (hat === 'halo') {
+        const ring = this.oval(0, 24 + sin(t * 2) * 2, 42, 12);
+        this.strokePath(ring, new Color(1, 0.85, 0.3, 0.35), 7);
+        this.strokePath(ring, new Color(1, 0.8, 0.2), 3.5);
+      } else if (hat === 'crown' || hat === 'diamondCrown') {
+        const diamond = hat === 'diamondCrown';
+        const body = diamond ? new Color(0.62, 0.9, 1) : new Color(1, 0.78, 0.24);
+        this.fillStroke(this.poly([[-18, -2], [18, -2], [20, 18], [10, 8], [0, 22], [-10, 8], [-20, 18]]), body, 2.5, 'round');
+        this.fillStroke(this.oval(0, 3, 6, 6), diamond ? Color.white : SYS.red, 1.5);
+        for (const x of [-20, 0, 20]) this.fillStroke(this.oval(x, x === 0 ? 23 : 19, 5, 5), diamond ? Color.white : body, 1.5);
+        const shine = 0.5 + 0.5 * sin(t * (diamond ? 5 : 3));
+        this.fill(this.star(12, 14, diamond ? 5 : 3.5), new Color(1, 1, 1, 0.75 * shine));
+        if (diamond) this.fill(this.star(-11, 11, 3 * (1 - shine) + 1), new Color(1, 1, 1, 0.75 * shine));
       }
+    }
+
+    /** Companions float around the character's bounding box. */
+    drawCompanion(m, t, r) {
+      const companion = this.pose.companion;
+      if (!companion || m === 'sleeping') return;
+      const right = r.x + r.width, top = r.y + r.height, midX = r.x + r.width / 2;
+      if (companion === 'balloon') {
+        const bx = right + 20 + sin(t * 1.1) * 3, by = top + 22 + sin(t * 1.4) * 4;
+        const string = new Path2D();
+        string.moveTo(right - 8, r.y + r.height * 0.45);
+        string.bezierCurveTo(right + 10, r.y + r.height * 0.6, bx - 6, by - 30, bx, by - 14);
+        this.strokePath(string, new Color(0.35, 0.35, 0.35), 1.2);
+        this.fillStroke(this.oval(bx, by, 22, 27), new Color(1, 0.3, 0.38), 2);
+        this.fill(this.oval(bx - 5, by + 6, 5, 8), new Color(1, 1, 1, 0.55));
+      } else if (companion === 'butterfly') {
+        const x = midX + cos(t * 0.9) * r.width * 0.6, y = top + 10 + sin(t * 1.7) * 12;
+        const flap = 0.35 + 0.65 * abs(sin(t * 12));
+        for (const side of [-1, 1]) {
+          this.fill(this.oval(x + side * 5 * flap, y + 2, 10 * flap, 11), new Color(0.72, 0.45, 1, 0.95));
+          this.fill(this.oval(x + side * 4 * flap, y - 4, 7 * flap, 7), new Color(1, 0.55, 0.8, 0.95));
+        }
+        this.fillRect(rect(x - 1, y - 7, 2, 12), new Color(0.2, 0.2, 0.2));
+      } else if (companion === 'star') {
+        const a = t * 1.6;
+        const x = midX + cos(a) * (r.width * 0.6 + 12), y = r.y + r.height * 0.55 + sin(a) * r.height * 0.35;
+        this.fillStroke(this.star(x, y, 8), new Color(1, 0.85, 0.2), 1.5);
+        this.fill(this.oval(x - 2, y + 1, 1.8, 2.2), new Color(0.25, 0.25, 0.25));
+        this.fill(this.oval(x + 2, y + 1, 1.8, 2.2), new Color(0.25, 0.25, 0.25));
+      } else if (companion === 'planets') {
+        [[4, 0.62, SYS.blue, 10], [6.5, 0.8, SYS.orange, 8]].forEach(([period, reach, color, d], i) => {
+          const a = t * ((2 * Math.PI) / period) + i * 2;
+          const x = midX + cos(a) * r.width * reach, y = r.y + r.height * 0.5 + sin(a) * r.height * 0.22;
+          this.fillStroke(this.oval(x, y, d, d), color, 1.5);
+          if (i === 1) this.strokePath(this.oval(x, y, d * 1.9, d * 0.55), new Color(1, 0.85, 0.6), 1.5);
+        });
+      }
+    }
+
+    /** Prestige emblem beside the feet: bronze, silver, gold, then diamond at Prestige Master. */
+    drawBadge(r) {
+      const rank = this.pose.prestige || 0;
+      if (!rank) return;
+      const color = rank >= 10 ? new Color(0.55, 0.88, 1) : rank >= 7 ? new Color(1, 0.78, 0.2) : rank >= 4 ? new Color(0.75, 0.78, 0.82) : new Color(0.8, 0.5, 0.25);
+      const x = r.x - 2, y = r.y + 14;
+      const shield = new Path2D();
+      shield.moveTo(x - 9, y + 9); shield.lineTo(x + 9, y + 9); shield.lineTo(x + 9, y - 1);
+      shield.bezierCurveTo(x + 9, y - 6, x + 4, y - 9, x, y - 11);
+      shield.bezierCurveTo(x - 4, y - 9, x - 9, y - 6, x - 9, y - 1);
+      shield.closePath();
+      this.fillStroke(shield, color, 2, 'round');
+      this.text(rank >= 10 ? '★' : String(rank), x, y, rank >= 10 ? 11 : 10, INK);
+    }
+
+    /** Golden shimmer for sprites: tint only the sprite's own pixels, plus a moving shine. */
+    goldenImage(img, r, flip, pixelated, t) {
+      const w = Math.max(1, Math.ceil(r.width * 2)), h = Math.max(1, Math.ceil(r.height * 2));
+      if (!this.goldCanvas) this.goldCanvas = document.createElement('canvas');
+      const c = this.goldCanvas;
+      c.width = w; c.height = h;
+      const g = c.getContext('2d');
+      g.imageSmoothingEnabled = !pixelated;
+      g.drawImage(img, 0, 0, w, h);
+      g.globalCompositeOperation = 'source-atop';
+      g.fillStyle = 'rgba(255,199,51,0.38)';
+      g.fillRect(0, 0, w, h);
+      const sweep = (fmod(t * 0.45, 1.6) - 0.3) * w;
+      g.fillStyle = 'rgba(255,255,255,0.35)';
+      g.beginPath();
+      g.moveTo(sweep, h); g.lineTo(sweep + w * 0.12, h); g.lineTo(sweep + w * 0.32, 0); g.lineTo(sweep + w * 0.2, 0);
+      g.closePath();
+      g.fill();
+      this.image(c, r, flip, pixelated);
     }
 
     drawEyes(style, t, dx, dy) {

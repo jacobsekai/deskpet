@@ -93,9 +93,10 @@
     cases.push({ label: 'resizing 150%', pose: { mood: 'idle', resizing: true, scale: 1.5 } });
     cases.push({ label: 'resizing 60%', pose: { mood: 'idle', resizing: true, scale: 0.6 } });
     cases.push({ label: '+5 XP popup', pose: { mood: 'petted', xpText: '+5 XP', xpAge: 0.3 } });
-    cases.push({ label: 'rewards: crown + scarf + aura', pose: { mood: 'idle', hat: 'crown', scarf: true, aura: true } });
-    cases.push({ label: 'rewards: party hat + rainbow trail', pose: { mood: 'walking', hat: 'partyHat', trail: 'rainbow', facingLeft: false } });
-    cases.push({ label: 'rewards: bow + golden fur', pose: { mood: 'petted', hat: 'bow', goldenFur: true, trail: 'sparkle' } });
+    cases.push({ label: 'top hat + butterfly + P3', pose: { mood: 'idle', hat: 'topHat', companion: 'butterfly', prestige: 3 } });
+    cases.push({ label: 'cap + fire trail + planets', pose: { mood: 'walking', hat: 'cap', trail: 'fire', companion: 'planets' } });
+    cases.push({ label: 'golden + diamond crown + P10', pose: { mood: 'idle', golden: true, hat: 'diamondCrown', aura: 'snow', prestige: 10 } });
+    cases.push({ label: 'needsYou + halo + balloon', pose: { mood: 'needsYou', hat: 'halo', companion: 'balloon', aura: 'purple' } });
     for (const c of cases.slice(1, 8)) { c.pose.caption = `Claude: ${c.label}`; c.pose.captionColor = '#007AFF'; }
 
     const cellW = 300, cellH = 300, cols = 6;
