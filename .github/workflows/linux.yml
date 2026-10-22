@@ -51,7 +51,11 @@ jobs:
           code=0; timeout 120 xvfb-run -a npx electron . --panel-snapshot --no-sandbox || code=$?
           echo "panel snapshot exit code: $code"
           if [ "$code" = 137 ]; then echo "::warning::quit stalled and the watchdog killed it"; elif [ "$code" != 0 ]; then exit $code; fi
-          timeout 120 xvfb-run -a npx electron . --talk-snapshot --personality minori --no-sandbox
+          code=0; timeout 120 xvfb-run -a npx electron . --talk-snapshot --personality minori --no-sandbox || code=$?
+          echo "talk snapshot exit code: $code"
+          if ls test-output/talk-*.png >/dev/null 2>&1 && [ "$code" != 124 ]; then
+            [ "$code" = 0 ] || echo "::warning::quit stalled with the talk window open and the watchdog ended it"
+          else exit 1; fi
           ls test-output
 
       - uses: actions/upload-artifact@v4

@@ -822,7 +822,11 @@ class Pet {
   /** Quit from a menu: the pet counts it as a goodbye. */
   quit() {
     this.companion.event('quit');
-    quitApp();
+    // Tearing down the see-through talk window during quit can stall on some Linux X servers; close it first.
+    if (this.talk && !this.talk.isDestroyed()) {
+      this.talk.destroy();
+      setTimeout(quitApp, 150);
+    } else quitApp();
   }
 
   get talkOpen() { return !!(this.talk && !this.talk.isDestroyed() && this.talk.isVisible()); }
@@ -1894,7 +1898,7 @@ if (process.argv.includes('--snapshot')) {
           await demo('menu', { id: 'cat:feeling' }); await wait(900); await shot('feelings');
           for (const g of ['rps', 'ttt', 'words', 'pong']) { await demo('menu', { id: `game:${g}` }); await wait(1400); await shot(`game-${g}`); }
           console.log('talk screenshots written');
-          quitApp();
+          pet.quit(); // the same path as Quit in the menu
         });
       }, 2500);
     }
