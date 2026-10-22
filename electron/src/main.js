@@ -2,10 +2,11 @@
 //
 // The main process owns all behavior: agent detection, moods, walking, throwing, resizing, and menus.
 // The renderer only draws the pose it's sent and reports where the pet is for hit testing.
-const { app, BrowserWindow, Tray, Menu, nativeImage, screen, powerMonitor, ipcMain, shell, dialog } = require('electron');
+const { app, BrowserWindow, Tray, Menu, nativeImage, screen, powerMonitor, ipcMain, shell, dialog, Notification } = require('electron');
 const fs = require('fs');
 const path = require('path');
-const { AgentMonitor, PRIORITY } = require('./agents');
+const { AgentMonitor, PRIORITY, TranscriptTokens, codexState } = require('./agents');
+const { Stats, FocusTimer, Updater, importPack, exportPack, kiroHooks, jumpTo, WindowPlatforms } = require('./extras');
 const { paths, Settings, loadConfig, saveConfig, hooksLive, readJSON } = require('./settings');
 const hooks = require('./hooks');
 
@@ -86,6 +87,20 @@ class Pet {
     this.pack = null; // { name, height } once the renderer has loaded a sprite pack
     this.packFingerprint = 0;
     this.lastPackCheck = 0;
+
+    this.stats = new Stats();
+    this.focus = new FocusTimer();
+    this.updater = new Updater(app.getVersion());
+    this.tokens = new TranscriptTokens();
+    this.platforms = new WindowPlatforms(screen);
+    this.perch = null; // { id, rect } of the window the pet stands on
+    this.hoverBegan = null;
+    this.hoverLeftAt = null;
+    this.cardSize = { width: 282, height: 160 };
+    this.lastMinute = now();
+    this.lastStatsSave = 0;
+    this.lastKiroCheck = 0;
+    this.updateAnnounced = false;
   }
 
   // MARK: Settings
@@ -101,6 +116,15 @@ class Pet {
   get thoughtBubble() { return this.settings.get('thoughtBubble', 'large'); }
   set thoughtBubble(v) { this.settings.set('thoughtBubble', v); }
   get scaleKey() { return `scale.${this.spritePackName || 'cat'}`; }
+  get notificationsOn() { return this.settings.get('notifications', true); }
+  get soundsOn() { return this.settings.get('sounds', true); }
+  get walkOnWindows() { return this.settings.get('walkOnWindows', true); }
+  get quietInCalls() { return this.settings.get('quietInCalls', true); }
+  get autoUpdate() { return this.settings.get('autoUpdate', true); }
+  get kiroHooksOn() { return this.settings.get('kiroHooks', false); }
+  toggle(key, fallback) { this.settings.set(key, !this.settings.get(key, fallback)); }
+  /** On a call: no sounds and no chatty remarks. */
+  get quiet() { return this.quietInCalls && this.agents.inCall; }
 
   get topSession() {
     return this.sessions.reduce((best, s) => (!best || PRIORITY.indexOf(s.activity) > PRIORITY.indexOf(best.activity) ? s : best), null);
@@ -119,6 +143,17 @@ class Pet {
     this.timer = setInterval(() => this.tick(), 1000 / 30);
     if (this.settings.get('setupComplete', false)) this.say(`hi ${this.config.ownerName}! 👋`, 4);
     else this.openWizard();
+
+    if (isWindows) app.setAppUserModelId('local.deskpet');
+    this.platforms.start();
+    this.createCard();
+    // Keep installed hook scripts current after updates.
+    if (isWindows && (hooks.installed() || this.kiroHooksOn)) {
+      try { fs.writeFileSync(paths.hookScript, fs.readFileSync(path.join(__dirname, 'hook.ps1'))); } catch (_) { /* best effort */ }
+    }
+    if (this.kiroHooksOn) kiroHooks.apply(true);
+    if (this.autoUpdate) setTimeout(() => this.checkForUpdates(false), 20000);
+    setInterval(() => { if (this.autoUpdate) this.checkForUpdates(false); }, 6 * 3600 * 1000);
   }
 
   createWindow() {
@@ -133,7 +168,7 @@ class Pet {
       x, y, width: this.size.width, height: this.size.height,
       transparent: true, frame: false, resizable: false, movable: false, hasShadow: false, skipTaskbar: true,
       alwaysOnTop: true, focusable: false, fullscreenable: false, show: false, backgroundColor: '#00000000',
-      webPreferences: { preload: path.join(__dirname, 'preload.js'), backgroundThrottling: false },
+      webPreferences: { preload: path.join(__dirname, 'preload.js'), backgroundThrottling: false, autoplayPolicy: 'no-user-gesture-required' },
     });
     this.win.setAlwaysOnTop(true, 'floating');
     if (!isWindows) this.win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
@@ -173,6 +208,7 @@ class Pet {
     this.handlePointer(t);
     this.move(dt, t);
     this.updateMousePassThrough();
+    this.updateCard(t);
     if (!this.win.isDestroyed()) this.win.webContents.send('pose', this.pose(t));
   }
 
@@ -193,6 +229,7 @@ class Pet {
       this.wasAsleep = false;
       this.transient = { mood: 'startled', until: t + 1.2 };
       this.say('huh?! oh, hi! 😳', 3);
+      this.playSound('wake');
     }
     const top = this.topSession;
     if (idle > 240 && (!top || top.activity === 'idle')) this.wasAsleep = true;
@@ -200,15 +237,41 @@ class Pet {
     if (idle > 300) this.streakStart = t;
     else if (t - this.streakStart > 50 * 60) {
       this.streakStart = t;
-      this.say('50 minutes straight — stretch break? 🙆', 6);
+      if (!this.quiet && this.focus.phase === 'off') this.say('50 minutes straight — stretch break? 🙆', 6);
     }
 
     const hour = new Date().getHours();
     this.night = hour >= 23 || hour < 6;
-    if (this.night && idle < 5 && t - this.lastNightNag > 3600) {
+    if (this.night && idle < 5 && t - this.lastNightNag > 3600 && !this.quiet) {
       this.lastNightNag = t;
       this.say(`it's late, ${this.config.ownerName}… bedtime soon? 🌙`, 5);
     }
+
+    const finished = this.focus.tick();
+    if (finished === 'focus') {
+      this.transient = { mood: 'done', until: t + 3 };
+      this.say('focus session done! take a break ☕', 5);
+      this.playSound('focus-done');
+      this.notify('Focus session done', `Take a ${Math.max(5, Math.round(this.focus.minutes / 5))} minute break ☕`, 0);
+      this.levelUp(this.stats.record(15, (d) => { d.focusSessions++; }));
+    } else if (finished === 'rest') {
+      this.say("break's over! ready for another round? 💪", 5);
+      this.notify("Break's over", 'Ready for another focus session?', 0);
+    }
+    if (t - this.lastMinute >= 60) {
+      this.lastMinute = t;
+      const busy = this.sessions.some((s) => s.activity !== 'idle' && s.activity !== 'done');
+      this.levelUp(this.stats.record(busy ? 1 : 0, (d) => {
+        if (idle < 60) d.activeMinutes++;
+        if (busy) d.agentMinutes++;
+      }));
+    }
+    if (t - this.lastStatsSave > 30) { this.lastStatsSave = t; this.stats.saveIfNeeded(); }
+    if (this.kiroHooksOn && t - this.lastKiroCheck > 600) {
+      this.lastKiroCheck = t;
+      kiroHooks.apply(true); // tools like `aim` regenerate Kiro agent files
+    }
+    if (this.perch && !this.walkOnWindows) this.dropFromPerch();
 
     this.mood = this.resolveMood(t, idle, sinceKey);
     if (this.mood === 'idle' && this.wander && this.win.isVisible() && t > this.nextWalkAt && !this.velocity && !this.resizing) this.startWalk(t);
@@ -240,12 +303,21 @@ class Pet {
       if (firstPass) continue;
       if (!previous) { this.say(`${s.name} showed up 👀`, 3.5); continue; }
       if (previous.activity === s.activity) continue;
-      if (s.activity === 'done') this.say(`${s.name} is done! ✨`, 4);
-      else if (s.activity === 'needsYou') this.say(`${s.name} needs you! 🙋`, 5);
-      else if (s.activity === 'error') this.say(`uh oh, ${s.name} hit an error 😵`, 4);
-      else if (s.activity === 'idle' && !s.precise && t - (this.busySince.get(s.id) || t) > 15) {
+      const project = s.project || s.name;
+      if (s.activity === 'done') {
+        this.say(`${s.name} is done! ✨`, 4);
+        this.taskFinished(s, project);
+      } else if (s.activity === 'needsYou') {
+        this.say(`${s.name} needs you! 🙋`, 5);
+        this.playSound('needs-you');
+        this.notifyUnlessWatching(s, `${s.name} needs you`, `${project}: ${s.detail}`);
+      } else if (s.activity === 'error') {
+        this.say(`uh oh, ${s.name} hit an error 😵`, 4);
+        this.notifyUnlessWatching(s, `${s.name} hit an error`, project);
+      } else if (s.activity === 'idle' && !s.precise && t - (this.busySince.get(s.id) || t) > 15) {
         this.say(`${s.name} looks done ✨`, 4);
         this.transient = { mood: 'done', until: t + 3 };
+        this.taskFinished(s, project);
       }
     }
     if (!firstPass) for (const [id, old] of this.known) if (!current.has(id)) this.say(`bye, ${old.name}! 👋`, 3);
@@ -265,6 +337,10 @@ class Pet {
       p.caption = `${top.name}: ${top.detail}${others > 0 ? `  +${others}` : ''}`;
       p.captionColor = STATUS_COLORS[top.activity];
       p.subagents = top.subagents;
+    }
+    if (!p.caption && this.focus.phase !== 'off') {
+      p.caption = this.focus.label;
+      p.captionColor = this.focus.phase === 'focus' ? '#FF3B30' : '#A2845E';
     }
     if (this.speech && this.speech.until > t) p.bubble = this.speech.text;
     return p;
@@ -369,12 +445,44 @@ class Pet {
   startWalk(t) {
     this.nextWalkAt = t + random(20, 60);
     const wa = this.display().workArea;
-    const target = random(wa.x - 40, wa.x + wa.width - this.size.width + 40);
-    if (Math.abs(target - this.win.getBounds().x) > 80) this.walkTarget = target;
+    let lo = wa.x - 40, hi = wa.x + wa.width - this.size.width + 40;
+    if (this.perch) {
+      // Stay on the window we're standing on.
+      lo = this.perch.rect.x + 24 - this.size.width / 2;
+      hi = this.perch.rect.x + this.perch.rect.width - 24 - this.size.width / 2;
+      if (hi - lo < 60) return;
+    }
+    const target = random(lo, hi);
+    if (Math.abs(target - this.win.getBounds().x) > 60) this.walkTarget = target;
+  }
+
+  /** Follows the window we're standing on, and falls when it closes, minimizes, or slides away. */
+  followPerch() {
+    if (!this.perch || this.velocity || this.press) return;
+    const w = this.platforms.platforms.find((p) => p.id === this.perch.id);
+    if (!w) return this.dropFromPerch();
+    const dx = w.rect.x - this.perch.rect.x;
+    const bottom = w.rect.y + GROUND;
+    if (dx !== 0 || Math.abs(this.pos.bottom - bottom) > 0.5) {
+      this.pos.x += dx;
+      this.pos.bottom = bottom;
+      if (this.walkTarget !== null) this.walkTarget += dx;
+      this.applyPosition();
+    }
+    this.perch = { id: w.id, rect: w.rect };
+    const center = this.pos.x + this.size.width / 2;
+    if (center < w.rect.x + 4 || center > w.rect.x + w.rect.width - 4) this.dropFromPerch();
+  }
+
+  dropFromPerch() {
+    this.perch = null;
+    this.walkTarget = null;
+    if (this.gravity) this.velocity = { x: 0, y: 0 };
   }
 
   move(dt, t) {
     if (this.velocity) return this.simulateThrow(dt, t);
+    this.followPerch();
     if (this.walkTarget === null) return;
     if ((this.mood !== 'walking' && this.mood !== 'idle') || this.press) { this.walkTarget = null; return; }
     this.walkDirection = this.walkTarget > this.pos.x ? 1 : -1;
@@ -397,9 +505,15 @@ class Pet {
     const w = this.size.width;
     const minX = wa.x - (w / 2 - body.halfWidth);
     const maxX = wa.x + wa.width - (w / 2 + body.halfWidth);
-    const floor = wa.y + wa.height;
+    let floor = wa.y + wa.height;
     const ceiling = wa.y + GROUND + body.height; // smallest allowed window bottom
     const bounciness = 0.72;
+    // Window tops count as floors when walking on windows is on.
+    let landing = null;
+    if (this.gravity && this.walkOnWindows) {
+      landing = this.platforms.landing(this.pos.bottom - GROUND, this.pos.x + w / 2, wa, body.height);
+      if (landing) floor = Math.min(floor, landing.rect.y + GROUND);
+    }
 
     if (this.gravity) v.y -= 2000 * dt;
     const drag = Math.pow(this.gravity ? 0.9 : 0.45, dt);
@@ -421,6 +535,7 @@ class Pet {
       if (v.y < 140) v.y = 0; // too weak to bounce again: slide to a stop
       v.x *= 0.8;
     }
+    if (impact > 300) this.playSound('bounce');
     if (impact > 700) {
       this.bounces++;
       if (t - this.lastBumpRemark > 0.7) {
@@ -435,6 +550,7 @@ class Pet {
     if (!resting) return;
     this.velocity = null;
     this.spin = 0;
+    this.perch = landing && Math.abs(this.pos.bottom - floor) < 1 ? { id: landing.id, rect: landing.rect } : null;
     this.savePosition();
     if (this.bounces >= 3) {
       this.transient = { mood: 'dizzy', until: t + 2.5 };
@@ -470,7 +586,7 @@ class Pet {
     const t = now();
     const top = this.topSession;
     const remarks = REMARKS[category];
-    if (!remarks.length || t - this.lastRemark < 45 || Math.random() > 0.4 || (top && top.activity !== 'idle')) return;
+    if (this.quiet || this.focus.phase !== 'off' || !remarks.length || t - this.lastRemark < 45 || Math.random() > 0.4 || (top && top.activity !== 'idle')) return;
     this.lastRemark = t;
     this.say(pick(remarks), 3);
   }
@@ -479,6 +595,14 @@ class Pet {
     const t = now();
     this.walkTarget = null;
     const top = this.topSession;
+    // When an agent wants attention, a click takes you to it.
+    if (top && ['needsYou', 'done', 'error', 'oops'].includes(top.activity) && top.pid) {
+      this.transient = { mood: 'petted', until: t + 1 };
+      this.jump(top.pid).then((ok) => this.say(ok ? `taking you to ${top.name} 👉` : `go check on ${top.name}! 👉`, 2.5));
+      return;
+    }
+    this.playSound('pet');
+    this.levelUp(this.stats.record(this.stats.today.pets < 20 ? 1 : 0, (d) => { d.pets++; }));
     if (top && top.activity !== 'idle' && top.activity !== 'done') {
       this.transient = { mood: 'petted', until: t + 1 };
       this.say(top.activity === 'needsYou' ? `go check on ${top.name}! 👉` : `shh, ${top.name} is working 🤫`, 2.5);
@@ -490,6 +614,8 @@ class Pet {
 
   dragBegan() {
     this.walkTarget = null;
+    this.perch = null;
+    this.hideCard();
     this.velocity = null;
     this.spin = 0;
     this.bounces = 0;
@@ -507,6 +633,7 @@ class Pet {
     const k = speed > limit ? limit / speed : 1;
     this.velocity = { x: v.x * k, y: v.y * k };
     if (speed > 1200) this.say('yeeeet! 🚀', 1.2);
+    if (speed > 400) this.levelUp(this.stats.record(2, (d) => { d.throwsCount++; }));
   }
 
   // MARK: Size & sprites
@@ -544,15 +671,21 @@ class Pet {
     this.packFingerprint = packFingerprint(name);
     const options = readJSON(path.join(dir, 'pack.json'), {});
     let files = [];
+    let sounds = [];
     try {
       files = fs.readdirSync(dir)
         .filter((f) => /\.(png|gif|webp|jpe?g)$/i.test(f))
         .map((f) => ({ name: f, data: fs.readFileSync(path.join(dir, f)) }));
+      const soundDir = path.join(dir, 'sounds');
+      if (fs.existsSync(soundDir)) {
+        sounds = fs.readdirSync(soundDir).filter((f) => /\.(wav|mp3|ogg|m4a)$/i.test(f))
+          .map((f) => ({ event: path.basename(f, path.extname(f)), data: fs.readFileSync(path.join(soundDir, f)) }));
+      }
     } catch (_) { /* missing folder: the renderer reports "no idle image" */ }
     this.pendingAnnounce = announce;
     this.pack = { name, height: Math.min(220, Math.max(40, options.height || 120)) };
     this.layoutWindow();
-    this.win.webContents.send('pack', { name, options, files });
+    this.win.webContents.send('pack', { name, options, files, sounds });
   }
 
   onPackLoaded(result) {
@@ -569,20 +702,33 @@ class Pet {
 
   buildMenu() {
     const pct = Math.round(this.scale * 100);
+    const today = this.todaySummary();
     const agentItems = this.sessions.length
       ? [...this.sessions].sort((a, b) => PRIORITY.indexOf(b.activity) - PRIORITY.indexOf(a.activity)).map((s) => ({
         label: `${s.activity === 'idle' ? '○' : '●'} ${s.name}${s.project ? ` (${s.project})` : ''} — ${s.detail}${s.precise ? '' : ' · guessed from CPU'}`,
-        enabled: false,
+        enabled: !!s.pid && isWindows,
+        click: () => this.jump(s.pid).then((ok) => { if (!ok) this.say("couldn't find that window 🤔", 2.5); }),
       }))
       : [{ label: 'No AI agents running', enabled: false }];
     const packs = listPacks();
+    const check = (label, key, fallback, after) => ({
+      label, type: 'checkbox', checked: this.settings.get(key, fallback),
+      click: () => { this.toggle(key, fallback); if (after) after(); },
+    });
     const template = [
-      { label: `${this.config.petName} — ${this.mood}`, enabled: false },
+      { label: `${this.config.petName} · Lv ${this.stats.level} — ${this.mood}`, enabled: false },
+      { label: `Today: ${today}`, enabled: false },
+      ...(this.quiet ? [{ label: '🤫 Quiet: a mic or camera is in use', enabled: false }] : []),
       { type: 'separator' },
       ...agentItems,
       { type: 'separator' },
-      { label: 'Wander around', type: 'checkbox', checked: this.wander, click: () => { this.wander = !this.wander; this.walkTarget = null; } },
-      { label: 'Gravity', type: 'checkbox', checked: this.gravity, click: () => { this.gravity = !this.gravity; } },
+      {
+        label: this.focus.phase === 'off' ? 'Focus timer' : this.focus.label,
+        submenu: [
+          ...[15, 25, 50].map((m) => ({ label: `Focus for ${m} minutes`, click: () => { this.focus.start(m); this.say(`focus mode: ${m} minutes. you got this! 🍅`, 3); } })),
+          ...(this.focus.phase !== 'off' ? [{ label: 'Stop timer', click: () => this.focus.stop() }] : []),
+        ],
+      },
       { label: `Bring ${this.config.petName} here`, click: () => this.bringHere() },
       {
         label: `Size (${pct}%)`,
@@ -608,25 +754,220 @@ class Pet {
           { label: 'Built-in cat', type: 'checkbox', checked: !this.spritePackName, click: () => this.chooseSprites('') },
           ...packs.map((p) => ({ label: p, type: 'checkbox', checked: this.spritePackName === p, click: () => this.chooseSprites(p) })),
           { type: 'separator' },
+          { label: 'Import pack…', click: () => this.importPackDialog() },
+          ...(this.spritePackName ? [{ label: `Export ${this.spritePackName}…`, click: () => this.exportPackDialog() }] : []),
           { label: 'Preview poses', click: () => this.previewPoses() },
           { label: 'Reload sprites', click: () => this.loadSprites(true) },
           { label: 'Open sprites folder', click: () => shell.openPath(paths.sprites) },
         ],
       },
+      {
+        label: 'Behavior',
+        submenu: [
+          check('Wander around', 'wander', true, () => { this.walkTarget = null; }),
+          check('Gravity', 'gravity', true),
+          check('Walk on windows', 'walkOnWindows', true),
+          check('Quiet during calls', 'quietInCalls', true),
+          { type: 'separator' },
+          check('Notifications', 'notifications', true),
+          check('Sounds', 'sounds', true),
+        ],
+      },
+      {
+        label: 'Agents',
+        submenu: [
+          ...(isWindows ? [{ label: 'Claude Code hooks', type: 'checkbox', checked: hooks.installed(), click: () => this.toggleHooks(!hooks.installed()) }] : []),
+          ...(isWindows ? [{ label: 'Kiro CLI hooks', type: 'checkbox', checked: this.kiroHooksOn, click: () => this.setKiroHooks(!this.kiroHooksOn) }] : []),
+          { label: 'Codex: automatic (reads its session log)', enabled: false },
+        ],
+      },
+      { type: 'separator' },
       { label: this.win.isVisible() ? `Hide ${this.config.petName}` : `Show ${this.config.petName}`, click: () => this.toggleVisible() },
       { label: 'Setup…', click: () => this.openWizard() },
-      { type: 'separator' },
+      this.updater.available
+        ? { label: `Update to v${this.updater.available.version}…`, click: () => this.installUpdate() }
+        : { label: 'Check for updates…', click: () => this.checkForUpdates(true) },
+      check('Automatic updates', 'autoUpdate', true),
     ];
     if (isWindows) {
-      const installed = hooks.installed();
-      template.push(
-        { label: 'Claude Code hooks', type: 'checkbox', checked: installed, click: () => this.toggleHooks(!installed) },
-        { label: 'Start with Windows', type: 'checkbox', checked: app.getLoginItemSettings().openAtLogin, click: (item) => app.setLoginItemSettings({ openAtLogin: item.checked }) },
-        { type: 'separator' },
-      );
+      template.push({ label: 'Start with Windows', type: 'checkbox', checked: app.getLoginItemSettings().openAtLogin, click: (item) => app.setLoginItemSettings({ openAtLogin: item.checked }) });
     }
-    template.push({ label: 'Quit DeskPet', click: () => app.quit() });
+    template.push({ type: 'separator' }, { label: 'Quit DeskPet', click: () => app.quit() });
     return Menu.buildFromTemplate(template);
+  }
+
+  // MARK: Attention, sounds, stats
+
+  playSound(event) {
+    if (this.soundsOn && !this.quiet && !this.win.isDestroyed()) this.win.webContents.send('sound', event);
+  }
+
+  jump(pid) {
+    this.hideCard();
+    return jumpTo(pid, this.agents.parents);
+  }
+
+  notify(title, body, pid) {
+    if (!this.notificationsOn || !Notification.isSupported()) return;
+    const n = new Notification({ title, body, silent: true, icon: path.join(__dirname, '..', 'assets', 'icon.png') });
+    if (pid) n.on('click', () => this.jump(pid));
+    n.show();
+  }
+
+  /** Notifies unless you're already looking at the app the agent runs in. */
+  notifyUnlessWatching(s, title, body) {
+    const fg = this.agents.foregroundPid;
+    for (let p = s.pid; p > 4 && fg; p = this.agents.parents.get(p) || 0) if (p === fg) return;
+    this.notify(title, body, s.pid);
+  }
+
+  taskFinished(s, project) {
+    this.playSound('done');
+    this.notifyUnlessWatching(s, `${s.name} is done ✨`, project);
+    this.levelUp(this.stats.record(10, (d) => { d.tasks++; }));
+  }
+
+  levelUp(level) {
+    if (!level) return;
+    this.transient = { mood: 'done', until: now() + 3 };
+    this.say(`level up! I'm level ${level} now ✨`, 4);
+    this.playSound('level-up');
+  }
+
+  todaySummary() {
+    const d = this.stats.today;
+    const hm = (m) => (m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`);
+    return `⌨️ ${hm(d.activeMinutes)} you · 🤖 ${hm(d.agentMinutes)} agents · ✅ ${d.tasks} task${d.tasks === 1 ? '' : 's'}`;
+  }
+
+  // MARK: Hover card
+
+  createCard() {
+    this.card = new BrowserWindow({
+      width: this.cardSize.width, height: this.cardSize.height, transparent: true, frame: false, resizable: false,
+      skipTaskbar: true, alwaysOnTop: true, focusable: false, show: false, hasShadow: false, backgroundColor: '#00000000',
+      webPreferences: { preload: path.join(__dirname, 'preload-card.js') },
+    });
+    this.card.setAlwaysOnTop(true, 'floating');
+    this.card.loadFile(path.join(__dirname, 'card', 'card.html'));
+  }
+
+  hideCard() {
+    if (this.card && !this.card.isDestroyed() && this.card.isVisible()) this.card.hide();
+  }
+
+  cardModel(t) {
+    const compact = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`);
+    return {
+      petName: this.config.petName, level: this.stats.level, progress: this.stats.progress, xpToNext: this.stats.xpToNext,
+      today: this.todaySummary(), focus: this.focus.phase === 'off' ? '' : this.focus.label, quiet: this.quiet,
+      accent: this.themeHex || '#FF9500',
+      rows: [...this.sessions].sort((a, b) => PRIORITY.indexOf(b.activity) - PRIORITY.indexOf(a.activity)).map((s) => {
+        const secs = Math.round(t - (this.busySince.get(s.id) || t));
+        const usage = s.isCodex ? (codexState(s.logPath, true) || {}).tokens : this.tokens.usage(s.logPath);
+        return {
+          title: s.name + (s.project ? ` · ${s.project}` : ''), detail: s.detail + (s.precise ? '' : ' (guessed)'),
+          color: STATUS_COLORS[s.activity], elapsed: s.activity === 'idle' ? 'idle' : secs >= 60 ? `${Math.floor(secs / 60)}m` : `${secs}s`,
+          tokens: usage ? `${compact(usage.output)} out · ${compact(usage.context)} context` : '', pid: s.pid || 0,
+        };
+      }),
+    };
+  }
+
+  /** Shows the card after hovering the pet for a moment; keeps it while the mouse is on the pet or the card. */
+  updateCard(t) {
+    if (!this.card || this.card.isDestroyed() || !this.geometry) return;
+    const p = this.localCursor();
+    const r = this.geometry.hitRect;
+    const overPet = p.x >= r.x && p.x <= r.x + r.width && p.y >= r.y && p.y <= r.y + r.height && !this.press && !this.resizing && !this.velocity;
+    const cb = this.card.getBounds();
+    const overCard = this.card.isVisible() && this.cursor.x >= cb.x - 8 && this.cursor.x <= cb.x + cb.width + 8 && this.cursor.y >= cb.y - 8 && this.cursor.y <= cb.y + cb.height + 8;
+    if (overPet || overCard) {
+      this.hoverLeftAt = null;
+      if (this.hoverBegan === null) this.hoverBegan = t;
+      if (!this.card.isVisible() && t - this.hoverBegan > 0.6) {
+        this.card.webContents.send('card', this.cardModel(t));
+        this.positionCard();
+        this.card.showInactive();
+      }
+    } else {
+      this.hoverBegan = null;
+      if (this.card.isVisible()) {
+        if (this.hoverLeftAt === null) this.hoverLeftAt = t;
+        if (t - this.hoverLeftAt > 0.35) this.card.hide();
+      }
+    }
+    if (this.card.isVisible() && Math.floor(t * 4) !== Math.floor((t - 1 / 30) * 4)) this.card.webContents.send('card', this.cardModel(t));
+  }
+
+  positionCard() {
+    const b = this.win.getBounds();
+    const r = this.geometry.hitRect;
+    const pet = { x: b.x + r.x, y: b.y + b.height - (r.y + r.height), width: r.width, height: r.height };
+    const wa = screen.getDisplayNearestPoint({ x: Math.round(pet.x), y: Math.round(pet.y) }).workArea;
+    const { width, height } = this.cardSize;
+    let x = Math.round(pet.x + pet.width / 2 - width / 2);
+    x = Math.min(Math.max(wa.x + 4, x), wa.x + wa.width - width - 4);
+    let y = Math.round(pet.y - height);
+    if (y < wa.y) y = Math.round(pet.y + pet.height);
+    this.card.setBounds({ x, y, width, height });
+  }
+
+  // MARK: Updates
+
+  async checkForUpdates(manual) {
+    const found = await this.updater.check();
+    if (found && (manual || !this.updateAnnounced)) {
+      this.updateAnnounced = true;
+      this.say(`update available: v${this.updater.available.version}! ✨ (tray menu)`, 6);
+    } else if (!found && manual) {
+      this.say(`I'm up to date! (v${app.getVersion()})`, 3);
+    }
+  }
+
+  async installUpdate() {
+    this.say('updating… see you in a sec! 🔄', 4);
+    const result = await this.updater.install(app, shell);
+    if (result !== 'updating') this.say(result, 4);
+  }
+
+  // MARK: Sprite pack files
+
+  async onDropFiles(files) {
+    try {
+      const name = await importPack(files, this.spritePackName);
+      this.chooseSprites(name);
+      this.transient = { mood: 'done', until: now() + 2.5 };
+      this.say(`new look: ${name}! ✨`, 3);
+    } catch (e) {
+      this.say(`hmm: ${e.message}`, 4);
+    }
+  }
+
+  async importPackDialog() {
+    const result = await dialog.showOpenDialog({
+      title: 'Import a sprite pack', properties: ['openFile', 'openDirectory', 'multiSelections'],
+      filters: [{ name: 'Sprite packs and images', extensions: ['zip', 'png', 'gif', 'webp', 'jpg', 'jpeg'] }],
+    });
+    if (!result.canceled && result.filePaths.length) this.onDropFiles(result.filePaths);
+  }
+
+  async exportPackDialog() {
+    const result = await dialog.showSaveDialog({ title: 'Export sprite pack', defaultPath: `${this.spritePackName}.zip`, filters: [{ name: 'Zip', extensions: ['zip'] }] });
+    if (result.canceled || !result.filePath) return;
+    try {
+      await exportPack(this.spritePackName, result.filePath);
+      this.say('packed up! 📦', 2);
+    } catch (e) {
+      this.say(`couldn't export: ${e.message}`, 4);
+    }
+  }
+
+  setKiroHooks(on) {
+    this.settings.set('kiroHooks', on);
+    const changed = kiroHooks.apply(on);
+    this.say(on ? (changed ? `Kiro connected (${changed} agents)! 🔌` : 'no Kiro agents found in ~/.kiro/agents') : 'Kiro hooks removed', 4);
+    return changed;
   }
 
   bringHere() {
@@ -745,6 +1086,8 @@ class Pet {
           gravity: this.gravity,
           startAtLogin: loginSupported && app.getLoginItemSettings().openAtLogin,
           startAtLoginSupported: loginSupported,
+          notifications: this.notificationsOn, sounds: this.soundsOn, walkOnWindows: this.walkOnWindows,
+          quietInCalls: this.quietInCalls, autoUpdate: this.autoUpdate, kiroInstalled: this.kiroHooksOn && kiroHooks.installed(),
           ...this.wizardStatus(),
         };
       case 'status':
@@ -771,6 +1114,10 @@ class Pet {
           case 'startAtLogin':
             app.setLoginItemSettings({ openAtLogin: !!payload.value });
             return { value: app.getLoginItemSettings().openAtLogin };
+          case 'notifications': case 'sounds': case 'walkOnWindows': case 'quietInCalls': case 'autoUpdate':
+            this.settings.set(payload.key, !!payload.value);
+            if (payload.key === 'sounds' && payload.value) this.playSound('pet');
+            break;
         }
         return { value: payload.value };
       case 'hooks':
@@ -783,6 +1130,10 @@ class Pet {
       case 'openSprites':
         shell.openPath(paths.sprites);
         return { ok: true };
+      case 'kiro': {
+        const changed = this.setKiroHooks(!!payload.install);
+        return { ok: !payload.install || changed > 0 || kiroHooks.installed(), changed };
+      }
       case 'finish':
         if (payload.ownerName) this.wizardCall('save', payload);
         this.settings.set('setupComplete', true);
@@ -876,6 +1227,10 @@ if (process.argv.includes('--snapshot')) {
     ipcMain.on('pack-loaded', (_e, result) => pet.onPackLoaded(result));
     ipcMain.on('theme-result', (_e, result) => pet.onThemeResult(result));
     ipcMain.handle('wizard', (_e, action, payload) => pet.wizardCall(action, payload));
+    ipcMain.on('drop-files', (_e, files) => pet.onDropFiles(files));
+    ipcMain.on('drag-hover', () => { pet.transient = { mood: 'startled', until: now() + 1 }; pet.say("ooh, what's that? 👀", 1.5); });
+    ipcMain.on('card-size', (_e, size) => { pet.cardSize = size; if (pet.card.isVisible()) pet.positionCard(); });
+    ipcMain.on('card-jump', (_e, pid) => pet.jump(pid));
     pet.start();
     // `--wizard-snapshot`: screenshot every setup step to test-output/, then quit.
     if (process.argv.includes('--wizard-snapshot')) {
@@ -895,6 +1250,23 @@ if (process.argv.includes('--snapshot')) {
         app.quit();
       });
     }
+    // `--card-snapshot`: render the hover card to test-output/card.png, then quit.
+    if (process.argv.includes('--card-snapshot')) {
+      setTimeout(async () => {
+        const model = pet.cardModel(now());
+        model.focus = '🍅 focus · 18:42';
+        pet.card.webContents.send('card', model);
+        await new Promise((r) => setTimeout(r, 600));
+        pet.card.setBounds({ x: 100, y: 100, ...pet.cardSize });
+        pet.card.showInactive();
+        await new Promise((r) => setTimeout(r, 500));
+        const image = await pet.card.webContents.capturePage();
+        fs.mkdirSync(path.join(__dirname, '..', 'test-output'), { recursive: true });
+        fs.writeFileSync(path.join(__dirname, '..', 'test-output', 'card.png'), image.toPNG());
+        console.log('card written', pet.cardSize);
+        app.quit();
+      }, 5000);
+    }
     // `--self-test`: run normally for a few seconds, print what was detected, then quit.
     if (process.argv.includes('--self-test')) {
       setTimeout(() => {
@@ -911,6 +1283,8 @@ if (process.argv.includes('--snapshot')) {
   app.on('before-quit', () => {
     if (!pet) return;
     pet.agents.stop();
+    pet.platforms.stop();
+    pet.stats.saveIfNeeded();
     pet.settings.flush();
   });
 }

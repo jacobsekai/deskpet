@@ -29,7 +29,7 @@ jobs:
       - name: PowerShell scripts parse
         shell: powershell
         run: |
-          foreach ($f in 'src/hook.ps1', 'src/windows-helper.ps1') {
+          foreach ($f in 'src/hook.ps1', 'src/windows-helper.ps1', 'src/windows-rects.ps1') {
             $errors = $null
             [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f), [ref]$null, [ref]$errors)
             if ($errors) { $errors; exit 1 }
@@ -55,6 +55,26 @@ jobs:
           $sample = Receive-Job $job | ConvertFrom-Json
           "processes: $($sample.p.Count), foreground: $($sample.fg)"
           if ($sample.p.Count -lt 10) { throw "helper returned too few processes" }
+
+      - name: Window helper lists windows
+        shell: powershell
+        run: |
+          $script = (Get-Content src/windows-rects.ps1 -Raw).Replace('__SKIP_PID__', '0')
+          Set-Content -Path rects-test.ps1 -Value $script
+          $file = Resolve-Path rects-test.ps1
+          $job = Start-Job { powershell -NoProfile -ExecutionPolicy Bypass -File $using:file | Select-Object -First 1 }
+          if (-not (Wait-Job $job -Timeout 90)) { throw "window helper produced no output" }
+          $rects = Receive-Job $job | ConvertFrom-Json
+          "windows: $(@($rects).Count)"
+
+      - name: Kiro hook writes session state
+        shell: powershell
+        run: |
+          '{"cwd":"C:\\demo","tool_name":"fs_write"}' |
+            powershell -NoProfile -ExecutionPolicy Bypass -File src/hook.ps1 -Agent kiro -Event preToolUse
+          $f = Get-ChildItem "$env:USERPROFILE\.deskpet\sessions\kiro-*.json" | Select-Object -First 1
+          $state = Get-Content $f.FullName -Raw | ConvertFrom-Json
+          if ($state.event -ne 'PreToolUse' -or $state.tool -ne 'fs_write') { throw "unexpected kiro hook state: $state" }
 
       - name: Package
         run: npx electron-packager . DeskPet --platform=win32 --arch=x64 --out=dist --overwrite --icon=assets/icon.ico --ignore=^/dist --ignore=^/test-output

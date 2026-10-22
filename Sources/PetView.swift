@@ -32,6 +32,9 @@ protocol PetViewDelegate: AnyObject {
     func petResize(to scale: CGFloat)
     func petResizeEnded()
     func petResizeFinished()
+    /// Files dropped on the pet (sprite pack zips, folders, or images).
+    func petReceivedFiles(_ urls: [URL])
+    func petDragHover()
 }
 
 private enum EyeStyle { case open, focused, wide, closed, happy, half, cross }
@@ -127,6 +130,25 @@ final class PetView: NSView {
     }
     /// Size of the sprite relative to the 82pt-tall cat, used to scale effects around it.
     private var spriteScale: CGFloat { sprites.map { min(1.8, max(0.7, $0.height / 82)) } ?? 1 }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        registerForDraggedTypes([.fileURL])
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        delegate?.petDragHover()
+        return .copy
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self]) as? [URL] ?? []
+        guard !urls.isEmpty else { return false }
+        delegate?.petReceivedFiles(urls)
+        return true
+    }
 
     override var isFlipped: Bool { false }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }

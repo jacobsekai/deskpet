@@ -14,7 +14,9 @@
   }
 
   window.deskpet.onPose((p) => { pose = p; });
+  window.deskpet.onSound((event) => window.DeskPetSounds.play(event));
   window.deskpet.onPack(async (source) => {
+    window.DeskPetSounds.setPack(source ? source.sounds : []);
     if (!source) { pack = null; return; }
     try {
       pack = await SpritePack.load(source);
@@ -61,6 +63,13 @@
   canvas.addEventListener('pointerup', (e) => {
     if (e.button !== 0) return;
     window.deskpet.send('release');
+  });
+  // Drop a sprite pack .zip, folder, or images onto the pet.
+  canvas.addEventListener('dragenter', (e) => { e.preventDefault(); window.deskpet.send('drag-hover'); });
+  canvas.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+  canvas.addEventListener('drop', (e) => {
+    e.preventDefault();
+    if (e.dataTransfer.files.length) window.deskpet.dropFiles([...e.dataTransfer.files]);
   });
   canvas.addEventListener('contextmenu', (e) => {
     e.preventDefault();

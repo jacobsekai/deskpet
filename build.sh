@@ -6,12 +6,14 @@ cd "$(dirname "$0")"
 mkdir -p build
 # Universal binary: Apple Silicon and Intel.
 for arch in arm64 x86_64; do
-    swiftc -O -swift-version 5 -target "$arch-apple-macos13.0" -framework AppKit -framework WebKit -framework ServiceManagement \
+    swiftc -O -swift-version 5 -target "$arch-apple-macos13.0" -framework AppKit -framework WebKit -framework ServiceManagement -framework SwiftUI -framework UserNotifications -framework CoreAudio -framework CoreMediaIO \
         -o "build/DeskPet-$arch" Sources/*.swift
 done
 lipo -create -output build/DeskPet build/DeskPet-arm64 build/DeskPet-x86_64
 
 APP=DeskPet.app
+# One version for both apps, from the Electron package.
+VERSION="$(sed -n 's/.*"version": "\(.*\)".*/\1/p' electron/package.json | head -1)"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
 cp build/DeskPet "$APP/Contents/MacOS/DeskPet"
@@ -30,7 +32,7 @@ WEB="$APP/Contents/Resources/web"
 mkdir -p "$WEB/wizard" "$WEB/renderer"
 cp electron/src/wizard/index.html electron/src/wizard/wizard.css electron/src/wizard/wizard.js "$WEB/wizard/"
 cp electron/src/renderer/color.js electron/src/renderer/pet.js electron/src/renderer/sprites.js "$WEB/renderer/"
-cat > "$APP/Contents/Info.plist" <<'PLIST'
+cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -40,7 +42,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundleName</key><string>DeskPet</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>1.0</string>
+    <key>CFBundleShortVersionString</key><string>$VERSION</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>

@@ -1,12 +1,14 @@
 # Claude Code hook for DeskPet on Windows: records the session's latest event in
 # %USERPROFILE%\.deskpet\sessions\<agent>-<session>.json. Must stay silent and always exit 0
 # (stdout from some hooks is fed back to the agent).
-param([string]$Agent = "claude")
+param([string]$Agent = "claude", [string]$Event = "")
 $ErrorActionPreference = 'SilentlyContinue'
 
 $raw = [Console]::In.ReadToEnd()
 try { $payload = $raw | ConvertFrom-Json } catch { exit 0 }
 $hookEvent = [string]$payload.hook_event_name
+# Kiro passes the event on the command line in case its hook input doesn't name it.
+if (-not $hookEvent) { $hookEvent = $Event }
 if (-not $hookEvent) { exit 0 }
 $hookEvent = $hookEvent.Substring(0, 1).ToUpper() + $hookEvent.Substring(1)
 
@@ -51,7 +53,7 @@ $state = [ordered]@{
   subagents = $subagents
   pid = $agentPid
 }
-if ($payload.tool_name) { $state.tool = [string]$payload.tool_name }
+if ($payload.tool_name) { $state.tool = [string]$payload.tool_name } elseif ($payload.toolName) { $state.tool = [string]$payload.toolName }
 if ($payload.cwd) { $state.cwd = [string]$payload.cwd }
 if ($payload.transcript_path) { $state.transcript = [string]$payload.transcript_path }
 

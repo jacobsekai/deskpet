@@ -60,7 +60,28 @@ npm run package:win                # build dist/DeskPet-win32-x64 (no Windows ma
 | Click / drag | purrs with hearts / dangles from the scruff |
 | Throw (flick and release) | flies, spins, and bounces off the screen edges; dizzy after a wild throw. With Gravity off it drifts and ricochets instead of falling |
 
-Right-click Mochi or use the 🐾 menu to see agent status, toggle wandering and gravity, or quit.
+Right-click Mochi or use the 🐾 menu (system tray on Windows) for every option.
+
+### Agents
+- **Claude Code:** exact states through hooks (🐾 → Agents → Claude Code hooks, or the setup wizard).
+- **Codex:** exact states automatically, read from its session log in `~/.codex/sessions`.
+- **Kiro CLI:** exact states through hooks added to `~/.kiro/agents/*.json` (🐾 → Agents → Kiro CLI hooks). Tools like `aim` regenerate those files, so DeskPet re-adds its hooks every 10 minutes while this is on.
+- **Others** (Amazon Q, Gemini, Cursor, …): detected by process and CPU use.
+
+### Getting your attention
+- **Click to jump:** when an agent is done or needs you, clicking the pet brings its terminal, IDE, or T3 Code window forward. Clicking a session in the menu or hover card does the same.
+- **Notifications:** when an agent finishes, needs permission, or errors (skipped if you're already looking at that app).
+- **Hover card:** hover the pet for a moment to see each session's state, how long it's been working, and its tokens (output and current context size).
+
+### Fun
+- **Walk on windows:** with gravity on, the pet lands on window title bars, rides along when you move them, and falls when they close or minimize.
+- **Levels and stats:** XP for finished agent tasks, focus sessions, pets, and throws; today's time-with-you and agent time in the menu and hover card (`~/.deskpet/stats.json`).
+- **Focus timer:** 15/25/50-minute sessions with a break afterwards (🐾 → Focus timer).
+- **Quiet during calls:** no sounds or chatty remarks while any app uses the microphone or camera.
+- **Sounds:** system sounds on macOS, synthesized ones on Windows; a sprite pack can bring its own as `sounds/<event>.(wav|mp3|m4a|aiff|caf|ogg)` with events `pet`, `done`, `needs-you`, `bounce`, `wake`, `level-up`, `focus-done`.
+
+### Updates
+DeskPet checks GitHub Releases every 6 hours (🐾 → Check for updates…) and can update itself in place. On macOS, move the app to Applications first.
 
 **Look:** 🐾 → Thought bubble (Large / Small / Off) and 🐾 → Theme color… (any hex code, e.g. `#FF8FB1`; **Default** restores the built-in colors). The theme tints speech and thought bubbles, captions, the "!" alert, and the resize box. You can also set `themeColor` in `config.json`.
 
@@ -95,6 +116,8 @@ PNG, GIF, WebP, JPEG, and HEIC all work. Any mood you skip falls back to a simil
 Draw every image at the **same resolution and character scale**, with the feet near the bottom.
 Transparent margins are trimmed automatically, and every pose uses idle's pixel size, so a sitting pose stays shorter than a standing one.
 Leave out bubbles, Zzz, "!", and hearts: DeskPet draws those over your sprite (set `"effects": false` to turn them off).
+
+**Sharing packs:** drop a pack `.zip`, a pack folder, or images onto the pet (or 🐾 → Sprites → Import pack…) to install it; 🐾 → Sprites → Export… zips the current pack.
 
 **Spritesheets:** drop a `sheet.png` into the pack folder instead of separate files. By default it's read as a 4×4 grid:
 

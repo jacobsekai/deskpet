@@ -18,7 +18,17 @@ while ($true) {
   $fgPid = [uint32]0
   [void][DeskPet.Win]::GetWindowThreadProcessId([DeskPet.Win]::GetForegroundWindow(), [ref]$fgPid)
   $fg = (Get-Process -Id $fgPid).ProcessName
-  [Console]::Out.WriteLine((@{ p = $list; c = $cmd; fg = $fg } | ConvertTo-Json -Compress -Depth 4))
+  # Microphone/camera in use by any app (for quiet mode): Windows records LastUsedTimeStop = 0 while in use.
+  $inUse = @{}
+  foreach ($cap in 'microphone', 'webcam') {
+    $inUse[$cap] = $false
+    $root = "HKCU:\Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\$cap"
+    foreach ($key in Get-ChildItem $root -Recurse) {
+      $stop = (Get-ItemProperty -Path $key.PSPath -Name LastUsedTimeStop).LastUsedTimeStop
+      if ($stop -ne $null -and $stop -eq 0) { $inUse[$cap] = $true; break }
+    }
+  }
+  [Console]::Out.WriteLine((@{ p = $list; c = $cmd; fg = $fg; fgPid = $fgPid; mic = $inUse.microphone; cam = $inUse.webcam } | ConvertTo-Json -Compress -Depth 4))
   [Console]::Out.Flush()
   Start-Sleep -Milliseconds 2000
 }

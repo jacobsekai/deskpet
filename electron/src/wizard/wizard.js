@@ -35,8 +35,8 @@
   const THEMES = [null, '#FF8FB1', '#FF6B6B', '#FFB347', '#7BD389', '#4FC3F7', '#9C88FF', '#2B2D42'];
   const PROVIDERS = [
     { name: 'Claude', title: 'Claude Code', color: 'linear-gradient(135deg,#e08a6a,#c96442)', glyph: '✳', hooks: true },
-    { name: 'Codex', title: 'Codex', color: 'linear-gradient(135deg,#3a3a3a,#111)', glyph: '◎' },
-    { name: 'Kiro', title: 'Kiro CLI', color: 'linear-gradient(135deg,#9d86ff,#6a4ff0)', glyph: 'K' },
+    { name: 'Codex', title: 'Codex', color: 'linear-gradient(135deg,#3a3a3a,#111)', glyph: '◎', auto: true },
+    { name: 'Kiro', title: 'Kiro CLI', color: 'linear-gradient(135deg,#9d86ff,#6a4ff0)', glyph: 'K', kiro: true },
     { name: 'Amazon Q', title: 'Amazon Q', color: 'linear-gradient(135deg,#7b6cf6,#3d2fb8)', glyph: 'Q' },
     { name: 'Gemini', title: 'Gemini CLI', color: 'linear-gradient(135deg,#4f8cf7,#9b72cb)', glyph: '✦' },
     { name: 'Cursor', title: 'Cursor Agent', color: 'linear-gradient(135deg,#444,#1b1b1b)', glyph: '▲' },
@@ -275,8 +275,24 @@
       chip.appendChild(badge(p, 'badge small'));
       const t = el('div');
       t.appendChild(el('div', 'title', p.title));
-      t.appendChild(el('div', 'status', running ? '<span class="dot-live"></span>Running now' : 'Noticed when it runs'));
+      let status = running ? '<span class="dot-live"></span>Running now' : 'Noticed when it runs';
+      if (p.kiro && !state.kiroInstalled && !running) status = 'Not connected';
+      if (p.auto && !running) status = 'Exact states, automatic';
+      if (p.kiro && state.kiroInstalled && !running) status = 'Connected ✓';
+      t.appendChild(el('div', 'status', status));
       chip.appendChild(t);
+      if (p.kiro && !state.kiroInstalled) {
+        const b = el('button', 'mini', 'Connect');
+        b.title = 'Adds DeskPet hooks to your Kiro CLI agents for exact states';
+        b.addEventListener('click', async () => {
+          b.textContent = '…';
+          const r = await call('kiro', { install: true });
+          if (r && r.ok) state.kiroInstalled = true;
+          else b.textContent = 'No agents';
+          if (r && r.ok) buildProviders();
+        });
+        chip.appendChild(b);
+      }
       grid.appendChild(chip);
     }
     list.appendChild(grid);
@@ -320,9 +336,14 @@
   function buildToggles() {
     const box = $('#toggles');
     const items = [
-      state.startAtLoginSupported && { key: 'startAtLogin', icon: '🚀', title: state.platform === 'windows' ? 'Start with Windows' : 'Open at login', desc: `${names().petName} is there every time you sign in` },
-      { key: 'wander', icon: '🚶', title: 'Wander around', desc: 'Takes little walks along the bottom of the screen' },
-      { key: 'gravity', icon: '🪂', title: 'Gravity', desc: 'Falls back down when dropped. Try throwing!' },
+      state.startAtLoginSupported && { key: 'startAtLogin', icon: '🚀', title: state.platform === 'windows' ? 'Start with Windows' : 'Open at login', desc: 'Starts when you sign in' },
+      { key: 'notifications', icon: '🔔', title: 'Notifications', desc: 'When agents finish or need you' },
+      { key: 'sounds', icon: '🔊', title: 'Sounds', desc: 'Purrs, pops, and chimes' },
+      { key: 'walkOnWindows', icon: '🪟', title: 'Walk on windows', desc: 'Stands on and rides windows' },
+      { key: 'wander', icon: '🚶', title: 'Wander around', desc: 'Takes little walks' },
+      { key: 'gravity', icon: '🪂', title: 'Gravity', desc: 'Falls when dropped' },
+      { key: 'quietInCalls', icon: '🤫', title: 'Quiet during calls', desc: 'Hush when mic/camera is on' },
+      { key: 'autoUpdate', icon: '⬆️', title: 'Automatic updates', desc: 'From GitHub releases' },
     ].filter(Boolean);
     for (const item of items) {
       const row = el('div', `toggle${state[item.key] ? ' on' : ''}`);

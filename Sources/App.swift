@@ -1,5 +1,7 @@
 import AppKit
 import ServiceManagement
+import SwiftUI
+import UniformTypeIdentifiers
 
 struct Config {
     var ownerName: String
@@ -98,6 +100,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     private var spriteFingerprint = Date.distantPast
     private var lastSpriteCheck = 0.0
 
+    private let notifier = Notifier()
+    private let sounds = SoundPlayer()
+    private let stats = Stats()
+    private let focus = FocusTimer()
+    private let updater = Updater()
+    private let transcriptTokens = TranscriptTokens()
+    private let hoverCard = HoverCard()
+    private var hoverBegan: Double?
+    private var hoverLeftAt: Double?
+    private var inCall = false
+    private var lastCallCheck = 0.0
+    private var lastMinute = CACurrentMediaTime()
+    private var lastStatsSave = 0.0
+    private var lastKiroCheck = 0.0
+    private var updateAnnounced = false
+    /// The window the pet is standing on, and where it was last seen.
+    private var perch: (id: Int, rect: NSRect)?
+    private var platforms: [Platform] = []
+    private var lastPlatformScan = 0.0
+
     private var wander: Bool {
         get { defaults.object(forKey: "wander") as? Bool ?? true }
         set { defaults.set(newValue, forKey: "wander") }
@@ -120,6 +142,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         get { defaults.object(forKey: "gravity") as? Bool ?? true }
         set { defaults.set(newValue, forKey: "gravity") }
     }
+    private func flag(_ key: String, _ fallback: Bool) -> Bool { defaults.object(forKey: key) as? Bool ?? fallback }
+    private var notificationsOn: Bool { get { flag("notifications", true) } set { defaults.set(newValue, forKey: "notifications") } }
+    private var soundsOn: Bool { get { flag("sounds", true) } set { defaults.set(newValue, forKey: "sounds"); sounds.enabled = newValue } }
+    private var walkOnWindows: Bool { get { flag("walkOnWindows", true) } set { defaults.set(newValue, forKey: "walkOnWindows") } }
+    private var quietInCalls: Bool { get { flag("quietInCalls", true) } set { defaults.set(newValue, forKey: "quietInCalls") } }
+    private var autoUpdate: Bool { get { flag("autoUpdate", true) } set { defaults.set(newValue, forKey: "autoUpdate") } }
+    private var kiroHooksOn: Bool { get { flag("kiroHooks", false) } set { defaults.set(newValue, forKey: "kiroHooks") } }
+    /// On a call: no sounds and no chatty remarks.
+    private var quiet: Bool { quietInCalls && inCall }
 
     private var topSession: AgentSession? { sessions.max { $0.activity.rawValue < $1.activity.rawValue } }
 
@@ -151,6 +182,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
 
         let timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in self?.tick() }
         RunLoop.main.add(timer, forMode: .common)
+
+        sounds.enabled = soundsOn
+        notifier.onClick = { [weak self] pid in self?.jump(to: pid) }
+        if notificationsOn && defaults.bool(forKey: "setupComplete") { notifier.requestPermission() }
+        hoverCard.model.onSelect = { [weak self] pid in self?.jump(to: pid) }
+        if kiroHooksOn { KiroHooks.apply(true) }
+        // Last time it may have been standing on a window; drop onto whatever is there now.
+        if gravity && panel.frame.minY > petScreen().visibleFrame.minY + 2 { velocity = .zero }
+        if autoUpdate { DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in self?.checkForUpdates(manual: false) } }
+        Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { [weak self] _ in
+            if self?.autoUpdate == true { self?.checkForUpdates(manual: false) }
+        }
     }
 
     private func setupPanel() {
@@ -212,6 +255,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         }
         move(dt: dt, now: now)
         updateMousePassThrough()
+        updateHoverCard(now)
         petView.pose = pose(now)
         petView.needsDisplay = true
     }
@@ -233,6 +277,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             wasAsleep = false
             transient = (.startled, now + 1.2)
             say("huh?! oh, hi! 😳", for: 3)
+            sounds.play(.wake)
         }
         if idle > 240 && topSession.map({ $0.activity == .idle }) ?? true { wasAsleep = true }
 
@@ -240,18 +285,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             streakStart = now
         } else if now - streakStart > 50 * 60 {
             streakStart = now
-            say("50 minutes straight — stretch break? 🙆", for: 6)
+            if !quiet && focus.phase == .off { say("50 minutes straight — stretch break? 🙆", for: 6) }
         }
 
         let hour = Calendar.current.component(.hour, from: Date())
         night = hour >= 23 || hour < 6
-        if night && idle < 5 && now - lastNightNag > 3600 {
+        if night && idle < 5 && now - lastNightNag > 3600 && !quiet {
             lastNightNag = now
             say("it's late, \(config.ownerName)… bedtime soon? 🌙", for: 5)
         }
 
+        if now - lastCallCheck > 2 {
+            lastCallCheck = now
+            inCall = CallDetector.inCall()
+            sounds.muted = quiet
+        }
+        if let finished = focus.tick() {
+            if finished == .focus {
+                transient = (.done, now + 3)
+                say("focus session done! take a break ☕", for: 5)
+                sounds.play(.focusDone)
+                post("Focus session done", "Take a \(max(5, focus.minutes / 5)) minute break ☕", pid: 0)
+                levelUp(stats.record(xp: 15) { $0.focusSessions += 1 })
+            } else {
+                say("break's over! ready for another round? 💪", for: 5)
+                post("Break's over", "Ready for another focus session?", pid: 0)
+            }
+        }
+        if now - lastMinute >= 60 {
+            lastMinute = now
+            let agentsBusy = sessions.contains { $0.activity != .idle && $0.activity != .done }
+            levelUp(stats.record(xp: agentsBusy ? 1 : 0) {
+                if idle < 60 { $0.activeMinutes += 1 }
+                if agentsBusy { $0.agentMinutes += 1 }
+            })
+        }
+        if now - lastStatsSave > 30 {
+            lastStatsSave = now
+            stats.saveIfNeeded()
+        }
+        if kiroHooksOn && now - lastKiroCheck > 600 {
+            lastKiroCheck = now
+            KiroHooks.apply(true) // tools like `aim` regenerate Kiro agent files
+        }
+
         mood = resolveMood(now: now, idle: idle, sinceKey: sinceKey)
         if mood == .idle && wander && !panel.isMiniaturized && now > nextWalkAt && velocity == nil && !petView.resizing { startWalk(now) }
+        if perch != nil && !walkOnWindows { dropFromPerch() }
     }
 
     private func resolveMood(now: Double, idle: Double, sinceKey: Double) -> Mood {
@@ -296,13 +376,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
                 continue
             }
             guard previous.activity != s.activity else { continue }
+            let project = s.project.isEmpty ? s.name : s.project
             switch s.activity {
-            case .done: say("\(s.name) is done! ✨", for: 4)
-            case .needsYou: say("\(s.name) needs you! 🙋", for: 5)
-            case .error: say("uh oh, \(s.name) hit an error 😵", for: 4)
+            case .done:
+                say("\(s.name) is done! ✨", for: 4)
+                taskFinished(s, project: project)
+            case .needsYou:
+                say("\(s.name) needs you! 🙋", for: 5)
+                sounds.play(.needsYou)
+                postUnlessWatching(s, title: "\(s.name) needs you", body: "\(project): \(s.detail)")
+            case .error:
+                say("uh oh, \(s.name) hit an error 😵", for: 4)
+                postUnlessWatching(s, title: "\(s.name) hit an error", body: project)
             case .idle where !s.precise && now - (busySince[s.id] ?? now) > 15:
                 say("\(s.name) looks done ✨", for: 4)
                 transient = (.done, now + 3)
+                taskFinished(s, project: project)
             default: break
             }
         }
@@ -326,6 +415,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             p.caption = "\(top.name): \(top.detail)" + (others > 0 ? "  +\(others)" : "")
             p.captionColor = Self.color(for: top.activity)
             p.subagents = top.subagents
+        }
+        if p.caption == nil && focus.phase != .off {
+            p.caption = focus.label
+            p.captionColor = focus.phase == .focus ? .systemRed : .systemBrown
         }
         if let s = speech, s.until > now { p.bubble = s.text }
         return p
@@ -379,6 +472,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             }
         }
         petView.scale = CGFloat(defaults.object(forKey: scaleKey) as? Double ?? 1)
+        sounds.packDirectory = name.isEmpty ? nil : SpritePack.root.appendingPathComponent(name)
         layoutWindow()
     }
 
@@ -401,16 +495,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     private func startWalk(_ now: Double) {
         nextWalkAt = now + Double.random(in: 20...60)
         guard let vf = (panel.screen ?? NSScreen.main)?.visibleFrame else { return }
-        let target = CGFloat.random(in: (vf.minX - 40)...(vf.maxX - size.width + 40))
-        if abs(target - panel.frame.minX) > 80 { walkTarget = target }
+        var range = (vf.minX - 40)...(vf.maxX - size.width + 40)
+        if let perch {
+            // Stay on the window we're standing on.
+            let lo = perch.rect.minX + 24 - size.width / 2, hi = perch.rect.maxX - 24 - size.width / 2
+            guard hi - lo > 60 else { return }
+            range = lo...hi
+        }
+        let target = CGFloat.random(in: range)
+        if abs(target - panel.frame.minX) > 60 { walkTarget = target }
+    }
+
+    // MARK: - Walking on windows
+
+    private func refreshPlatforms(_ now: Double) {
+        guard walkOnWindows, gravity, now - lastPlatformScan > 0.1 else { return }
+        lastPlatformScan = now
+        platforms = Platforms.current()
+    }
+
+    /// Follows the window we're standing on, and falls when it closes, minimizes, or slides away.
+    private func followPerch(_ now: Double) {
+        guard let current = perch, velocity == nil, !petView.dragging else { return }
+        refreshPlatforms(now)
+        guard let window = platforms.first(where: { $0.id == current.id }) else { return dropFromPerch() }
+        var o = panel.frame.origin
+        let dx = window.rect.minX - current.rect.minX
+        let feet = window.rect.maxY
+        if dx != 0 || abs(o.y + PetView.ground - feet) > 0.5 {
+            o.x += dx
+            o.y = feet - PetView.ground
+            if let target = walkTarget { walkTarget = target + dx }
+            panel.setFrameOrigin(o)
+        }
+        perch = (window.id, window.rect)
+        let center = o.x + size.width / 2
+        if center < window.rect.minX + 4 || center > window.rect.maxX - 4 || feet + petView.bodyExtent.height > petScreen().visibleFrame.maxY {
+            dropFromPerch()
+        }
+    }
+
+    private func dropFromPerch() {
+        perch = nil
+        walkTarget = nil
+        if gravity { velocity = .zero }
     }
 
     private func move(dt: Double, now: Double) {
-        var origin = panel.frame.origin
         if let v = velocity {
             simulateThrow(v, dt: CGFloat(dt), now: now)
             return
         }
+        followPerch(now)
+        var origin = panel.frame.origin
         guard let target = walkTarget else { return }
         guard mood == .walking || mood == .idle, !petView.dragging else {
             walkTarget = nil
@@ -436,9 +573,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         let body = petView.bodyExtent
         let minX = vf.minX - (size.width / 2 - body.halfWidth)
         let maxX = vf.maxX - (size.width / 2 + body.halfWidth)
-        let floorY = vf.minY
+        var floorY = vf.minY
         let ceilingY = vf.maxY - (PetView.ground + body.height)
         let bounciness: CGFloat = 0.72
+        // Window tops count as floors when walking on windows is on.
+        var landing: Platform?
+        if gravity && walkOnWindows {
+            refreshPlatforms(now)
+            landing = Platforms.landing(below: o.y + PetView.ground, x: o.x + size.width / 2, in: platforms, screen: vf, headroom: body.height)
+            if let landing { floorY = max(floorY, landing.rect.maxY - PetView.ground) }
+        }
 
         if gravity { v.dy -= 2000 * dt }
         let drag = pow(gravity ? 0.9 : 0.45, dt)
@@ -461,6 +605,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             v.dx *= 0.8
         }
 
+        if impact > 300 { sounds.play(.bounce) }
         if impact > 700 {
             bounces += 1
             if now - lastBumpRemark > 0.7 {
@@ -478,6 +623,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         }
         velocity = nil
         spin = 0
+        perch = (landing != nil && abs(o.y - floorY) < 1) ? (landing!.id, landing!.rect) : nil
         saveOrigin(o)
         if bounces >= 3 {
             transient = (.dizzy, now + 2.5)
@@ -510,7 +656,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         let category = AppCategory(app)
         accessory = Self.accessory(for: category)
         let now = CACurrentMediaTime()
-        guard let remark = category.remarks.randomElement(), now - lastRemark > 45, Double.random(in: 0...1) < 0.4,
+        guard !quiet, focus.phase == .off, let remark = category.remarks.randomElement(), now - lastRemark > 45, Double.random(in: 0...1) < 0.4,
               topSession.map({ $0.activity == .idle }) ?? true else { return }
         lastRemark = now
         say(remark, for: 3)
@@ -527,6 +673,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     func petTapped() {
         let now = CACurrentMediaTime()
         walkTarget = nil
+        // When an agent wants attention, a click takes you to it.
+        if let top = topSession, [.needsYou, .done, .error, .oops].contains(top.activity), top.pid > 0 {
+            transient = (.petted, now + 1)
+            say(jump(to: top.pid) ? "taking you to \(top.name) 👉" : "go check on \(top.name)! 👉", for: 2.5)
+            return
+        }
+        sounds.play(.pet)
+        levelUp(stats.record(xp: stats.today.pets < 20 ? 1 : 0) { $0.pets += 1 })
         if let top = topSession, top.activity != .idle, top.activity != .done {
             transient = (.petted, now + 1)
             say(top.activity == .needsYou ? "go check on \(top.name)! 👉" : "shh, \(top.name) is working 🤫", for: 2.5)
@@ -538,6 +692,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
 
     func petDragBegan() {
         walkTarget = nil
+        perch = nil
+        hoverCard.hide()
         velocity = nil
         spin = 0
         bounces = 0
@@ -559,6 +715,208 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         let scale = speed > limit ? limit / speed : 1
         velocity = CGVector(dx: v.dx * scale, dy: v.dy * scale)
         if speed > 1200 { say("yeeeet! 🚀", for: 1.2) }
+        if speed > 400 { levelUp(stats.record(xp: 2) { $0.throwsCount += 1 }) }
+    }
+
+    // MARK: - Attention, stats, and the hover card
+
+    @discardableResult
+    private func jump(to pid: pid_t) -> Bool {
+        hoverCard.hide()
+        return SessionJumper.jump(to: pid)
+    }
+
+    private func post(_ title: String, _ body: String, pid: pid_t) {
+        guard notificationsOn else { return }
+        notifier.post(title: title, body: body, pid: pid)
+    }
+
+    /// Notifies unless you're already looking at the app the agent runs in.
+    private func postUnlessWatching(_ s: AgentSession, title: String, body: String) {
+        if s.pid > 0, let host = SessionJumper.hostApp(of: s.pid), host == NSWorkspace.shared.frontmostApplication { return }
+        post(title, body, pid: s.pid)
+    }
+
+    private func taskFinished(_ s: AgentSession, project: String) {
+        sounds.play(.done)
+        postUnlessWatching(s, title: "\(s.name) is done ✨", body: project)
+        levelUp(stats.record(xp: 10) { $0.tasks += 1 })
+    }
+
+    private func levelUp(_ newLevel: Int?) {
+        guard let newLevel else { return }
+        transient = (.done, CACurrentMediaTime() + 3)
+        say("level up! I'm level \(newLevel) now ✨", for: 4)
+        sounds.play(.levelUp)
+    }
+
+    private func todaySummary() -> String {
+        let d = stats.today
+        func hm(_ minutes: Int) -> String { minutes >= 60 ? "\(minutes / 60)h \(minutes % 60)m" : "\(minutes)m" }
+        return "⌨️ \(hm(d.activeMinutes)) you · 🤖 \(hm(d.agentMinutes)) agents · ✅ \(d.tasks) task\(d.tasks == 1 ? "" : "s")"
+    }
+
+    /// Shows the card after hovering the pet for a moment; keeps it while the mouse is on the pet or the card.
+    private func updateHoverCard(_ now: Double) {
+        let m = NSEvent.mouseLocation
+        let local = NSPoint(x: m.x - panel.frame.minX, y: m.y - panel.frame.minY)
+        let overPet = petView.hitRect.contains(local) && !petView.dragging && !petView.resizing && velocity == nil
+        let overCard = hoverCard.isVisible && hoverCard.frame.insetBy(dx: -8, dy: -8).contains(m)
+        if overPet || overCard {
+            hoverLeftAt = nil
+            if hoverBegan == nil { hoverBegan = now }
+            if !hoverCard.isVisible, now - (hoverBegan ?? now) > 0.6 {
+                refreshHoverModel(now)
+                let pet = petView.hitRect.offsetBy(dx: panel.frame.minX, dy: panel.frame.minY)
+                hoverCard.show(near: pet)
+            }
+        } else {
+            hoverBegan = nil
+            if hoverCard.isVisible {
+                if hoverLeftAt == nil { hoverLeftAt = now }
+                if now - (hoverLeftAt ?? now) > 0.35 { hoverCard.hide() }
+            }
+        }
+        if hoverCard.isVisible && Int(now * 4) != Int((now - 1.0 / 30) * 4) {
+            refreshHoverModel(now)
+            hoverCard.refit()
+        }
+    }
+
+    private func refreshHoverModel(_ now: Double) {
+        let model = hoverCard.model
+        model.petName = config.petName
+        model.level = stats.level
+        model.progress = stats.progress
+        model.xpToNext = stats.xpToNext
+        model.today = todaySummary()
+        model.focus = focus.phase == .off ? "" : focus.label
+        model.quiet = quiet
+        model.accent = Color(nsColor: petView.theme.accent ?? .systemOrange)
+        model.rows = sessions.sorted { $0.activity.rawValue > $1.activity.rawValue }.map { s in
+            let elapsed: String
+            if s.activity == .idle { elapsed = "idle" } else {
+                let secs = Int(now - (busySince[s.id] ?? now))
+                elapsed = secs >= 60 ? "\(secs / 60)m" : "\(secs)s"
+            }
+            let usage = s.isCodex ? CodexLog.state(path: s.logPath, procBusy: true)?.tokens : transcriptTokens.usage(s.logPath)
+            let tokens = usage.map { "\(Self.compact($0.output)) out · \(Self.compact($0.context)) context" } ?? ""
+            return HoverModel.Row(id: s.id, title: s.name + (s.project.isEmpty ? "" : " · \(s.project)"),
+                                  detail: s.detail + (s.precise ? "" : " (guessed)"), color: Color(nsColor: Self.color(for: s.activity)),
+                                  elapsed: elapsed, tokens: tokens, pid: s.pid)
+        }
+    }
+
+    private static func compact(_ n: Int) -> String {
+        n >= 1_000_000 ? String(format: "%.1fM", Double(n) / 1e6) : n >= 1000 ? String(format: "%.1fk", Double(n) / 1000) : "\(n)"
+    }
+
+    // MARK: - Updates
+
+    private func checkForUpdates(manual: Bool) {
+        updater.check { [weak self] found in
+            guard let self else { return }
+            if found, let update = self.updater.available {
+                if manual || !self.updateAnnounced {
+                    self.updateAnnounced = true
+                    self.say("update available: v\(update.version)! ✨ (🐾 menu)", for: 6)
+                }
+            } else if manual {
+                self.say("I'm up to date! (v\(Updater.currentVersion))", for: 3)
+            }
+        }
+    }
+
+    @objc private func manualUpdateCheck() { checkForUpdates(manual: true) }
+    @objc private func toggleAutoUpdate() { autoUpdate.toggle() }
+
+    @objc private func installUpdate() {
+        say("updating… see you in a sec! 🔄", for: 4)
+        updater.install { [weak self] message in self?.say(message, for: 5) }
+    }
+
+    // MARK: - Drops and pack files
+
+    func petDragHover() {
+        transient = (.startled, CACurrentMediaTime() + 1)
+        say("ooh, what's that? 👀", for: 1.5)
+    }
+
+    func petReceivedFiles(_ urls: [URL]) {
+        do {
+            let name = try PackArchive.importItems(urls, currentPack: spritePackName)
+            spritePackName = name
+            loadSprites(announce: false)
+            transient = (.done, CACurrentMediaTime() + 2.5)
+            say("new look: \(name)! ✨", for: 3)
+        } catch {
+            say("hmm: \(error.localizedDescription)", for: 4)
+        }
+    }
+
+    @objc private func importPack() {
+        let open = NSOpenPanel()
+        open.allowsMultipleSelection = true
+        open.canChooseDirectories = true
+        open.allowedContentTypes = [.zip, .image, .folder]
+        open.message = "Choose a sprite pack .zip, a pack folder, or images"
+        NSApp.activate(ignoringOtherApps: true)
+        if open.runModal() == .OK { petReceivedFiles(open.urls) }
+    }
+
+    @objc private func exportPack() {
+        let save = NSSavePanel()
+        save.nameFieldStringValue = "\(spritePackName).zip"
+        save.allowedContentTypes = [.zip]
+        NSApp.activate(ignoringOtherApps: true)
+        guard save.runModal() == .OK, let url = save.url else { return }
+        do {
+            try PackArchive.export(pack: spritePackName, to: url)
+            say("packed up! 📦", for: 2)
+        } catch {
+            say("couldn't export: \(error.localizedDescription)", for: 4)
+        }
+    }
+
+    // MARK: - Menu actions for new options
+
+    @objc private func jumpToSession(_ sender: NSMenuItem) {
+        if !jump(to: pid_t(sender.tag)) { say("couldn't find that window 🤔", for: 2.5) }
+    }
+
+    @objc private func startFocus(_ sender: NSMenuItem) {
+        focus.start(minutes: sender.tag)
+        say("focus mode: \(sender.tag) minutes. you got this! 🍅", for: 3)
+    }
+
+    @objc private func stopFocus() { focus.stop() }
+    @objc private func toggleWalkOnWindows() { walkOnWindows.toggle() }
+    @objc private func toggleQuietInCalls() { quietInCalls.toggle() }
+    @objc private func toggleSounds() { soundsOn.toggle() }
+
+    @objc private func toggleNotifications() {
+        notificationsOn.toggle()
+        if notificationsOn { notifier.requestPermission() }
+    }
+
+    @objc private func toggleClaudeHooks() {
+        do {
+            let install = !HookInstaller.installed()
+            try HookInstaller.setInstalled(install)
+            say(install ? "Claude Code connected! 🔌" : "Claude Code hooks removed", for: 3)
+        } catch {
+            say("couldn't update Claude settings: \(error.localizedDescription)", for: 5)
+        }
+    }
+
+    @objc private func toggleKiroHooks() {
+        kiroHooksOn.toggle()
+        let changed = KiroHooks.apply(kiroHooksOn)
+        if kiroHooksOn {
+            say(changed > 0 ? "Kiro connected (\(changed) agents)! 🔌" : "no Kiro agents found in ~/.kiro/agents", for: 4)
+        } else {
+            say("Kiro hooks removed", for: 3)
+        }
     }
 
     // MARK: - Menu
@@ -573,7 +931,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
 
     private func fill(_ menu: NSMenu) {
         menu.removeAllItems()
-        menu.addItem(disabled("\(config.petName) — \(String(describing: mood))"))
+        menu.addItem(disabled("\(config.petName) · Lv \(stats.level) — \(String(describing: mood))"))
+        menu.addItem(disabled("Today: \(todaySummary())"))
+        if quiet { menu.addItem(disabled("🤫 Quiet: a mic or camera is in use")) }
         menu.addItem(.separator())
         if sessions.isEmpty {
             menu.addItem(disabled("No AI agents running"))
@@ -581,14 +941,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             for s in sessions.sorted(by: { $0.activity.rawValue > $1.activity.rawValue }) {
                 let project = s.project.isEmpty ? "" : " (\(s.project))"
                 let source = s.precise ? "" : " · guessed from CPU"
-                menu.addItem(disabled("\(s.activity == .idle ? "○" : "●") \(s.name)\(project) — \(s.detail)\(source)"))
+                let i = item("\(s.activity == .idle ? "○" : "●") \(s.name)\(project) — \(s.detail)\(source)", #selector(jumpToSession(_:)))
+                i.tag = Int(s.pid)
+                i.isEnabled = s.pid > 0
+                i.toolTip = "Jump to this session"
+                menu.addItem(i)
             }
         }
         menu.addItem(.separator())
-        menu.addItem(item("Wander around", #selector(toggleWander), checked: wander))
-        menu.addItem(item("Gravity", #selector(toggleGravity), checked: gravity))
+
+        let focusMenu = NSMenu()
+        for minutes in [15, 25, 50] {
+            let i = item("Focus for \(minutes) minutes", #selector(startFocus(_:)))
+            i.tag = minutes
+            focusMenu.addItem(i)
+        }
+        if focus.phase != .off { focusMenu.addItem(item("Stop timer", #selector(stopFocus))) }
+        menu.addItem(submenu(focus.phase == .off ? "Focus timer" : focus.label, focusMenu))
         menu.addItem(item("Bring \(config.petName) here", #selector(bringHere)))
-        let sizeItem = NSMenuItem(title: "Size (\(Int((petView.scale * 100).rounded()))%)", action: nil, keyEquivalent: "")
+
         let sizeMenu = NSMenu()
         sizeMenu.addItem(item(petView.resizing ? "Finish resizing" : "Resize…", #selector(toggleResizing)))
         sizeMenu.addItem(.separator())
@@ -597,20 +968,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             i.tag = percent
             sizeMenu.addItem(i)
         }
-        sizeItem.submenu = sizeMenu
-        menu.addItem(sizeItem)
-        let bubbleItem = NSMenuItem(title: "Thought bubble", action: nil, keyEquivalent: "")
+        menu.addItem(submenu("Size (\(Int((petView.scale * 100).rounded()))%)", sizeMenu))
+
         let bubbleMenu = NSMenu()
         for (title, size) in [("Large", ThoughtBubbleSize.large), ("Small", .small), ("Off", .off)] {
             let i = item(title, #selector(chooseThoughtBubble(_:)), checked: thoughtBubble == size)
             i.representedObject = size.rawValue
             bubbleMenu.addItem(i)
         }
-        bubbleItem.submenu = bubbleMenu
-        menu.addItem(bubbleItem)
+        menu.addItem(submenu("Thought bubble", bubbleMenu))
         let themeTitle = petView.theme.accent.map { "Theme color (\($0.hexString))…" } ?? "Theme color…"
         menu.addItem(item(themeTitle, #selector(chooseTheme)))
-        let spritesItem = NSMenuItem(title: "Sprites", action: nil, keyEquivalent: "")
+
         let spritesMenu = NSMenu()
         let builtIn = item("Built-in cat", #selector(chooseSprites(_:)), checked: spritePackName.isEmpty)
         builtIn.representedObject = ""
@@ -621,15 +990,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             spritesMenu.addItem(i)
         }
         spritesMenu.addItem(.separator())
+        spritesMenu.addItem(item("Import pack…", #selector(importPack)))
+        if !spritePackName.isEmpty { spritesMenu.addItem(item("Export \(spritePackName)…", #selector(exportPack))) }
         spritesMenu.addItem(item("Preview poses", #selector(previewPoses)))
         spritesMenu.addItem(item("Reload sprites", #selector(reloadSprites)))
         spritesMenu.addItem(item("Open sprites folder", #selector(openSpritesFolder)))
-        spritesItem.submenu = spritesMenu
-        menu.addItem(spritesItem)
+        menu.addItem(submenu("Sprites", spritesMenu))
+
+        let behaviorMenu = NSMenu()
+        behaviorMenu.addItem(item("Wander around", #selector(toggleWander), checked: wander))
+        behaviorMenu.addItem(item("Gravity", #selector(toggleGravity), checked: gravity))
+        behaviorMenu.addItem(item("Walk on windows", #selector(toggleWalkOnWindows), checked: walkOnWindows))
+        behaviorMenu.addItem(item("Quiet during calls", #selector(toggleQuietInCalls), checked: quietInCalls))
+        behaviorMenu.addItem(.separator())
+        behaviorMenu.addItem(item("Notifications", #selector(toggleNotifications), checked: notificationsOn))
+        behaviorMenu.addItem(item("Sounds", #selector(toggleSounds), checked: soundsOn))
+        menu.addItem(submenu("Behavior", behaviorMenu))
+
+        let agentsMenu = NSMenu()
+        agentsMenu.addItem(item("Claude Code hooks", #selector(toggleClaudeHooks), checked: HookInstaller.installed()))
+        agentsMenu.addItem(item("Kiro CLI hooks", #selector(toggleKiroHooks), checked: kiroHooksOn))
+        agentsMenu.addItem(disabled("Codex: automatic (reads its session log)"))
+        menu.addItem(submenu("Agents", agentsMenu))
+
+        menu.addItem(.separator())
         menu.addItem(item(panel.isVisible ? "Hide \(config.petName)" : "Show \(config.petName)", #selector(toggleVisible)))
         menu.addItem(item("Setup…", #selector(openWizard)))
+        if let update = updater.available {
+            menu.addItem(item("Update to v\(update.version)…", #selector(installUpdate)))
+        } else {
+            menu.addItem(item("Check for updates…", #selector(manualUpdateCheck)))
+        }
+        menu.addItem(item("Automatic updates", #selector(toggleAutoUpdate), checked: autoUpdate))
         menu.addItem(.separator())
         menu.addItem(item("Quit DeskPet", #selector(quit), key: "q"))
+    }
+
+    private func submenu(_ title: String, _ menu: NSMenu) -> NSMenuItem {
+        let i = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        i.submenu = menu
+        return i
     }
 
     private func disabled(_ title: String) -> NSMenuItem {
@@ -720,6 +1120,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
                 "themeColor": themeHex, "thoughtBubble": thoughtBubble.rawValue,
                 "wander": wander, "gravity": gravity,
                 "startAtLogin": SMAppService.mainApp.status == .enabled, "startAtLoginSupported": true,
+                "notifications": notificationsOn, "sounds": soundsOn, "walkOnWindows": walkOnWindows,
+                "quietInCalls": quietInCalls, "autoUpdate": autoUpdate, "kiroInstalled": kiroHooksOn && KiroHooks.installed(),
             ].merging(wizardStatus()) { a, _ in a }
         case "status":
             return wizardStatus()
@@ -762,6 +1164,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             case "startAtLogin":
                 if value as? Bool == true { try? SMAppService.mainApp.register() } else { try? SMAppService.mainApp.unregister() }
                 return ["value": SMAppService.mainApp.status == .enabled]
+            case "notifications":
+                notificationsOn = value as? Bool ?? true
+                if notificationsOn { notifier.requestPermission() }
+            case "sounds":
+                soundsOn = value as? Bool ?? true
+                if soundsOn { sounds.play(.pet) }
+            case "walkOnWindows": walkOnWindows = value as? Bool ?? true
+            case "quietInCalls": quietInCalls = value as? Bool ?? true
+            case "autoUpdate": autoUpdate = value as? Bool ?? true
             default:
                 break
             }
@@ -776,9 +1187,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         case "openSprites":
             NSWorkspace.shared.open(SpritePack.root)
             return ["ok": true]
+        case "kiro":
+            let install = payload["install"] as? Bool ?? true
+            kiroHooksOn = install
+            let changed = KiroHooks.apply(install)
+            return ["ok": !install || changed > 0 || KiroHooks.installed(), "changed": changed]
         case "finish":
             _ = wizardCall("save", payload)
             defaults.set(true, forKey: "setupComplete")
+            if notificationsOn { notifier.requestPermission() }
             wizard?.close()
             transient = (.done, CACurrentMediaTime() + 2.5)
             say("hi \(config.ownerName)! I'm \(config.petName) 🐾", for: 4)

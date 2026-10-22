@@ -16,7 +16,8 @@ func runHook(_ args: [String]) -> Never {
 
     let data = FileHandle.standardInput.readDataToEndOfFile()
     let payload = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
-    guard var event = (payload["hook_event_name"] as? String) ?? (payload["hookEventName"] as? String),
+    let eventArg = args.firstIndex(of: "--event").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
+    guard var event = (payload["hook_event_name"] as? String) ?? (payload["hookEventName"] as? String) ?? eventArg,
           !event.isEmpty else { exit(0) }
     event = event.prefix(1).uppercased() + event.dropFirst()
 
@@ -50,7 +51,7 @@ func runHook(_ args: [String]) -> Never {
         "subagents": subagents,
         "pid": Int(agentPID),
     ]
-    if let tool = payload["tool_name"] as? String { state["tool"] = tool }
+    if let tool = (payload["tool_name"] as? String) ?? (payload["toolName"] as? String) { state["tool"] = tool }
     if let cwd = payload["cwd"] as? String { state["cwd"] = cwd }
     if let transcript = payload["transcript_path"] as? String { state["transcript"] = transcript }
     if let out = try? JSONSerialization.data(withJSONObject: state) {

@@ -12,8 +12,13 @@ struct AgentSession {
     var activity: AgentActivity
     var detail: String
     var subagents: Int
-    /// true when driven by hook events, false when guessed from CPU usage.
+    /// true when driven by hook events or a session log, false when guessed from CPU usage.
     var precise: Bool
+    /// The agent's process, for bringing its window forward. 0 if unknown.
+    var pid: pid_t = 0
+    /// Claude transcript or Codex session log, for token counts.
+    var logPath: String = ""
+    var isCodex = false
 }
 
 /// A running agent CLI found in the process table, with its whole child tree.
@@ -22,10 +27,13 @@ struct ProcSession {
     let name: String
     let pids: Set<pid_t>
     let busy: Bool
+    /// For Codex: the session log it's writing.
+    var codexLog: String?
 }
 
 private struct HookState {
     let url: URL
+    let agent: String
     let event: String
     let tool: String
     let ts: Double
@@ -92,12 +100,19 @@ final class AgentMonitor {
             let matching = hooks.filter { proc.pids.contains($0.pid) }
             if let hook = matching.max(by: { $0.ts < $1.ts }) {
                 hooks.removeAll { proc.pids.contains($0.pid) }
-                result.append(session(from: hook, id: "\(proc.name)-\(proc.pid)", name: proc.name, procBusy: proc.busy, now: now))
+                var s = session(from: hook, id: "\(proc.name)-\(proc.pid)", name: proc.name, procBusy: proc.busy, now: now)
+                s.pid = proc.pid
+                result.append(s)
+            } else if let log = proc.codexLog, let state = CodexLog.state(path: log, procBusy: proc.busy) {
+                result.append(AgentSession(
+                    id: "\(proc.name)-\(proc.pid)", name: proc.name, project: "",
+                    activity: state.activity, detail: state.detail, subagents: 0, precise: true,
+                    pid: proc.pid, logPath: log, isCodex: true))
             } else {
                 result.append(AgentSession(
                     id: "\(proc.name)-\(proc.pid)", name: proc.name, project: "",
                     activity: proc.busy ? .typing : .idle, detail: proc.busy ? "working…" : "ready",
-                    subagents: 0, precise: false))
+                    subagents: 0, precise: false, pid: proc.pid))
             }
         }
 
@@ -106,7 +121,9 @@ final class AgentMonitor {
             if hook.pid > 0 && !isAlive(hook.pid) {
                 try? FileManager.default.removeItem(at: hook.url)
             } else if now - hook.ts < 3600 && scanCount > 0 && hook.pid > 0 {
-                result.append(session(from: hook, id: hook.url.lastPathComponent, name: "Claude", procBusy: true, now: now))
+                var s = session(from: hook, id: hook.url.lastPathComponent, name: Self.displayName(hook.agent), procBusy: true, now: now)
+                s.pid = hook.pid
+                result.append(s)
             }
         }
         return result
@@ -122,6 +139,7 @@ final class AgentMonitor {
                   let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
             return HookState(
                 url: url,
+                agent: obj["agent"] as? String ?? "claude",
                 event: obj["event"] as? String ?? "",
                 tool: obj["tool"] as? String ?? "",
                 ts: obj["ts"] as? Double ?? 0,
@@ -136,7 +154,7 @@ final class AgentMonitor {
         let age = now - hook.ts
         var activity: AgentActivity
         switch hook.event {
-        case "UserPromptSubmit", "PostToolUse", "SubagentStop": activity = .thinking
+        case "UserPromptSubmit", "PostToolUse", "SubagentStop", "AgentSpawn": activity = hook.event == "AgentSpawn" ? .idle : .thinking
         case "PreToolUse": activity = Self.activity(forTool: hook.tool)
         case "PostToolUseFailure": activity = age < 3 ? .oops : .thinking
         case "PermissionRequest", "Notification": activity = .needsYou
@@ -156,7 +174,7 @@ final class AgentMonitor {
         return AgentSession(
             id: id, name: name, project: (hook.cwd as NSString).lastPathComponent,
             activity: activity, detail: Self.detail(activity, tool: hook.tool),
-            subagents: hook.subagents, precise: true)
+            subagents: hook.subagents, precise: true, logPath: hook.transcript)
     }
 
     private var transcriptCache: [String: (modified: Date, size: Int, ended: Bool)] = [:]
@@ -192,8 +210,21 @@ final class AgentMonitor {
         return ended
     }
 
+    static func displayName(_ agent: String) -> String {
+        switch agent {
+        case "kiro": return "Kiro"
+        case "codex": return "Codex"
+        default: return "Claude"
+        }
+    }
+
     private static func activity(forTool tool: String) -> AgentActivity {
         switch tool {
+        // Kiro CLI tool names
+        case "fs_read", "grep", "glob", "code", "knowledge", "read": return .reading
+        case "fs_write", "execute_bash", "execute_cmd", "shell", "write": return .typing
+        case "web_search", "web_fetch", "use_aws": return .searching
+        case "use_subagent", "delegate": return .delegating
         case "Read", "Grep", "Glob", "LS", "NotebookRead": return .reading
         case "WebFetch", "WebSearch", "ToolSearch": return .searching
         case "Agent", "Task", "Workflow": return .delegating
@@ -218,7 +249,8 @@ final class AgentMonitor {
         case .typing:
             switch tool {
             case "Edit", "Write", "MultiEdit", "NotebookEdit": return "writing code"
-            case "Bash", "BashOutput", "PowerShell": return "running commands"
+            case "Bash", "BashOutput", "PowerShell", "execute_bash", "execute_cmd", "shell": return "running commands"
+            case "fs_write", "write": return "writing code"
             default: return tool.isEmpty ? "working…" : "using \(tool)"
             }
         case .oops: return "a tool failed"
@@ -267,7 +299,9 @@ final class AgentMonitor {
             }
             let usage = 0.5 * (smoothedUsage[c.pid] ?? 0) + 0.5 * (cpuSeconds / interval)
             smoothedUsage[c.pid] = usage
-            sessions.append(ProcSession(pid: c.pid, name: name, pids: tree, busy: usage > 0.15))
+            var session = ProcSession(pid: c.pid, name: name, pids: tree, busy: usage > 0.15)
+            if name == "Codex" { session.codexLog = CodexLog.logPath(for: tree) }
+            sessions.append(session)
         }
 
         previousCPU = cpuByPid
