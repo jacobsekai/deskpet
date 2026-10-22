@@ -5,10 +5,13 @@ const os = require('os');
 const path = require('path');
 
 const root = path.join(os.homedir(), '.deskpet');
+let spritesOverride = null;
 const paths = {
   root,
   sessions: path.join(root, 'sessions'),
-  sprites: path.join(root, 'sprites'),
+  /** ~/.deskpet/sprites, or the sync folder's sprites when "sync sprite packs" is on. */
+  get sprites() { return spritesOverride || path.join(root, 'sprites'); },
+  localSprites: path.join(root, 'sprites'),
   config: path.join(root, 'config.json'),
   settings: path.join(root, 'electron-settings.json'),
   hookScript: path.join(root, 'hook.ps1'),
@@ -68,4 +71,6 @@ function hooksLive() {
   } catch (_) { return false; }
 }
 
-module.exports = { paths, Settings, loadConfig, saveConfig, hooksLive, readJSON };
+function setSpritesOverride(dir) { spritesOverride = dir || null; }
+
+module.exports = { paths, Settings, loadConfig, saveConfig, hooksLive, readJSON, setSpritesOverride };

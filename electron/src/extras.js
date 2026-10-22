@@ -45,10 +45,14 @@ class Stats {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   }
 
-  get xp() { return this.data.xp; }
-  get prestige() { return this.data.prestige || 0; }
+  // Other devices' progress (cloud sync). Totals include it; this device's file never does.
+  get remote() { return this._remote || (this._remote = { xp: 0, days: {}, prestige: null }); }
+  get xp() { return this.data.xp + this.remote.xp; }
+  get localXP() { return this.data.xp; }
+  get prestige() { return this.remote.prestige ? this.remote.prestige.rank : this.data.prestige || 0; }
+  get prestigeBase() { return this.remote.prestige ? this.remote.prestige.base : this.data.prestigeBase || 0; }
   /** XP earned since the last prestige. */
-  get levelXP() { return this.data.xp - (this.data.prestigeBase || 0); }
+  get levelXP() { return this.xp - this.prestigeBase; }
   get maxLevel() { return this.prestige >= 10 ? 1000 : 100; }
   get level() { return Stats.levelFor(this.levelXP, this.maxLevel); }
   get atMax() { return this.level >= this.maxLevel; }
@@ -61,23 +65,67 @@ class Stats {
   get xpToNext() { return this.atMax ? 0 : Stats.xpNeeded(this.level + 1) - this.levelXP; }
   get rankTitle() { return this.prestige ? `${PRESTIGE.title(this.prestige)} · Lv ${this.level}` : `Lv ${this.level}`; }
 
-  doPrestige() {
-    if (!this.canPrestige) return;
-    this.data.prestige = this.prestige + 1;
-    this.data.prestigeBase = this.data.xp;
+  /** This device's contribution, for its sync file. */
+  get deviceExport() { return { xp: this.data.xp, days: this.data.days }; }
+
+  /** Everything combined, for transfer keys. */
+  get exported() {
+    const days = { ...this.data.days };
+    const { addDays } = require('./sync');
+    for (const [k, d] of Object.entries(this.remote.days)) days[k] = addDays(days[k], d);
+    return { xp: this.xp, days, prestige: this.prestige, prestigeBase: this.prestigeBase };
+  }
+
+  /** "Use synced progress": this device starts from zero (a backup is kept) and adds onto the others. */
+  resetLocal() {
+    if (fs.existsSync(this.file)) fs.copyFileSync(this.file, `${this.file}.bak`);
+    this.data.xp = 0;
+    this.data.days = {};
     this.dirty = true;
     this.saveIfNeeded();
   }
 
-  get today() {
+  /** Leaving sync: keep the shared prestige and current level progress on this device alone. */
+  leaveSync() {
+    const p = this.remote.prestige;
+    if (p) {
+      const progress = this.xp - p.base;
+      this.data.prestige = p.rank;
+      this.data.prestigeBase = this.data.xp - progress;
+    }
+    this._remote = { xp: 0, days: {}, prestige: null };
+    this.dirty = true;
+    this.saveIfNeeded();
+  }
+
+  doPrestige() {
+    if (!this.canPrestige) return;
+    const xp = this.xp;
+    this.data.prestige = this.prestige + 1;
+    this.data.prestigeBase = xp;
+    if (this.remote.prestige) this.remote.prestige = { rank: this.data.prestige, base: xp };
+    this.dirty = true;
+    this.saveIfNeeded();
+  }
+
+  get localToday() {
     return { activeMinutes: 0, agentMinutes: 0, tasks: 0, pets: 0, throwsCount: 0, focusSessions: 0, openMinutes: 0, playXP: 0, greeted: false, blocked: 0, ...(this.data.days[Stats.dayKey()] || {}) };
   }
+  /** Today across all synced devices. */
+  get today() { return require('./sync').addDays(this.localToday, this.remote.days[Stats.dayKey()]); }
 
   /** Updates today's counters; returns the new level if this XP gain leveled up. */
   record(xp = 0, change = () => {}) {
     const key = Stats.dayKey();
-    const day = this.today;
-    change(day);
+    const day = this.localToday;
+    // Counters that cap across devices (play XP, daily hello) are checked against today's total.
+    const totalBefore = this.today;
+    const combined = { ...totalBefore };
+    change(combined);
+    for (const [k, v] of Object.entries(combined)) {
+      if (typeof v === 'number') day[k] = (day[k] || 0) + v - (totalBefore[k] || 0);
+      else if (v === true) day[k] = true;
+    }
     this.data.days[key] = day;
     const before = this.level;
     this.data.xp += xp;
@@ -142,7 +190,8 @@ class Updater {
       const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'DeskPet' } });
       const release = await res.json();
       const version = String(release.tag_name || '').replace(/^v/, '');
-      const asset = (release.assets || []).find((a) => a.name === 'DeskPet-win32-x64.zip');
+      const wanted = process.platform === 'linux' ? `DeskPet-linux-${process.arch}.AppImage` : 'DeskPet-win32-x64.zip';
+      const asset = (release.assets || []).find((a) => a.name === wanted);
       this.available = asset && isNewer(version, this.current) ? { version, url: asset.browser_download_url, page: release.html_url } : null;
     } catch (_) { this.available = null; }
     return !!this.available;
@@ -152,6 +201,7 @@ class Updater {
   async install(app, shell) {
     const update = this.available;
     if (!update || this.installing) return 'no update';
+    if (process.platform === 'linux' && process.env.APPIMAGE) return this.installAppImage(app, update);
     if (!isWindows || !app.isPackaged) { shell.openExternal(update.page); return 'opened the release page'; }
     this.installing = true;
     try {
@@ -179,6 +229,25 @@ class Updater {
     }
   }
 }
+
+Updater.prototype.installAppImage = async function installAppImage(app, update) {
+  // An AppImage is one file: download the new one beside it, swap it in, and start it.
+  this.installing = true;
+  try {
+    const target = process.env.APPIMAGE;
+    const res = await fetch(update.url, { headers: { 'User-Agent': 'DeskPet' } });
+    fs.writeFileSync(`${target}.new`, Buffer.from(await res.arrayBuffer()));
+    fs.chmodSync(`${target}.new`, 0o755);
+    fs.renameSync(`${target}.new`, target);
+    spawn(target, [], { detached: true, stdio: 'ignore' }).unref();
+    app.quit();
+    setTimeout(() => app.exit(0), 1500).unref();
+    return 'updating';
+  } catch (e) {
+    this.installing = false;
+    return `update failed: ${e.message}`;
+  }
+};
 
 // MARK: - Sprite pack zips
 
@@ -254,12 +323,9 @@ async function exportPack(name, zip) {
 
 const KIRO_AGENTS = path.join(os.homedir(), '.kiro', 'agents');
 const KIRO_EVENTS = ['agentSpawn', 'userPromptSubmit', 'preToolUse', 'postToolUse', 'stop'];
-const isKiroOurs = (entry) => /-Agent kiro -Event /.test((entry && entry.command) || '');
+const isKiroOurs = (entry) => /(-Agent kiro -Event |--agent kiro --event )/.test((entry && entry.command) || '');
 
-function kiroCommand(event) {
-  const script = paths.hookScript.replace(/\\/g, '/');
-  return `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${script}" -Agent kiro -Event ${event}`;
-}
+function kiroCommand(event) { return require('./hooks').hookCommand('kiro', event); }
 
 function kiroFiles() {
   try { return fs.readdirSync(KIRO_AGENTS).filter((f) => f.endsWith('.json')).map((f) => path.join(KIRO_AGENTS, f)); } catch (_) { return []; }
@@ -271,8 +337,8 @@ const kiroHooks = {
   },
   /** Returns how many agent files changed. */
   apply(install) {
-    if (!isWindows) return 0;
-    if (install) fs.writeFileSync(paths.hookScript, fs.readFileSync(path.join(__dirname, 'hook.ps1')));
+    if (process.platform === 'darwin') return 0;
+    if (install) require('./hooks').installScripts();
     let changed = 0;
     for (const file of kiroFiles()) {
       const agent = readJSON(file, null);
@@ -297,12 +363,46 @@ const kiroHooks = {
 
 /** Activates the first window owned by the agent process or one of its ancestors (the terminal or IDE). */
 async function jumpTo(pid, parents) {
-  if (!isWindows || !pid) return false;
+  if (!pid) return false;
   const chain = [];
   for (let p = pid; p > 4 && chain.length < 16; p = parents.get(p) || 0) chain.push(p);
+  if (process.platform === 'linux') return jumpLinux(chain);
+  if (!isWindows) return false;
   const { code } = await runPowerShell(`$s = New-Object -ComObject WScript.Shell; foreach ($p in @(${chain.join(',')})) { if ($s.AppActivate([int]$p)) { exit 0 } }; exit 1`);
   return code === 0;
 }
+
+/** X11: activate the window whose process is the agent or one of its ancestors (needs wmctrl). */
+function jumpLinux(chain) {
+  return new Promise((resolve) => {
+    execFile('wmctrl', ['-lp'], (err, out) => {
+      if (err) return resolve(false);
+      const windows = String(out).split('\n').map((l) => l.trim().split(/\s+/)).filter((p) => p.length > 2);
+      for (const pid of chain) {
+        const w = windows.find((p) => Number(p[2]) === pid);
+        if (w) return execFile('wmctrl', ['-i', '-a', w[0]], (e) => resolve(!e));
+      }
+      resolve(false);
+    });
+  });
+}
+
+// MARK: - Start at login (Linux has no login-item API: use an XDG autostart entry)
+
+const AUTOSTART = path.join(os.homedir(), '.config', 'autostart', 'deskpet.desktop');
+const loginItem = {
+  get(app) {
+    if (process.platform !== 'linux') return app.getLoginItemSettings().openAtLogin;
+    return fs.existsSync(AUTOSTART);
+  },
+  set(app, on) {
+    if (process.platform !== 'linux') return app.setLoginItemSettings({ openAtLogin: on });
+    if (!on) return fs.rmSync(AUTOSTART, { force: true });
+    fs.mkdirSync(path.dirname(AUTOSTART), { recursive: true });
+    const exec = process.env.APPIMAGE || process.execPath;
+    fs.writeFileSync(AUTOSTART, `[Desktop Entry]\nType=Application\nName=DeskPet\nComment=A desktop pet that keeps an eye on your AI agents\nExec="${exec}"\nX-GNOME-Autostart-enabled=true\n`);
+  },
+};
 
 // MARK: - Window platforms (walk on windows)
 
@@ -352,7 +452,7 @@ class WindowPlatforms {
 // MARK: - Focus blocklist (Windows: matched against the browser's window title)
 
 const BLOCK_DEFAULTS = ['youtube.com', 'reddit.com', 'x.com', 'twitter.com', 'instagram.com', 'tiktok.com', 'facebook.com', 'netflix.com', 'twitch.tv'];
-const BROWSERS = /^(chrome|msedge|firefox|brave|opera|vivaldi|arc|librewolf|waterfox)$/i;
+const BROWSERS = /^(chrome|msedge|firefox|brave|opera|vivaldi|arc|librewolf|waterfox|google-chrome|chromium|chromium-browser|brave-browser|microsoft-edge|vivaldi-stable|zen|floorp)$/i;
 // Window titles show page titles, not addresses, so each domain maps to words its titles contain.
 const TITLE_WORDS = { 'x.com': [' / x'], 'twitter.com': ['twitter'], 'youtube.com': ['youtube'] };
 
@@ -456,5 +556,5 @@ const PRESTIGE = {
 module.exports = {
   REWARDS, SLOTS, PRESTIGE,
   Stats, FocusTimer, Updater, importPack, exportPack, kiroHooks, jumpTo, WindowPlatforms, isNewer,
-  BLOCK_DEFAULTS, BROWSERS, TITLE_WORDS, parseBlocklist, matchTitle, closeBlockedTab, transferKey, TRANSFER_SETTINGS,
+  loginItem, BLOCK_DEFAULTS, BROWSERS, TITLE_WORDS, parseBlocklist, matchTitle, closeBlockedTab, transferKey, TRANSFER_SETTINGS,
 };

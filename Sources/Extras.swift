@@ -171,14 +171,22 @@ final class Stats {
         file = (try? Data(contentsOf: url)).flatMap { try? JSONDecoder().decode(File.self, from: $0) } ?? File()
     }
 
-    var xp: Int { file.xp }
-    var prestige: Int { file.prestige }
+    // Other devices' progress (cloud sync). Totals include it; this device's file never does.
+    var remoteXP = 0
+    var remoteDays: [String: Day] = [:]
+    /// Prestige shared through sync (whichever device prestiged last).
+    var syncedPrestige: (rank: Int, base: Int)?
+
+    var xp: Int { file.xp + remoteXP }
+    var localXP: Int { file.xp }
+    var prestige: Int { syncedPrestige?.rank ?? file.prestige }
+    var prestigeBase: Int { syncedPrestige?.base ?? file.prestigeBase }
     /// XP earned since the last prestige.
-    var levelXP: Int { file.xp - file.prestigeBase }
-    var maxLevel: Int { file.prestige >= Prestige.maxRank ? Prestige.masterCap : Prestige.levelCap }
+    var levelXP: Int { xp - prestigeBase }
+    var maxLevel: Int { prestige >= Prestige.maxRank ? Prestige.masterCap : Prestige.levelCap }
     var level: Int { Self.level(for: levelXP, cap: maxLevel) }
     var atMax: Bool { level >= maxLevel }
-    var canPrestige: Bool { level >= Prestige.levelCap && file.prestige < Prestige.maxRank }
+    var canPrestige: Bool { level >= Prestige.levelCap && prestige < Prestige.maxRank }
     /// XP progress within the current level, 0...1 (1 at the cap).
     var progress: Double {
         guard !atMax else { return 1 }
@@ -187,7 +195,7 @@ final class Stats {
     }
     var xpToNext: Int { atMax ? 0 : Self.xpNeeded(level + 1) - levelXP }
     /// "Lv 42", "Prestige 3 · Lv 42", "💎 Prestige Master · Lv 345"
-    var rankTitle: String { file.prestige == 0 ? "Lv \(level)" : "\(Prestige.title(file.prestige)) · Lv \(level)" }
+    var rankTitle: String { prestige == 0 ? "Lv \(level)" : "\(Prestige.title(prestige)) · Lv \(level)" }
 
     /// XP needed (since the last prestige) to reach `level`. Each level costs 30 + its number,
     /// so level 100 takes about 7,900 XP; Prestige Master levels past 100 cost 300 each.
@@ -206,8 +214,9 @@ final class Stats {
     /// Resets to level 1 and raises the prestige rank. Rewards stay unlocked.
     func doPrestige() {
         guard canPrestige else { return }
-        file.prestige += 1
-        file.prestigeBase = file.xp
+        file.prestige = prestige + 1
+        file.prestigeBase = xp
+        if syncedPrestige != nil { syncedPrestige = (file.prestige, file.prestigeBase) }
         dirty = true
         saveIfNeeded()
     }
@@ -218,14 +227,31 @@ final class Stats {
         return f
     }()
 
-    var today: Day { file.days[Self.dayFormatter.string(from: Date())] ?? Day() }
+    /// Today across all synced devices.
+    var today: Day {
+        let key = Self.dayFormatter.string(from: Date())
+        return (file.days[key] ?? Day()) + (remoteDays[key] ?? Day())
+    }
 
     /// Updates today's counters; returns the new level if this XP gain leveled up.
     @discardableResult
     func record(xp gained: Int = 0, _ change: (inout Day) -> Void = { _ in }) -> Int? {
         let key = Self.dayFormatter.string(from: Date())
         var day = file.days[key] ?? Day()
-        change(&day)
+        // Counters that cap across devices (play XP, daily hello) are checked against today's total.
+        let remote = remoteDays[key] ?? Day()
+        var combined = day + remote
+        change(&combined)
+        day.activeMinutes += combined.activeMinutes - (day + remote).activeMinutes
+        day.agentMinutes += combined.agentMinutes - (day + remote).agentMinutes
+        day.tasks += combined.tasks - (day + remote).tasks
+        day.pets += combined.pets - (day + remote).pets
+        day.throwsCount += combined.throwsCount - (day + remote).throwsCount
+        day.focusSessions += combined.focusSessions - (day + remote).focusSessions
+        day.openMinutes += combined.openMinutes - (day + remote).openMinutes
+        day.playXP += combined.playXP - (day + remote).playXP
+        day.blocked += combined.blocked - (day + remote).blocked
+        day.greeted = day.greeted || combined.greeted
         file.days[key] = day
         let before = level
         file.xp += gained
@@ -233,9 +259,44 @@ final class Stats {
         return level > before ? level : nil
     }
 
-    /// The whole stats file as JSON, for transfer keys.
+    /// Everything (all synced devices combined) as JSON, for transfer keys.
     var exported: [String: Any] {
-        (try? JSONEncoder().encode(file)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+        var merged = file
+        merged.xp = xp
+        merged.prestige = prestige
+        merged.prestigeBase = prestigeBase
+        for (key, day) in remoteDays { merged.days[key] = (merged.days[key] ?? Day()) + day }
+        return (try? JSONEncoder().encode(merged)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+    }
+
+    /// Just this device's contribution, for its sync file.
+    var deviceExport: [String: Any] {
+        let days = (try? JSONEncoder().encode(file.days)).flatMap { try? JSONSerialization.jsonObject(with: $0) } ?? [String: Any]()
+        return ["xp": file.xp, "days": days]
+    }
+
+    /// Leaving sync: keep the shared prestige and current level progress on this device alone.
+    func leaveSync() {
+        if let synced = syncedPrestige {
+            let progress = xp - synced.base
+            file.prestige = synced.rank
+            file.prestigeBase = file.xp - progress
+        }
+        syncedPrestige = nil
+        remoteXP = 0
+        remoteDays = [:]
+        dirty = true
+        saveIfNeeded()
+    }
+
+    /// "Use synced progress": this device starts from zero (a backup is kept) and adds onto the others.
+    func resetLocal() {
+        try? FileManager.default.removeItem(at: url.appendingPathExtension("bak"))
+        try? FileManager.default.copyItem(at: url, to: url.appendingPathExtension("bak"))
+        file.xp = 0
+        file.days = [:]
+        dirty = true
+        saveIfNeeded()
     }
 
     /// Replaces all stats (from a transfer key), keeping a backup of the old file.

@@ -7,13 +7,23 @@ const fs = require('fs');
 const path = require('path');
 const { AgentMonitor, PRIORITY, TranscriptTokens, codexState } = require('./agents');
 const {
-  REWARDS, SLOTS, PRESTIGE, Stats, FocusTimer, Updater, importPack, exportPack, kiroHooks, jumpTo, WindowPlatforms,
+  REWARDS, SLOTS, PRESTIGE, Stats, FocusTimer, Updater, importPack, exportPack, kiroHooks, jumpTo, WindowPlatforms, loginItem,
   BLOCK_DEFAULTS, BROWSERS, TITLE_WORDS, parseBlocklist, matchTitle, closeBlockedTab, transferKey, TRANSFER_SETTINGS,
 } = require('./extras');
-const { paths, Settings, loadConfig, saveConfig, hooksLive, readJSON } = require('./settings');
+const { paths, Settings, loadConfig, saveConfig, hooksLive, readJSON, setSpritesOverride } = require('./settings');
+const { Sync } = require('./sync');
 const hooks = require('./hooks');
 
 const GROUND = 34;
+
+if (process.platform === 'linux') {
+  // Transparent windows on X11 and most Wayland compositors (through XWayland).
+  app.commandLine.appendSwitch('enable-transparent-visuals');
+  app.disableHardwareAcceleration();
+  // AppImages can't ship Chromium's setuid sandbox helper, and Ubuntu 24.04+ blocks the user-namespace
+  // sandbox for unconfined apps, so AppImage builds run without it. DeskPet only loads its own local pages.
+  if (process.env.APPIMAGE) app.commandLine.appendSwitch('no-sandbox');
+}
 const SCALE_RANGE = [0.25, 4];
 const isWindows = process.platform === 'win32';
 const now = () => performance.now() / 1000;
@@ -107,6 +117,9 @@ class Pet {
     this.xpPopup = null;
     this.lastBrowserCheck = 0;
     this.lastBlockNag = 0;
+    this.sync = new Sync(this.settings);
+    this.lastSyncTick = 0;
+    if (this.settings.get('syncPacks', false) && this.sync.enabled) setSpritesOverride(this.sync.spritesFolder);
   }
 
   // MARK: Settings
@@ -157,8 +170,8 @@ class Pet {
     this.platforms.start();
     this.createCard();
     // Keep installed hook scripts current after updates.
-    if (isWindows && (hooks.installed() || this.kiroHooksOn)) {
-      try { fs.writeFileSync(paths.hookScript, fs.readFileSync(path.join(__dirname, 'hook.ps1'))); } catch (_) { /* best effort */ }
+    if (process.platform !== 'darwin' && (hooks.installed() || this.kiroHooksOn)) {
+      try { hooks.installScripts(); } catch (_) { /* best effort */ }
     }
     if (this.kiroHooksOn) kiroHooks.apply(true);
     setTimeout(() => this.wearEarnedRewardsOnce(), 6000);
@@ -271,6 +284,10 @@ class Pet {
     if (this.focus.phase === 'focus' && this.blockDuringFocus && this.blocklist.length && t - this.lastBrowserCheck > 2) {
       this.lastBrowserCheck = t;
       this.checkForDistraction(t);
+    }
+    if (this.sync.enabled && t - this.lastSyncTick > 5) {
+      this.lastSyncTick = t;
+      this.syncTick();
     }
     if (t - this.lastMinute >= 60) {
       this.lastMinute = t;
@@ -740,7 +757,7 @@ class Pet {
     const agentItems = this.sessions.length
       ? [...this.sessions].sort((a, b) => PRIORITY.indexOf(b.activity) - PRIORITY.indexOf(a.activity)).map((s) => ({
         label: `${s.activity === 'idle' ? '○' : '●'} ${s.name}${s.project ? ` (${s.project})` : ''} — ${s.detail}`,
-        enabled: !!s.pid && isWindows,
+        enabled: !!s.pid && process.platform !== 'darwin',
         click: () => this.jump(s.pid).then((ok) => { if (!ok) this.say("couldn't find that window 🤔", 2.5); }),
       }))
       : [{ label: 'No AI agents running', enabled: false }];
@@ -788,11 +805,11 @@ class Pet {
   panelState() {
     const t = now();
     const st = this.stats;
-    const loginSupported = isWindows || process.platform === 'darwin';
+    const loginSupported = true;
     const card = this.cardModel(t);
     const next = REWARDS.find((r) => r.level > st.level);
     return {
-      platform: isWindows ? 'windows' : process.platform === 'darwin' ? 'mac' : 'other', chrome: 'custom', version: app.getVersion(),
+      platform: isWindows ? 'windows' : process.platform === 'darwin' ? 'mac' : 'linux', chrome: 'custom', version: app.getVersion(),
       openPage: this.panelPage, names: { petName: this.config.petName, ownerName: this.config.ownerName },
       rank: {
         title: st.rankTitle, level: st.level, progress: st.progress, xpToNext: st.xpToNext, atMax: st.atMax, prestige: st.prestige,
@@ -811,11 +828,13 @@ class Pet {
       toggles: {
         wander: this.wander, gravity: this.gravity, walkOnWindows: this.walkOnWindows, quietInCalls: this.quietInCalls,
         notifications: this.notificationsOn, sounds: this.soundsOn, autoUpdate: this.autoUpdate,
-        startAtLogin: loginSupported && app.getLoginItemSettings().openAtLogin, startAtLoginSupported: loginSupported,
+        startAtLogin: loginSupported && loginItem.get(app), startAtLoginSupported: loginSupported,
         showPrestigeBadge: this.settings.get('showPrestigeBadge', true),
+        walkOnWindowsSupported: process.platform !== 'linux',
       },
-      hooks: { claudeInstalled: hooks.installed(), claudeLive: hooks.installed() && hooksLive(), kiroInstalled: this.kiroHooksOn && kiroHooks.installed(), kiroSupported: isWindows },
+      hooks: { claudeInstalled: hooks.installed(), claudeLive: hooks.installed() && hooksLive(), kiroInstalled: this.kiroHooksOn && kiroHooks.installed(), kiroSupported: process.platform !== 'darwin' },
       update: { available: this.updater.available ? this.updater.available.version : null },
+      sync: this.syncState(),
       preview: (() => { const p = this.pose(t); return { hat: p.hat, trail: p.trail, aura: p.aura, companion: p.companion, golden: p.golden, prestige: p.prestige }; })(),
     };
   }
@@ -828,7 +847,7 @@ class Pet {
           case 'scale': this.setScale(Math.min(4, Math.max(0.25, Number(payload.value) || 1))); this.settings.set(this.scaleKey, this.scale); break;
           case 'blocklist': this.settings.set('blocklist', payload.value ? parseBlocklist(payload.value.join('\n')) : BLOCK_DEFAULTS); break;
           case 'spritePack': this.chooseSprites(payload.value || ''); break;
-          case 'startAtLogin': app.setLoginItemSettings({ openAtLogin: !!payload.value }); break;
+          case 'startAtLogin': loginItem.set(app, !!payload.value); break;
           default:
             this.settings.set(payload.key, payload.value);
             if (payload.key === 'sounds' && payload.value) this.playSound('pet');
@@ -859,6 +878,15 @@ class Pet {
       case 'transferPreview': return this.dialogCall('transfer-preview', payload);
       case 'transferImport':
         try { return { ok: true, note: this.applyTransfer(transferKey.decode(payload.key)) }; } catch (e) { return { ok: false, error: e.message }; }
+      case 'syncInspect': return { ...Sync.inspect(payload.path, this.sync.deviceID), localXP: this.stats.localXP };
+      case 'syncChoose': {
+        const r = await dialog.showOpenDialog(this.panel, { title: 'Choose a folder your cloud drive syncs', properties: ['openDirectory', 'createDirectory'] });
+        return r.canceled || !r.filePaths.length ? {} : { path: r.filePaths[0] };
+      }
+      case 'syncEnable': this.enableSync(payload.path, payload.mode === 'fresh'); return { ok: true };
+      case 'syncDisable': this.disableSync(); return { ok: true };
+      case 'syncNow': this.syncTick(); return { ok: true };
+      case 'syncPacks': this.setSyncPacks(!!payload.on); return { ok: true };
       case 'pack': return this.wizardCall('pack', payload);
       case 'openSprites': shell.openPath(paths.sprites); return { ok: true };
       case 'importPack': await this.importPackDialog(); return { ok: true };
@@ -1163,6 +1191,83 @@ class Pet {
     }
   }
 
+  // MARK: Cloud sync
+
+  syncProfile() {
+    const settings = {};
+    for (const key of TRANSFER_SETTINGS) if (key in this.settings.values) settings[key] = this.settings.values[key];
+    return { names: { petName: this.config.petName, ownerName: this.config.ownerName }, settings, prestige: this.stats.prestige, prestigeBase: this.stats.prestigeBase };
+  }
+
+  syncTick() {
+    const levelBefore = this.stats.level;
+    const remote = this.stats.remote;
+    if (!remote.prestige) remote.prestige = { rank: this.stats.prestige, base: this.stats.prestigeBase };
+    let result;
+    try { result = this.sync.sync(this.stats.deviceExport, this.syncProfile()); } catch (e) { this.sync.error = e.message; return; }
+    if (!result) return;
+    remote.xp = result.remoteXP;
+    remote.days = result.remoteDays;
+    if (result.newerProfile) this.applySyncProfile(result.newerProfile);
+    if (this.stats.level > levelBefore) this.levelUp(this.stats.level);
+  }
+
+  /** Another device changed names, settings, or prestige more recently: follow it. */
+  applySyncProfile(p) {
+    const packBefore = this.spritePackName;
+    const names = p.names || {};
+    if ((names.petName && names.petName !== this.config.petName) || (names.ownerName && names.ownerName !== this.config.ownerName)) {
+      const petName = names.petName || this.config.petName, ownerName = names.ownerName || this.config.ownerName;
+      saveConfig({ petName, ownerName });
+      this.config = { ...this.config, petName, ownerName };
+    }
+    for (const [k, v] of Object.entries(p.settings || {})) if (TRANSFER_SETTINGS.includes(k) && v !== null) this.settings.set(k, v);
+    if (typeof p.prestige === 'number' && typeof p.prestigeBase === 'number') this.stats.remote.prestige = { rank: p.prestige, base: p.prestigeBase };
+    if (this.spritePackName !== packBefore) this.loadSprites(false);
+    this.sync.accept(this.syncProfile());
+  }
+
+  syncState() {
+    const ago = (ms) => { const s = Math.round((Date.now() - ms) / 1000); return s < 60 ? `${s} sec. ago` : s < 3600 ? `${Math.round(s / 60)} min. ago` : `${Math.round(s / 3600)} hr. ago`; };
+    return {
+      enabled: this.sync.enabled, folder: this.sync.folder, folderName: this.sync.folder ? path.basename(this.sync.folder) : null,
+      devices: this.sync.devices.map((d) => ({ name: d.name, platform: d.platform, me: d.id === this.sync.deviceID, xp: d.xp, updated: ago(d.updated * 1000) })),
+      lastSync: this.sync.lastSync ? ago(this.sync.lastSync) : null, error: this.sync.error,
+      syncPacks: this.settings.get('syncPacks', false), candidates: Sync.candidates(), deviceName: this.sync.deviceName,
+    };
+  }
+
+  enableSync(folder, fresh) {
+    if (fresh) this.stats.resetLocal();
+    const first = Sync.inspect(folder, this.sync.deviceID).devices === 0;
+    this.sync.folder = folder;
+    this.stats.remote.prestige = { rank: this.stats.prestige, base: this.stats.prestigeBase };
+    this.sync.prepareJoin(this.syncProfile(), first);
+    this.syncTick();
+    this.say(fresh ? 'synced! picking up where you left off ☁️' : 'sync is on: progress adds up across devices ☁️', 4);
+  }
+
+  disableSync() {
+    this.stats.leaveSync();
+    this.sync.disable();
+    if (this.settings.get('syncPacks', false)) this.setSyncPacks(false);
+    this.say('sync is off ☁️', 2.5);
+  }
+
+  /** Moving packs into the sync folder copies the local ones there first. */
+  setSyncPacks(on) {
+    if (on && this.sync.spritesFolder) {
+      fs.mkdirSync(this.sync.spritesFolder, { recursive: true });
+      for (const name of fs.existsSync(paths.localSprites) ? fs.readdirSync(paths.localSprites) : []) {
+        const target = path.join(this.sync.spritesFolder, name);
+        if (!name.startsWith('.') && !fs.existsSync(target)) fs.cpSync(path.join(paths.localSprites, name), target, { recursive: true });
+      }
+    }
+    this.settings.set('syncPacks', on);
+    setSpritesOverride(on ? this.sync.spritesFolder : null);
+    this.loadSprites(false);
+  }
+
   // MARK: Focus blocklist
 
   checkForDistraction(t) {
@@ -1213,7 +1318,7 @@ class Pet {
     settings.scales = Object.fromEntries(Object.entries(this.settings.values).filter(([k]) => k.startsWith('scale.')).map(([k, v]) => [k.slice(6), v]));
     return {
       app: 'deskpet', v: 1, exported: new Date().toISOString(), from: isWindows ? 'Windows' : process.platform,
-      config: { ownerName: this.config.ownerName, petName: this.config.petName }, settings, stats: this.stats.data,
+      config: { ownerName: this.config.ownerName, petName: this.config.petName }, settings, stats: this.stats.exported,
     };
   }
 
@@ -1399,11 +1504,11 @@ class Pet {
   }
 
   wizardCall(action, payload) {
-    const loginSupported = isWindows || process.platform === 'darwin';
+    const loginSupported = true;
     switch (action) {
       case 'state':
         return {
-          platform: isWindows ? 'windows' : process.platform === 'darwin' ? 'mac' : 'other',
+          platform: isWindows ? 'windows' : process.platform === 'darwin' ? 'mac' : 'linux',
           chrome: 'custom',
           ownerName: this.config.ownerName,
           petName: this.config.petName,
@@ -1413,7 +1518,7 @@ class Pet {
           thoughtBubble: this.thoughtBubble,
           wander: this.wander,
           gravity: this.gravity,
-          startAtLogin: loginSupported && app.getLoginItemSettings().openAtLogin,
+          startAtLogin: loginSupported && loginItem.get(app),
           startAtLoginSupported: loginSupported,
           notifications: this.notificationsOn, sounds: this.soundsOn, walkOnWindows: this.walkOnWindows,
           quietInCalls: this.quietInCalls, autoUpdate: this.autoUpdate, kiroInstalled: this.kiroHooksOn && kiroHooks.installed(),
@@ -1441,8 +1546,8 @@ class Pet {
           case 'wander': this.wander = !!payload.value; this.walkTarget = null; break;
           case 'gravity': this.gravity = !!payload.value; break;
           case 'startAtLogin':
-            app.setLoginItemSettings({ openAtLogin: !!payload.value });
-            return { value: app.getLoginItemSettings().openAtLogin };
+            loginItem.set(app, !!payload.value);
+            return { value: loginItem.get(app) };
           case 'notifications': case 'sounds': case 'walkOnWindows': case 'quietInCalls': case 'autoUpdate':
             this.settings.set(payload.key, !!payload.value);
             if (payload.key === 'sounds' && payload.value) this.playSound('pet');
@@ -1532,7 +1637,7 @@ function runSnapshot() {
     const file = path.join(out, packName ? `snapshot-${packName}.png` : 'snapshot.png');
     fs.writeFileSync(file, Buffer.from(dataURL.split(',')[1], 'base64'));
     console.log(`wrote ${file}`);
-    app.quit();
+    app.exit(0);
   });
   win.webContents.on('did-finish-load', () => {
     let source = null;

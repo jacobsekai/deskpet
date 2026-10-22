@@ -1,12 +1,12 @@
 # DeskPet 🐾
 
-Mochi, a desktop cat that reacts to what you're doing and to your AI agents. Runs on macOS (native Swift) and Windows (Electron).
+Mochi, a desktop cat that reacts to what you're doing and to your AI agents. Runs on macOS (native Swift), Windows, and Linux (Electron).
 
 | Folder | What |
 |---|---|
 | `Sources/`, `build.sh`, `install-hooks.py` | macOS app (Swift/AppKit) |
-| `electron/` | Windows app (Electron); also runs on macOS for development |
-| `.github/workflows/windows.yml` | Builds and checks the Windows app on every push; attaches the zip to releases |
+| `electron/` | Windows and Linux app (Electron); also runs on macOS for development |
+| `.github/workflows/windows.yml`, `linux.yml` | Build and check the Windows and Linux apps on every push; attach them to releases |
 
 ## Run on macOS
 
@@ -27,7 +27,19 @@ Windows SmartScreen may warn about an unsigned app the first time; choose **More
 
 The Windows app has the same features as the Mac one: all poses and reactions, throwing, resizing, themes, thought bubble sizes, and sprite packs (`%USERPROFILE%\.deskpet\sprites\`, same format, so a pack folder can be copied between machines). Differences: typing is detected as "input while the mouse is still" since Windows has no permission-free keyboard API, and agent hooks run through PowerShell.
 
-### Developing the Windows app
+## Run on Linux
+
+1. Download `DeskPet-linux-x64.AppImage` (or `-arm64`) from the latest release.
+2. `chmod +x DeskPet-linux-*.AppImage` and run it. No install needed; it works on any distro with a desktop.
+3. Open the control center from the tray icon or by right-clicking the pet, and connect Claude Code (or Kiro) under Agents.
+
+A `tar.gz` is also published for people who prefer unpacking it somewhere. Notes:
+- The pet needs a compositing desktop for its transparent window (GNOME, KDE Plasma, Cinnamon, Xfce with compositing, …).
+- On X11, `xprop` and `wmctrl` (usually preinstalled) power the focus blocklist, app reactions, and click-to-jump. Wayland sessions don't let apps see other windows, so those features stay off there.
+- Quiet-during-calls uses `pactl` (PipeWire or PulseAudio). Walking on windows isn't available on Linux.
+- GNOME needs the AppIndicator extension to show tray icons; right-clicking the pet always opens the menu.
+
+### Developing the Windows and Linux app
 
 ```bash
 cd electron
@@ -36,6 +48,7 @@ npm start                          # run it (works on macOS too)
 npm run snapshot                   # render every pose to test-output/snapshot.png
 npm run snapshot -- --pack minori  # same, with a sprite pack
 npm run package:win                # build dist/DeskPet-win32-x64 (no Windows machine needed)
+npm run package:linux              # build the AppImages and tar.gz (on Linux; CI does this)
 ```
 
 ## What Mochi notices
@@ -101,6 +114,11 @@ npm run package:win                # build dist/DeskPet-win32-x64 (no Windows ma
   - **Blocklist:** during focus, the pet calls you out when you open a listed site, or closes the tab in strict mode (🐾 → Focus timer → Edit blocklist…). On macOS it reads the active tab in Safari, Chrome, Edge, Brave, Arc, Vivaldi, and Opera (macOS asks once per browser); on Windows it matches the browser window's title.
 - **Quiet during calls:** no sounds or chatty remarks while any app uses the microphone or camera.
 - **Sounds:** system sounds on macOS, synthesized ones on Windows; a sprite pack can bring its own as `sounds/<event>.(wav|mp3|m4a|aiff|caf|ogg)` with events `pet`, `done`, `needs-you`, `bounce`, `wake`, `level-up`, `focus-done`.
+
+### Sync across devices
+Control center → Account → **Sync across devices**: pick a folder your cloud drive syncs (iCloud Drive, OneDrive, Dropbox, Google Drive, Nextcloud, Syncthing, … DeskPet lists the ones it finds). Each device writes only its own file in `DeskPet/devices/`, so devices never overwrite each other: XP and daily stats add up across all of them, while names, settings, worn rewards, and prestige follow whichever device changed them last. Works between macOS, Windows, and Linux, offline included (devices catch up when the folder syncs). Optionally keep sprite packs in the sync folder too. Nothing goes through a server.
+
+If the folder already has progress when you join, you choose **Combine** (add both) or **Use synced progress** (start this device fresh, with a backup), so progress you already moved with a transfer key isn't counted twice.
 
 ### Moving to another device
 🐾 → Move to another device → Export transfer key… gives you one pasteable code (`DESKPET-1:…`) with your names, level and stats, look, size, and settings. Import it on the other machine from the same menu, or with "Have a transfer key?" in setup. Keys work between macOS and Windows. Sprite pack images aren't in the key: move packs with Sprites → Export.

@@ -38,7 +38,14 @@ final class SpritePack {
     private var animations: [Mood: [Frame]] = [:]
     private var settings: [Mood: MoodSettings] = [:]
 
-    static let root = DeskPetPaths.root.appendingPathComponent("sprites")
+    /// ~/.deskpet/sprites, or the cloud sync folder's sprites when "sync sprite packs" is on.
+    static var root: URL {
+        let d = UserDefaults.standard
+        if d.bool(forKey: "syncPacks"), let folder = d.string(forKey: "syncFolder") {
+            return URL(fileURLWithPath: folder).appendingPathComponent("DeskPet/sprites")
+        }
+        return DeskPetPaths.root.appendingPathComponent("sprites")
+    }
 
     static func available() -> [String] {
         let dirs = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey])) ?? []

@@ -366,7 +366,7 @@
       state.startAtLoginSupported && { key: 'startAtLogin', icon: '🚀', title: state.platform === 'windows' ? 'Start with Windows' : 'Open at login', desc: 'Starts when you sign in' },
       { key: 'notifications', icon: '🔔', title: 'Notifications', desc: 'When agents finish or need you' },
       { key: 'sounds', icon: '🔊', title: 'Sounds', desc: 'Purrs, pops, and chimes' },
-      { key: 'walkOnWindows', icon: '🪟', title: 'Walk on windows', desc: 'Stands on and rides windows' },
+      state.platform !== 'linux' && { key: 'walkOnWindows', icon: '🪟', title: 'Walk on windows', desc: 'Stands on and rides windows' },
       { key: 'wander', icon: '🚶', title: 'Wander around', desc: 'Takes little walks' },
       { key: 'gravity', icon: '🪂', title: 'Gravity', desc: 'Falls when dropped' },
       { key: 'quietInCalls', icon: '🤫', title: 'Quiet during calls', desc: 'Hush when mic/camera is on' },
@@ -396,7 +396,8 @@
   function buildTips() {
     const home = state.platform === 'windows'
       ? 'Every option lives in the <kbd>system tray</kbd> (check the ^ arrow)'
-      : 'Every option lives under <kbd>🐾</kbd> in the menu bar';
+      : state.platform === 'linux' ? 'Open the control center from the <kbd>tray icon</kbd>, or right-click me'
+        : 'Every option lives under <kbd>🐾</kbd> in the menu bar';
     const tips = [
       ['🐾', home],
       ['🫳', 'Drag me anywhere, or flick and let go to throw me'],

@@ -1,0 +1,68 @@
+# Builds the Linux AppImages (x64 and ARM64) on Ubuntu, checks the Linux pieces, and attaches
+# them to GitHub Releases.
+name: Linux build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: electron
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - name: Desktop tools the app uses when present
+        run: sudo apt-get update && sudo apt-get install -y xvfb x11-utils wmctrl pulseaudio-utils
+
+      - name: Hook writes session state
+        run: |
+          echo '{"hook_event_name":"PreToolUse","session_id":"ci-test","tool_name":"Edit","cwd":"/tmp/demo"}' | node src/hook.js --agent claude
+          node -e "const s=require(process.env.HOME+'/.deskpet/sessions/claude-ci-test.json'); if (s.event!=='PreToolUse'||s.tool!=='Edit') { console.error(s); process.exit(1) }; console.log('ok', s)"
+          echo '{"hook_event_name":"SessionEnd","session_id":"ci-test"}' | node src/hook.js --agent claude
+          test ! -f ~/.deskpet/sessions/claude-ci-test.json
+          echo '{"cwd":"/tmp/k","tool_name":"fs_read"}' | node src/hook.js --agent kiro --event preToolUse
+          ls ~/.deskpet/sessions/ | grep kiro-
+
+      - name: Smoke test (starts, scans processes, quits)
+        run: xvfb-run -a npx electron . --self-test --no-sandbox | tee self-test.txt && grep -q '"version"' self-test.txt
+
+      - name: Screenshots (pet and control center)
+        run: |
+          xvfb-run -a npx electron . --snapshot --no-sandbox
+          xvfb-run -a npx electron . --panel-snapshot --no-sandbox
+          ls test-output
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-screenshots
+          path: electron/test-output/*.png
+
+      - name: Package AppImage and tar.gz (x64, ARM64)
+        run: npx electron-builder --linux AppImage tar.gz --x64 --arm64 --publish never
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DeskPet-linux
+          path: |
+            electron/dist/*.AppImage
+            electron/dist/*.tar.gz
+
+      - name: Attach to release
+        if: github.event_name == 'release'
+        run: gh release upload "${{ github.event.release.tag_name }}" dist/*.AppImage dist/*.tar.gz --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -203,23 +203,51 @@ class AgentMonitor {
   }
 
   scanUnix() {
-    execFile('/bin/ps', ['-axww', '-o', 'pid=,ppid=,time=,comm='], { maxBuffer: 16 * 1024 * 1024 }, (err, out) => {
+    if (process.platform === 'linux') this.scanLinuxDesktop();
+    execFile('ps', ['-e', '-ww', '-o', 'pid=,ppid=,time=,comm='], { maxBuffer: 16 * 1024 * 1024 }, (err, out) => {
       if (err) return;
       const procs = out.split('\n').map((line) => {
         const m = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/.exec(line);
         if (!m) return null;
-        const cpu = m[3].split(':').reduce((acc, part) => acc * 60 + (parseFloat(part) || 0), 0);
+        // macOS: "12:34.56"; Linux: "01:02:03" or "2-01:02:03" (days).
+        const [days, clock] = m[3].includes('-') ? m[3].split('-') : ['0', m[3]];
+        const cpu = Number(days) * 86400 + clock.split(':').reduce((acc, part) => acc * 60 + (parseFloat(part) || 0), 0);
         return { pid: +m[1], ppid: +m[2], cpu, base: path.basename(m[4]).toLowerCase() };
       }).filter(Boolean);
-      const candidates = procs.filter((p) => KNOWN[p.base]);
+      const candidates = procs.filter((p) => KNOWN[p.base] || p.base === 'node');
       if (!candidates.length) return this.update(procs, new Map());
-      execFile('/bin/ps', ['-ww', '-o', 'pid=,args=', '-p', candidates.map((c) => c.pid).join(',')], (e2, out2) => {
+      execFile('ps', ['-ww', '-o', 'pid=,args=', '-p', candidates.map((c) => c.pid).join(',')], { maxBuffer: 16 * 1024 * 1024 }, (e2, out2) => {
         const args = new Map();
         for (const line of (out2 || '').split('\n')) {
           const m = /^\s*(\d+)\s+(.*)$/.exec(line);
           if (m) args.set(+m[1], m[2]);
         }
         this.update(procs, args);
+      });
+    });
+  }
+
+  /** Linux desktop info: foreground window (X11, via xprop) and whether a mic is recording (PipeWire/PulseAudio). */
+  scanLinuxDesktop() {
+    execFile('pactl', ['list', 'short', 'source-outputs'], { timeout: 1500 }, (err, out) => {
+      this.inCall = !err && String(out).trim().length > 0;
+    });
+    execFile('xprop', ['-root', '_NET_ACTIVE_WINDOW'], { timeout: 1500 }, (err, out) => {
+      const id = !err && /#\s*(0x[0-9a-f]+)/i.exec(String(out));
+      if (!id || id[1] === '0x0') return;
+      execFile('xprop', ['-id', id[1], '_NET_WM_PID', '_NET_WM_NAME', 'WM_CLASS'], { timeout: 1500 }, (e2, info) => {
+        if (e2) return;
+        const text = String(info);
+        const pid = /_NET_WM_PID\(CARDINAL\) = (\d+)/.exec(text);
+        const title = /_NET_WM_NAME\(UTF8_STRING\) = "(.*)"/.exec(text);
+        const cls = /WM_CLASS\(STRING\) = "([^"]*)", "([^"]*)"/.exec(text);
+        this.foregroundPid = pid ? Number(pid[1]) : 0;
+        this.foregroundTitle = title ? title[1] : '';
+        const name = cls ? cls[1].toLowerCase() : null;
+        if (name !== this.foreground) {
+          this.foreground = name;
+          if (this.onForeground) this.onForeground(name);
+        }
       });
     });
   }

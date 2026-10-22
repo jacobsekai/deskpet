@@ -122,6 +122,7 @@
         $('#acc-owner').value = state.names.ownerName;
       }
     }
+    renderSync();
     $('#about-update').textContent = state.update.available ? `Version ${state.update.available} is available!` : `You're on the latest version (${state.version}).`;
     $('#about-update-btn').textContent = state.update.available ? `⬆️ Update to v${state.update.available}` : 'Check for updates';
   }
@@ -192,15 +193,11 @@
       $('#modal-text').textContent = r.prestige + 1 >= 10
         ? `${state.names.petName} goes back to level 1 as a Prestige Master and can then level all the way to 1000. Every reward stays unlocked.`
         : `${state.names.petName} goes back to level 1 and earns a ${r.nextEmblem} prestige badge. Every reward stays unlocked.`;
-      $('#modal').hidden = false;
+      openModal({ ok: 'Prestige', cancel: 'Not yet', onOk: async () => { await call('prestige'); burstConfetti(); refresh(); } });
     });
     $('#modal-cancel').addEventListener('click', () => { $('#modal').hidden = true; });
-    $('#modal-ok').addEventListener('click', async () => {
-      $('#modal').hidden = true;
-      await call('prestige');
-      burstConfetti();
-      refresh();
-    });
+    $('#modal-ok').addEventListener('click', () => { $('#modal').hidden = true; if (modalActions.ok) modalActions.ok(); });
+    $('#modal-alt').addEventListener('click', () => { $('#modal').hidden = true; if (modalActions.alt) modalActions.alt(); });
     $('#badge-toggle').addEventListener('change', (e) => set('showPrestigeBadge', e.target.checked));
   }
 
@@ -368,6 +365,7 @@
     }
     $('#block-note').textContent = state.platform === 'windows'
       ? 'Matched against the browser window title, in any browser.'
+      : state.platform === 'linux' ? 'Matched against the browser window title (X11 sessions; Wayland doesn\'t share window titles).'
       : 'Reads the active tab in Safari, Chrome, Edge, Brave, Arc, Vivaldi, and Opera (macOS asks once per browser).';
   }
 
@@ -415,6 +413,7 @@
     box.innerHTML = '';
     for (const [key, title, desc] of TOGGLES) {
       if (key === 'startAtLogin' && !state.toggles.startAtLoginSupported) continue;
+      if (key === 'walkOnWindows' && state.toggles.walkOnWindowsSupported === false) continue;
       const row = el('div', `toggle${state.toggles[key] ? ' on' : ''}`);
       row.appendChild(el('div', 'icon', ICONS[key]));
       row.appendChild(el('div', '', `<div class="title">${esc(title)}</div><div class="desc">${esc(desc)}</div>`));
@@ -422,6 +421,84 @@
       row.addEventListener('click', () => set(key, !state.toggles[key]));
       box.appendChild(row);
     }
+  }
+
+  let modalActions = {};
+  /** Shows the modal (title/text/emblem already filled in) with up to two actions. */
+  function openModal({ ok, alt, cancel, onOk, onAlt }) {
+    modalActions = { ok: onOk, alt: onAlt };
+    $('#modal-ok').textContent = ok;
+    $('#modal-cancel').textContent = cancel || 'Cancel';
+    $('#modal-alt').hidden = !alt;
+    if (alt) $('#modal-alt').textContent = alt;
+    $('#modal').hidden = false;
+  }
+
+  // MARK: Sync
+
+  const PLATFORM_ICONS = { macOS: '💻', Windows: '🪟', Linux: '🐧' };
+  let lastSync = '';
+
+  function renderSync() {
+    const s = state.sync;
+    if (!s) return;
+    const key = JSON.stringify(s);
+    if (key === lastSync) return;
+    lastSync = key;
+    const box = $('#sync-box');
+    box.innerHTML = '';
+    if (!s.enabled) {
+      box.appendChild(el('p', 'sub', 'Pick a folder your cloud drive already syncs. Each device keeps its own file there, so XP and stats add up across all of them, and names, settings, rewards, and prestige follow whichever device changed them last. Nothing goes through a server.'));
+      const row = el('div', 'actions');
+      for (const c of s.candidates) {
+        const b = el('button', 'ghost-btn folder-btn', `<span>☁️ ${esc(c.name)}</span><small>${esc(c.path)}</small>`);
+        b.addEventListener('click', () => startSync(c.path, c.name));
+        row.appendChild(b);
+      }
+      const choose = el('button', s.candidates.length ? 'ghost-btn' : 'primary', s.candidates.length ? 'Choose another folder…' : 'Choose a synced folder…');
+      choose.addEventListener('click', async () => { const r = await call('syncChoose'); if (r && r.path) startSync(r.path, r.path.split(/[\\/]/).pop()); });
+      row.appendChild(choose);
+      box.appendChild(row);
+      return;
+    }
+    box.appendChild(el('div', 'sync-on', `<span class="dot-live"></span>Syncing through ${esc(s.folderName || s.folder)}${s.lastSync ? `<span class="muted"> · ${esc(s.lastSync)}</span>` : ''}`));
+    if (s.error) box.appendChild(el('p', 'note error', esc(s.error)));
+    const list = el('div', 'devices');
+    for (const d of s.devices) {
+      list.appendChild(el('div', 'device', `<span class="icon">${PLATFORM_ICONS[d.platform] || '🖥️'}</span>
+        <div><div><b>${esc(d.name)}</b> ${d.me ? '<span class="me">THIS DEVICE</span>' : ''}</div><div class="meta">${esc(d.platform)} · ${d.xp} XP · updated ${esc(d.updated)}</div></div><span></span>`));
+    }
+    if (s.devices.length < 2) list.appendChild(el('div', 'empty', `Turn on sync on your other devices with the same folder and they'll show up here.`));
+    box.appendChild(list);
+    const packs = el('div', 'toggle-row', `<span>Keep sprite packs in the sync folder</span><div class="switch-btn${s.syncPacks ? ' on' : ''}"></div>`);
+    packs.querySelector('.switch-btn').addEventListener('click', () => call('syncPacks', { on: !s.syncPacks }).then(refresh));
+    box.appendChild(packs);
+    const row = el('div', 'actions');
+    const now = el('button', 'ghost-btn', '🔄 Sync now');
+    now.addEventListener('click', () => call('syncNow').then(refresh));
+    const off = el('button', 'ghost-btn', 'Turn off sync');
+    off.addEventListener('click', () => call('syncDisable').then(refresh));
+    row.appendChild(now);
+    row.appendChild(off);
+    box.appendChild(row);
+  }
+
+  /** If the folder already has progress from other devices, ask how to join. */
+  async function startSync(path, name) {
+    const found = await call('syncInspect', { path });
+    if (!found.devices || !found.localXP) {
+      await call('syncEnable', { path, mode: 'merge' });
+      return refresh();
+    }
+    $('#modal-emblem').textContent = '☁️';
+    $('#modal-title').textContent = `Join sync in ${name}?`;
+    $('#modal-text').textContent = `${found.names.join(', ')} already ${found.devices === 1 ? 'has' : 'have'} ${found.xp} XP there, and this device has ${found.localXP} XP. `
+      + 'Combine adds them together. If you already moved this progress with a transfer key, use the synced progress instead so nothing counts twice (this device\'s stats are backed up).';
+    openModal({
+      ok: 'Combine', alt: 'Use synced progress', cancel: 'Cancel',
+      onOk: () => call('syncEnable', { path, mode: 'merge' }).then(refresh),
+      onAlt: () => call('syncEnable', { path, mode: 'fresh' }).then(refresh),
+    });
   }
 
   // MARK: Account & About

@@ -116,6 +116,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     private var lastStatsSave = 0.0
     private var lastKiroCheck = 0.0
     private var updateAnnounced = false
+    private let sync = Sync()
+    private var lastSyncTick = 0.0
     private var lastBrowserCheck = 0.0
     private var lastBlockNag = 0.0
     /// Recent XP gain shown floating above the pet.
@@ -339,6 +341,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         if focus.phase == .focus && blockDuringFocus && !blocklist.isEmpty && now - lastBrowserCheck > 2 {
             lastBrowserCheck = now
             checkForDistraction()
+        }
+        if sync.enabled && now - lastSyncTick > 5 {
+            lastSyncTick = now
+            syncTick()
         }
         if now - lastMinute >= 60 {
             lastMinute = now
@@ -1075,6 +1081,102 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         say("focus mode: \(sender.tag) minutes\(blocking). you got this! 🍅", for: 3.5)
     }
 
+    // MARK: - Cloud sync
+
+    private func syncProfile() -> [String: Any] {
+        var settings: [String: Any] = [:]
+        for key in TransferKey.settingKeys { if let v = defaults.object(forKey: key) { settings[key] = v } }
+        return ["names": ["petName": config.petName, "ownerName": config.ownerName], "settings": settings,
+                "prestige": stats.prestige, "prestigeBase": stats.prestigeBase]
+    }
+
+    private func syncTick() {
+        let levelBefore = stats.level
+        if stats.syncedPrestige == nil { stats.syncedPrestige = (stats.prestige, stats.prestigeBase) }
+        guard let result = sync.sync(localStats: stats.deviceExport, profile: syncProfile()) else { return }
+        stats.remoteXP = result.remoteXP
+        stats.remoteDays = result.remoteDays
+        if let profile = result.newerProfile { applySyncProfile(profile) }
+        if stats.level > levelBefore { levelUp(stats.level) }
+    }
+
+    /// Another device changed names, settings, or prestige more recently: follow it.
+    private func applySyncProfile(_ profile: [String: Any]) {
+        let packBefore = spritePackName
+        if let names = profile["names"] as? [String: Any] {
+            let pet = names["petName"] as? String ?? config.petName, owner = names["ownerName"] as? String ?? config.ownerName
+            if pet != config.petName || owner != config.ownerName {
+                Config.save(["petName": pet, "ownerName": owner])
+                config.petName = pet
+                config.ownerName = owner
+            }
+        }
+        for (key, value) in profile["settings"] as? [String: Any] ?? [:] where TransferKey.settingKeys.contains(key) && !(value is NSNull) {
+            defaults.set(value, forKey: key)
+        }
+        if let rank = profile["prestige"] as? Int, let base = profile["prestigeBase"] as? Int { stats.syncedPrestige = (rank, base) }
+        if spritePackName != packBefore { loadSprites(announce: false) }
+        petView.theme = Theme(hex: themeHex) ?? .default
+        petView.thoughtBubble = thoughtBubble
+        sounds.enabled = soundsOn
+        sync.accept(profile: syncProfile())
+    }
+
+    private func syncState() -> [String: Any] {
+        let fmt = RelativeDateTimeFormatter()
+        fmt.unitsStyle = .short
+        return [
+            "enabled": sync.enabled, "folder": sync.folder?.path as Any, "folderName": sync.folder?.lastPathComponent as Any,
+            "devices": sync.devices.map { d in
+                ["name": d.name, "platform": d.platform, "me": d.id == sync.deviceID, "xp": d.xp,
+                 "updated": fmt.localizedString(for: Date(timeIntervalSince1970: d.updated), relativeTo: Date())] as [String: Any]
+            },
+            "lastSync": sync.lastSync.map { fmt.localizedString(for: $0, relativeTo: Date()) } as Any,
+            "error": sync.error as Any,
+            "syncPacks": defaults.bool(forKey: "syncPacks"),
+            "candidates": Sync.candidates().map { ["name": $0.name, "path": $0.path] },
+            "deviceName": sync.deviceName,
+        ]
+    }
+
+    private func enableSync(path: String, fresh: Bool) {
+        if fresh { stats.resetLocal() }
+        let folder = URL(fileURLWithPath: path)
+        let first = Sync.inspect(folder, excluding: sync.deviceID).devices == 0
+        sync.folder = folder
+        stats.syncedPrestige = (stats.prestige, stats.prestigeBase)
+        sync.prepareJoin(profile: syncProfile(), first: first)
+        lastSyncTick = 0
+        syncTick()
+        say(fresh ? "synced! picking up where you left off ☁️" : "sync is on: progress adds up across devices ☁️", for: 4)
+    }
+
+    private func disableSync() {
+        stats.leaveSync()
+        sync.disable()
+        if defaults.bool(forKey: "syncPacks") {
+            defaults.set(false, forKey: "syncPacks")
+            loadSprites(announce: false)
+        }
+        say("sync is off ☁️", for: 2.5)
+    }
+
+    /// Moving packs into the sync folder copies the local ones there first.
+    private func setSyncPacks(_ on: Bool) {
+        if on, let dest = sync.spritesFolder {
+            let local = DeskPetPaths.root.appendingPathComponent("sprites")
+            try? FileManager.default.createDirectory(at: dest, withIntermediateDirectories: true)
+            for name in (try? FileManager.default.contentsOfDirectory(atPath: local.path)) ?? [] where !name.hasPrefix(".") {
+                let target = dest.appendingPathComponent(name)
+                if !FileManager.default.fileExists(atPath: target.path) {
+                    try? FileManager.default.copyItem(at: local.appendingPathComponent(name), to: target)
+                }
+            }
+        }
+        defaults.set(on, forKey: "syncPacks")
+        loadSprites(announce: false)
+    }
+
     // MARK: - Focus blocklist
 
     private func checkForDistraction() {
@@ -1396,6 +1498,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             "hooks": ["claudeInstalled": HookInstaller.installed(), "claudeLive": HookInstaller.installed() && HookInstaller.live(),
                       "kiroInstalled": kiroHooksOn && KiroHooks.installed(), "kiroSupported": true],
             "update": ["available": updater.available?.version as Any],
+            "sync": syncState(),
             "preview": ["hat": pose.hat as Any, "trail": pose.trail as Any, "aura": pose.aura as Any,
                         "companion": pose.companion as Any, "golden": pose.golden, "prestige": pose.prestige],
         ]
@@ -1491,6 +1594,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             } catch {
                 return ["ok": false, "error": error.localizedDescription]
             }
+        case "syncInspect":
+            let found = Sync.inspect(URL(fileURLWithPath: payload["path"] as? String ?? ""), excluding: sync.deviceID)
+            return ["devices": found.devices, "xp": found.xp, "names": found.names, "localXP": stats.localXP]
+        case "syncChoose":
+            let open = NSOpenPanel()
+            open.canChooseDirectories = true
+            open.canChooseFiles = false
+            open.canCreateDirectories = true
+            open.message = "Choose a folder your cloud drive syncs (iCloud Drive, OneDrive, Dropbox, …)"
+            NSApp.activate(ignoringOtherApps: true)
+            guard open.runModal() == .OK, let url = open.url else { return [:] as [String: Any] }
+            return ["path": url.path]
+        case "syncEnable":
+            enableSync(path: payload["path"] as? String ?? "", fresh: payload["mode"] as? String == "fresh")
+            return ["ok": true]
+        case "syncDisable":
+            disableSync()
+            return ["ok": true]
+        case "syncNow":
+            syncTick()
+            return ["ok": true]
+        case "syncPacks":
+            setSyncPacks(payload["on"] as? Bool ?? false)
+            return ["ok": true]
         case "importPack": importPack(); return ["ok": true]
         case "exportPack": exportPack(); return ["ok": true]
         case "previewPoses": previewPoses(); return ["ok": true]

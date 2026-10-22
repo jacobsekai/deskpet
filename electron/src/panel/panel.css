@@ -120,6 +120,15 @@ textarea:focus { border-color: var(--accent); }
 .about { display: grid; grid-template-columns: 160px 1fr; gap: 16px; align-items: center; }
 .about canvas { width: 160px; height: 140px; }
 
+.sync-on { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 13.5px; margin-bottom: 8px; }
+.sync-on .dot-live { color: #34c759; }
+.devices { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+.device { display: grid; grid-template-columns: 26px 1fr auto; gap: 10px; align-items: center; background: white; border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; font-size: 13px; }
+.device .icon { font-size: 18px; text-align: center; }
+.device .meta { font-size: 11.5px; color: var(--muted); }
+.device .me { font-size: 10.5px; font-weight: 800; color: var(--accent); }
+.folder-btn { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; }
+.folder-btn small { font-weight: 500; color: var(--muted); font-size: 11px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .modal { position: absolute; inset: 0; z-index: 10; display: grid; place-items: center; background: rgba(42, 29, 24, 0.25); backdrop-filter: blur(6px); }
 .modal[hidden] { display: none; }
 .modal-card { width: 380px; background: #fffaf7; border-radius: 22px; padding: 24px; text-align: center; box-shadow: 0 30px 70px -20px rgba(0, 0, 0, 0.45); animation: rise 0.3s both; }
