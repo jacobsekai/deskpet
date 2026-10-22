@@ -13,6 +13,7 @@ const {
 const { paths, Settings, loadConfig, saveConfig, hooksLive, readJSON, setSpritesOverride } = require('./settings');
 const { Sync } = require('./sync');
 const hooks = require('./hooks');
+const { spawn } = require('child_process');
 
 const GROUND = 34;
 
@@ -1601,8 +1602,26 @@ class Pet {
 
 /** Quits, forcing the exit if a window or helper holds shutdown up (seen on Windows). */
 function quitApp() {
+  exitWatchdog(5);
   app.quit();
-  setTimeout(() => app.exit(0), 1500).unref();
+  setTimeout(() => exitNow(0), 1500).unref();
+}
+
+/** Quits without cleanup handlers (snapshots, tests, and when a normal quit stalls). */
+function exitNow(code) {
+  exitWatchdog(2);
+  for (const w of BrowserWindow.getAllWindows()) { try { w.destroy(); } catch (_) { /* already gone */ } }
+  app.exit(code);
+}
+
+/** On some Linux X servers Electron blocks while tearing down transparent windows, so a helper makes sure we go. */
+let watchdogStarted = false;
+function exitWatchdog(seconds) {
+  if (process.platform !== 'linux' || watchdogStarted) return;
+  watchdogStarted = true;
+  try {
+    spawn('sh', ['-c', `sleep ${seconds}; kill -9 ${process.pid} 2>/dev/null`], { detached: true, stdio: 'ignore' }).unref();
+  } catch (_) { /* no shell */ }
 }
 
 function pointIn(r, x, y) { return x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height; }
@@ -1631,8 +1650,8 @@ function runSnapshot() {
     webPreferences: { preload: path.join(__dirname, 'preload.js'), offscreen: false },
   });
   win.webContents.on('console-message', (e) => console.log('renderer:', e.message));
-  win.webContents.on('render-process-gone', (_e, d) => { console.error('renderer gone:', d.reason); app.exit(3); });
-  setTimeout(() => { console.error('snapshot timed out'); app.exit(2); }, 45000);
+  win.webContents.on('render-process-gone', (_e, d) => { console.error('renderer gone:', d.reason); exitNow(3); });
+  setTimeout(() => { console.error('snapshot timed out'); exitNow(2); }, 45000);
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'), { query: { snapshot: '1' } });
   ipcMain.once('snapshot-done', (_e, dataURL) => {
     const out = path.join(__dirname, '..', 'test-output');
@@ -1640,7 +1659,7 @@ function runSnapshot() {
     const file = path.join(out, packName ? `snapshot-${packName}.png` : 'snapshot.png');
     fs.writeFileSync(file, Buffer.from(dataURL.split(',')[1], 'base64'));
     console.log(`wrote ${file}`);
-    app.exit(0);
+    exitNow(0);
   });
   win.webContents.on('did-finish-load', () => {
     let source = null;
@@ -1668,10 +1687,10 @@ if (process.argv.includes('--snapshot')) {
   const selfTest = process.argv.includes('--self-test');
   if (selfTest) {
     // Make startup failures visible (and fatal) when testing.
-    const fail = (e) => { console.error('self-test failed:', e && e.stack ? e.stack : e); app.exit(1); };
+    const fail = (e) => { console.error('self-test failed:', e && e.stack ? e.stack : e); exitNow(1); };
     process.on('uncaughtException', fail);
     process.on('unhandledRejection', fail);
-    setTimeout(() => { console.error('self-test timed out'); app.exit(2); }, 30000);
+    setTimeout(() => { console.error('self-test timed out'); exitNow(2); }, 30000);
   }
   app.whenReady().then(() => {
     pet = new Pet();
@@ -1706,12 +1725,12 @@ if (process.argv.includes('--snapshot')) {
           fs.writeFileSync(path.join(out, `wizard-${i}.png`), image.toPNG());
         }
         console.log('wizard screenshots written');
-        app.quit();
+        quitApp();
       });
     }
     // `--panel-snapshot`: screenshot every control center page to test-output/, then quit.
     if (process.argv.includes('--panel-snapshot')) {
-      setTimeout(() => { console.error('panel snapshot timed out'); app.exit(2); }, 60000);
+      setTimeout(() => { console.error('panel snapshot timed out'); exitNow(2); }, 60000);
       pet.openPanel();
       pet.panel.webContents.on('console-message', (e) => console.log('panel:', e.message));
       pet.panel.webContents.once('did-finish-load', async () => {
@@ -1725,7 +1744,7 @@ if (process.argv.includes('--snapshot')) {
           fs.writeFileSync(path.join(out, `panel-${page}.png`), (await pet.panel.webContents.capturePage()).toPNG());
         }
         console.log('panel screenshots written');
-        app.exit(0);
+        quitApp(); // the same path as Quit in the control center
       });
     }
     // `--card-snapshot`: render the hover card to test-output/card.png, then quit.
@@ -1742,7 +1761,7 @@ if (process.argv.includes('--snapshot')) {
         fs.mkdirSync(path.join(__dirname, '..', 'test-output'), { recursive: true });
         fs.writeFileSync(path.join(__dirname, '..', 'test-output', 'card.png'), image.toPNG());
         console.log('card written', pet.cardSize);
-        app.quit();
+        quitApp();
       }, 5000);
     }
     // `--self-test`: run normally for a few seconds, print what was detected, then quit.
@@ -1754,7 +1773,7 @@ if (process.argv.includes('--snapshot')) {
           scans: pet.agents.scanCount, pack: pet.pack && pet.pack.name, menuItems: pet.buildMenu().items.length,
           windowsToStandOn: pet.platforms.platforms.length, inCall: pet.agents.inCall, version: app.getVersion(),
         }, null, 2));
-        app.exit(0);
+        quitApp();
       }, 7000);
     }
   });

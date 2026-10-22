@@ -44,7 +44,10 @@ jobs:
         timeout-minutes: 5
         run: |
           timeout 90 xvfb-run -a npx electron . --snapshot --no-sandbox
-          timeout 120 xvfb-run -a npx electron . --panel-snapshot --no-sandbox
+          # Ends through Quit; 137 means the exit watchdog had to kill a stalled quit.
+          code=0; timeout 120 xvfb-run -a npx electron . --panel-snapshot --no-sandbox || code=$?
+          echo "panel snapshot exit code: $code"
+          if [ "$code" = 137 ]; then echo "::warning::quit stalled and the watchdog killed it"; elif [ "$code" != 0 ]; then exit $code; fi
           ls test-output
 
       - uses: actions/upload-artifact@v4
