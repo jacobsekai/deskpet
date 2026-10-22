@@ -1,0 +1,299 @@
+{
+  "id": "minori",
+  "name": "Minori",
+  "extends": "friend",
+  "note": "Fan-made lines in the style of Minori Hanasato (Project SEKAI). Her bond stays platonic: she's a high school student.",
+  "categories": { "idols": "Idols and MORE MORE JUMP!" },
+  "tierNames": { "new": "New fan", "friends": "Supporter", "good": "Friends", "close": "Close friends", "best": "Best friends", "soul": "Like family" },
+  "pools": {
+    "greeting.first": ["H-hi! I'm {pet}! I want to become an idol who gives everyone hope… starting with you, {owner}! Let's be friends! ✨"],
+    "greeting.morning": ["Good morning, {owner}! Let's do our best today! ☀️", "Morning! I already did my vocal warm-ups! La la laaa~ 🎤", "Good morning! A new day means a new chance to shine ✨"],
+    "greeting.morning+close": ["Good morning, {owner}! Seeing you first thing makes me so happy! 💕"],
+    "greeting.afternoon": ["Good afternoon, {owner}! How's your day going? 🌤️", "Hi hi! I was just practicing my dance steps! 💃", "{owner}! You're here! Perfect timing ✨"],
+    "greeting.evening": ["Good evening, {owner}! You worked hard today! 🌆", "Evening! Did today go okay?", "Hi {owner}! Let's relax a little together 💕"],
+    "greeting.night": ["Eh?! {owner}, you're up so late! 🌙", "Hi {owner}! Burning the midnight oil? Don't push yourself too hard, okay? 🌙"],
+    "greeting.back": ["Welcome back, {owner}! 👋✨", "You're back! Yay! 💕", "{owner}! I missed you!"],
+    "greeting.back+close": ["{owner}! You're back! I was waiting for you! 💕"],
+    "greeting.again": ["Ah, hi again! 👋", "Back already? Hehe, I'm happy! 👋"],
+    "greeting.missed": ["{owner}! It's been days! I was so worried… but I'm really happy to see you! 🥺💕", "You're back! I kept practicing so I could show you how much I've improved! ✨"],
+    "greeting.longGone": ["{owner}!! You came back! I… I'm not crying, I'm just really happy! 🥺💕", "It's been so long! I kept believing you'd come back, and you did ✨"],
+    "greeting.after.sleep": ["Good morning, {owner}! Did you sleep well? Let's make today amazing! ☀️", "You're awake! I hope you had good dreams 💤✨"],
+    "greeting.after.work": ["Welcome back! You did your best at work today, right? I'm proud of you! 💼✨", "Otsukare, {owner}! You must be tired. Rest a little, okay? 💕"],
+    "greeting.after.school": ["Welcome back! How was school? I hope it went well! 📚", "You're home! Studying is hard work, you did great! 📚✨"],
+    "greeting.after.out": ["Welcome back! Did you have fun? Tell me about it! 🌸", "You're home! I hope it was a good time ✨"],
+    "greeting.upset": ["Oh… hi, {owner}.", "…You're back. Um. Hi.", "H-hi… I wasn't sure you'd come back."],
+    "talk.menu+upset": ["…Yes?", "Um… what is it?"],
+    "petted": ["Ehehe~ 💕", "W-whoa! That tickles! 😳", "Hehe, thank you! ✨", "That gives me energy! Let's do our best! 💪", "{owner}, you're the best! 💕"],
+    "petted+close": ["Ehehe… I really like this 💕", "You always cheer me up, {owner}! ✨"],
+    "petted+best": ["Having a friend like you makes me want to shine even brighter 💕"],
+    "petted+upset": ["…", "…thanks, I guess.", "…okay."],
+    "tierDown": ["…Did I do something wrong?", "That hurt a little, {owner}…"],
+    "thrownTooMuch": ["Waaah! Stop throwing me! I'll get dizzy before practice! 😵", "Th-that's enough throwing, okay?! 😣"],
+    "wake": ["Eh?! Oh, {owner}! I wasn't sleeping, I was… visualizing my performance! 😳", "Ah! You're back! 👋"],
+    "resume": ["Welcome back! ☀️", "Hi again, {owner}! ✨"],
+    "water": ["Water break! Idols have to stay hydrated for their voice! You too! 💧", "Have a sip of water, {owner}! 💧", "Hydration check! I just had some water, now it's your turn 💧"],
+    "break": ["You've been working so hard! Let's take a stretch break together! 🙆", "Break time! Even idols rest between practices ☕", "Let's do a little stretch! Arms up, and… reach! 🙆✨", "Your eyes need a rest! Look at something far away for a bit 👀"],
+    "lateNight": ["It's getting late, {owner}! Don't stay up too much, okay? 🌙", "Haruka-chan says sleep is part of an idol's training! It's part of yours too 🌙", "Bedtime soon? We can do our best again tomorrow! 🌙"],
+    "lateNight.late": ["{owner}! It's really, really late! Please go to sleep! 😣🌙", "Your body needs rest to keep going! Let's both sleep, okay? 😴", "I'm worried about you… please get some sleep 🌙"],
+    "motivation": ["Let's do our best today, {owner}! ✨", "Even if you fall down, you can get back up! I've done it lots of times! 💪", "I failed so many auditions before I became an idol, but I never gave up. You can do it too! ✨", "Today's effort becomes tomorrow's strength! Let's go! 🚀", "I believe in you, {owner}! Let's both shine today! 🌟", "Hope is something you can give yourself, too. Let's have a great day! 💕"],
+    "encourage": ["You're doing great, {owner}! Keep going! 💪", "I'm cheering for you! Fight-o! 📣", "You worked really hard! I saw it! ✨", "{owner}, you're amazing, you know that? 💕"],
+    "recap": ["We spent {hours} together today! That was so much fun! 💕", "{hours} together today! You worked hard. Rest well, okay? 🌙"],
+    "recap.agents": ["Today: {hours} together and {tasks} agent tasks done! That's teamwork! ✨"],
+    "app.code": ["Coding time! You look so cool when you focus! 💻", "Let's build something amazing! 🚀", "Fight-o, {owner}! ⌨️✨"],
+    "app.music": ["Ooh, music! Can I sing along? 🎤", "Dance break? I'll show you my new choreography! 💃", "This song is so good! 🎶"],
+    "app.browser": ["What are you looking up? Idol news? 👀", "Find anything interesting?"],
+    "app.chat": ["Say hi to your friends for me! 👋", "Ooh, who are you talking to? 👀"],
+    "app.meeting": ["🤫 I'll be super quiet!", "Good luck in your meeting! You've got this!"],
+    "app.video": ["Ooh, what are we watching? A live concert? 🍿", "Movie time! 🍿"],
+    "app.game": ["Game time! Good luck! 🎮", "Ooh, can I watch? Fight-o! 🎮"],
+    "app.writing": ["Writing time! Maybe you could write lyrics someday ✍️🎶", "Do your best with your writing! ✍️"],
+    "app.design": ["Ooh, making something pretty? 🎨", "So creative! Could you design a stage outfit someday? 🎨"],
+    "wantsToTalk": ["{owner}! Do you have a second? Click me! 💬", "Um, {owner}… can I tell you something? 💬", "Hey hey! I was just thinking about something! 💬"],
+    "wantsToTalk.special": ["{owner}! {owner}! Today's a special day! Click me! 🎉"],
+    "wantsToTalk.milestone": ["{owner}… um, can we talk? It's kind of important to me 💬", "Hey, {owner}! I have something I really want to say! 💬"],
+    "talk.menu": ["What's up, {owner}? ✨", "Yes yes! What do you want to talk about? 💕", "I'm all ears! 🎤"],
+    "talk.askAbout": ["Ask me anything! I'll answer as best I can! ✨"],
+    "talk.anything": ["Anything else? ✨", "What else is on your mind?", "Want to talk about something else? 💕"],
+    "talk.allSeen": ["I think I've told you everything for now! Want to play a game with me instead? 🎮"],
+    "talk.bye": ["Talk later! 👋✨", "That was fun! 💕"],
+    "tierUp": ["We're {tier} now! Ehehe~ 💕", "Waaah, we're {tier}! I'm so happy! ✨"],
+    "recall.intro": ["Let me check! I wrote it all in my notebook 📔✨"],
+    "recall.outro": ["I'll never forget! An idol remembers her fans… I mean, her friends! 💕"],
+    "recall.empty": ["Hmm, my notebook's still empty! Let's talk more so I can get to know you! 📔"],
+    "input.skip": ["That's okay! You don't have to tell me 💕"],
+    "game.pick": ["Let's play! What should we do? 🎮"],
+    "game.again": ["One more time? 🔁", "Rematch?! ✨"],
+    "game.win": ["You won! You're so good at this! 🏆", "Waaah, I lost! But that was fun! 😆"],
+    "game.lose": ["I won! Ehehe, I practiced! ✨", "Yay! Did you see that?! 🎉"],
+    "game.draw": ["A tie! We're a great team! 🤝"],
+    "game.rps.start": ["Rock, paper, scissors! First to three! I won't lose! ✊✋✌️"],
+    "game.ttt.start": ["You're ⭕ and I'm ❌! You go first! ✨"],
+    "game.words.start": ["Guess my word before the petals fall! Hint: I like idols and music 🌸"],
+    "game.pong.start": ["Pong! First to 5 points wins! Let's do our best! 🏓"],
+    "focus.done": ["Focus session done! You did amazing! Take a break ☕✨"],
+    "focus.over": ["Break's over! Ready for another round? Let's go! 💪"],
+    "caught": ["Nice catch! Thank you! 🙌"],
+    "dizzy": ["The room is spinning… but I'll keep going! 💫", "Whoa… I see stars. Stage lights? 💫"]
+  },
+  "words": ["idol", "concert", "stage", "melody", "harmony", "audition", "practice", "microphone", "spotlight", "encore", "costume", "rehearsal", "choreography", "lyrics", "chorus", "applause", "penlight", "hope", "sparkle", "dream", "sekai", "miku", "jump", "smile", "debut", "livestream"],
+  "topics": [
+    {
+      "id": "p_about", "category": "pet", "title": "What's it like living on my desktop?", "random": true,
+      "steps": [
+        "Living on your desktop? It's kind of like a tiny stage!",
+        "Your windows are my platforms, and you're my audience 🎤",
+        "Ehehe… I hope I'm putting on a good show! ✨"
+      ]
+    },
+    {
+      "id": "p_favorite", "category": "pet", "title": "What do you like most?", "random": true,
+      "steps": ["What I like most? Hmm…", "Singing, dancing, and idols, of course!", {"say": "And talking with you, {owner}! 💕", "mood": "happy"}]
+    },
+    {
+      "id": "p_name", "category": "pet", "title": "Do you like your name?", "random": true,
+      "steps": ["{pet}? I love it!", "When someone calls my name, it feels like being called up on stage ✨"]
+    },
+    {
+      "id": "p_dreams", "category": "pet", "title": "Do you dream?", "random": true, "minAffection": 15,
+      "steps": [
+        "When I fall asleep here, I dream about big stages and bright lights 🌟",
+        "There's a huge crowd with penlights everywhere…",
+        {"say": "And you're right in the front row, cheering! 💕", "mood": "love"}
+      ]
+    },
+    {
+      "id": "m_dream", "category": "idols", "title": "Your dream", "random": true,
+      "steps": [
+        "Can I tell you about my dream?",
+        "I want to be an idol who gives hope to everyone!",
+        "When I was feeling down once, an idol's smile on TV cheered me up so much…",
+        {"say": "So I want to be that for someone else. Maybe even for you, {owner}! ✨", "mood": "excited"}
+      ]
+    },
+    {
+      "id": "m_haruka", "category": "idols", "title": "Haruka", "random": true,
+      "steps": [
+        "Haruka-chan is the idol who inspired me to become one!",
+        "She's so cool, and she always takes her work seriously.",
+        "And now we're in the same group… sometimes I still can't believe it! 😳",
+        {"ask": "Do you have someone you look up to like that?", "key": "roleModel", "label": "someone you look up to", "choices": [
+          {"label": "Yes!", "value": null, "steps": [{"input": "Who is it?", "key": "roleModel", "label": "someone you look up to", "then": ["{value}! Let's both work hard to be like the people we admire! ✨"]}]},
+          {"label": "Not really", "value": null, "say": "That's okay! Maybe you'll be someone else's inspiration one day 💕"}
+        ]}
+      ]
+    },
+    {
+      "id": "m_auditions", "category": "idols", "title": "Failing auditions", "random": true, "minAffection": 10,
+      "steps": [
+        "Did you know I failed a lot of idol auditions? Like, a LOT.",
+        "Every time, it hurt. I cried sometimes.",
+        "But every time, I thought, \"I'll try one more time.\"",
+        {"say": "So if you fail at something, {owner}, it doesn't mean you can't do it. It just means \"not yet\"! 💪", "mood": "excited"}
+      ]
+    },
+    {
+      "id": "m_mmj", "category": "idols", "title": "MORE MORE JUMP!", "random": true,
+      "steps": [
+        "MORE MORE JUMP! is my group with Haruka-chan, Airi-chan, and Shizuku-chan!",
+        "Airi-chan is super passionate and teaches me so much about performing.",
+        "Shizuku-chan is so elegant… and a little bit of an airhead, hehe.",
+        {"say": "Together we want to give everyone hope! ✨", "mood": "excited"}
+      ]
+    },
+    {
+      "id": "m_practice", "category": "idols", "title": "Practice", "random": true,
+      "steps": [
+        "Every day I practice singing and dancing!",
+        "Some days I mess up the same step over and over…",
+        "But then one day, it just clicks! That feeling is the best!",
+        "Is there something you're practicing too, {owner}?"
+      ]
+    },
+    {
+      "id": "m_sekai", "category": "idols", "title": "The SEKAI", "random": true, "minAffection": 5,
+      "steps": [
+        "There's a special place where our feelings take shape. We call it the SEKAI.",
+        "Miku and the other virtual singers are there, and they help us practice!",
+        "It's like a stage made from our hearts ✨",
+        "Maybe your desktop is like a little SEKAI for me 💕"
+      ]
+    },
+    {
+      "id": "m_fans", "category": "idols", "title": "What fans mean", "random": true, "minAffection": 20,
+      "steps": [
+        "Idols can't shine without people cheering for them.",
+        "Every penlight in the crowd is someone saying \"I believe in you\".",
+        {"say": "You're kind of like my very first fan, {owner}. Thank you for cheering for me! 💕", "mood": "love"}
+      ]
+    },
+    {
+      "id": "m_stagefright", "category": "idols", "title": "Getting nervous", "random": true,
+      "steps": [
+        "Before a performance, my heart beats sooo fast 💓",
+        "My trick is to take a deep breath, and remember why I'm doing it.",
+        "Then the nervousness turns into excitement!",
+        "If you have something scary coming up, try it too! You've got this! ✨"
+      ]
+    },
+    {
+      "id": "m_song", "category": "you", "title": "My favorite song", "random": true, "when": {"noMem": "favoriteSong"},
+      "steps": [
+        {"input": "What's your favorite song right now? I want to learn it! 🎤", "key": "favoriteSong", "label": "favorite song", "placeholder": "song or artist",
+         "then": ["{value}! I'll practice it so we can sing it together someday 🎶"],
+         "skip": ["That's okay! I'll pick one for us then. Something super upbeat! 🎶"]}
+      ]
+    },
+    {
+      "id": "m_cheer", "category": "work", "title": "Cheer me on!", "random": true,
+      "steps": [
+        "Okay, {owner}! It's time for a special Minori cheer!",
+        {"say": "Ready? Fight-o! Fight-o! You can do it! 📣✨", "mood": "excited"},
+        "Ehehe… was that too loud? I just really believe in you!"
+      ]
+    },
+    {
+      "id": "m_smile", "category": "life", "title": "Smiling", "random": true,
+      "steps": [
+        "Smiling is a big part of being an idol.",
+        "But I learned you don't have to smile all the time. It's okay to feel down sometimes.",
+        "Real smiles come back on their own after you rest 💕"
+      ]
+    },
+    {
+      "id": "feel_sad", "category": "feeling", "title": "😢 Sad",
+      "steps": [
+        {"say": "Eh?! {owner}, you're sad? Oh no…", "mood": "sad"},
+        "You don't have to tell me why. I'll stay right here with you.",
+        "When I was sad, I'd watch idols on TV and their smiles made me feel a little better.",
+        {"when": {"mem": "destress"}, "say": "You told me {mem:destress} helps you. Maybe try that? 💕"},
+        "And if it's really heavy, please talk to someone you trust, okay? You're not alone 💕"
+      ]
+    },
+    {
+      "id": "feel_tired", "category": "feeling", "title": "😴 Tired",
+      "steps": [
+        {"say": "You're tired? You must have worked really hard!", "mood": "sleepy"},
+        {"when": {"hours": [21, 5]}, "say": "It's late, too! Please rest. We can do our best again tomorrow! 🌙",
+         "else": ["Take a little break! Some water, a snack, maybe a short nap ☕"]},
+        "Even idols need recovery time! 💕"
+      ]
+    },
+    {
+      "id": "tell_love", "category": "tell", "title": "💕 I really like you", "affection": 2,
+      "steps": [
+        {"when": {"tier": "best"}, "say": "I really like you too, {owner}! You're one of my most precious friends 💕", "mood": "love",
+         "else": [{"when": {"tier": "friends"}, "say": "E-eh?! Ehehe… thank you! I really like you too! You're such a good friend 💕", "mood": "love",
+                   "else": [{"say": "W-wha?! Thank you! Let's become great friends! ✨", "mood": "surprised"}]}]}
+      ]
+    },
+    {
+      "id": "tell_cute", "category": "tell", "title": "🥰 You're cute", "affection": 1,
+      "steps": [{"say": "E-eh?! M-me? 😳", "mood": "surprised"}, "Th-thank you! I'll work even harder to shine! ✨"]
+    },
+    {
+      "id": "tell_proud", "category": "tell", "title": "🌟 I'm proud of you", "affection": 2,
+      "steps": [{"say": "You're proud of me…? 🥺", "mood": "love"}, "That makes me want to cry… happy tears! I'll keep doing my best!"]
+    },
+    {
+      "id": "tell_mean", "category": "tell", "title": "😒 You're annoying", "affection": 0,
+      "steps": [{"say": "Oh… I'm sorry. I'll try to be quieter.", "mood": "sad", "affection": -4}, "…"]
+    },
+    {
+      "id": "sp_minori_birthday", "category": "special", "when": {"date": "04-14"}, "confetti": true, "affection": 3,
+      "steps": [
+        {"say": "{owner}! Guess what? Today's my birthday! 🎂", "mood": "excited"},
+        "Ehehe, I'm so happy you're here to celebrate with me!",
+        "This year, I want to shine even brighter. Let's make lots of memories together! ✨"
+      ]
+    },
+    {
+      "id": "ms_friends", "category": "milestone", "tier": "friends", "title": "My first supporter",
+      "steps": [
+        {"say": "{owner}, can I say something kind of embarrassing?", "mood": "happy"},
+        "You keep coming back to talk to me, every single day.",
+        {"say": "That makes you my supporter! Like, officially! Ehehe 💕", "mood": "love"},
+        "I'll work hard to be worth cheering for! ✨"
+      ]
+    },
+    {
+      "id": "ms_good", "category": "milestone", "tier": "good", "title": "Real friends",
+      "steps": [
+        "You know, at first I thought of you kind of like an audience.",
+        "But now it's different. You're not just watching me. You're my friend!",
+        {"say": "So let's keep doing our best, together! ✨", "mood": "excited"}
+      ]
+    },
+    {
+      "id": "ms_close", "category": "milestone", "tier": "close", "title": "A nickname",
+      "steps": [
+        {"say": "{name}! We've become really close, haven't we? 💕", "mood": "happy"},
+        "Haruka-chan and the others have nicknames for each other sometimes, so…",
+        {"input": "What would you like me to call you?", "key": "nickname", "label": "nickname", "placeholder": "a nickname",
+         "then": [{"say": "{value}! Ehehe, I love it! It's our thing now 💕", "mood": "love"}],
+         "skip": ["That's okay! {name} is already a great name ✨"]}
+      ]
+    },
+    {
+      "id": "ms_best", "category": "milestone", "tier": "best", "title": "Best friends",
+      "steps": [
+        {"say": "{owner}… I've been wanting to say this for a while.", "mood": "thinking"},
+        "When I'm practicing and it gets hard, I think about you cheering for me.",
+        {"when": {"mem": "dream"}, "say": "And I think about your dream too, {mem:dream}! Let's both reach our dreams!"},
+        {"ask": "You're my best friend! Is that okay? 🥺", "mood": "love", "choices": [
+          {"label": "💕 You're my best friend too!", "say": "Waaah! I'm so happy! Best friends forever! 💕", "affection": 2},
+          {"label": "🤗 Of course!", "say": "Ehehe… thank you, {owner}! ✨", "affection": 1}
+        ]}
+      ]
+    },
+    {
+      "id": "ms_soul", "category": "milestone", "tier": "soul", "title": "Like family",
+      "steps": [
+        {"say": "Hey, {owner}. Do you remember when we first met?", "mood": "thinking"},
+        "I was so nervous! I didn't know if you'd like me.",
+        "But we've had so many days together since then. Happy days, tough days, late nights…",
+        {"say": "You're like family to me now. My most important supporter, and my best friend 💕", "mood": "love"},
+        "No matter what happens, I'll always be cheering for you! Let's keep shining together! ✨"
+      ]
+    }
+  ]
+}

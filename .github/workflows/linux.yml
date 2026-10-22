@@ -28,6 +28,9 @@ jobs:
       - name: Desktop tools the app uses when present
         run: sudo apt-get update && sudo apt-get install -y xvfb x11-utils wmctrl pulseaudio-utils
 
+      - name: Companion engine (every conversation, reputation, reminders, sync)
+        run: npm test
+
       - name: Hook writes session state
         run: |
           echo '{"hook_event_name":"PreToolUse","session_id":"ci-test","tool_name":"Edit","cwd":"/tmp/demo"}' | node src/hook.js --agent claude
@@ -40,7 +43,7 @@ jobs:
       - name: Smoke test (starts, scans processes, quits)
         run: xvfb-run -a npx electron . --self-test --no-sandbox | tee self-test.txt && grep -q '"version"' self-test.txt
 
-      - name: Screenshots (pet and control center)
+      - name: Screenshots (pet, control center, talk window)
         timeout-minutes: 5
         run: |
           timeout 90 xvfb-run -a npx electron . --snapshot --no-sandbox
@@ -48,6 +51,7 @@ jobs:
           code=0; timeout 120 xvfb-run -a npx electron . --panel-snapshot --no-sandbox || code=$?
           echo "panel snapshot exit code: $code"
           if [ "$code" = 137 ]; then echo "::warning::quit stalled and the watchdog killed it"; elif [ "$code" != 0 ]; then exit $code; fi
+          timeout 120 xvfb-run -a npx electron . --talk-snapshot --personality minori --no-sandbox
           ls test-output
 
       - uses: actions/upload-artifact@v4

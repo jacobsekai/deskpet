@@ -44,7 +44,7 @@ final class WizardController: NSObject, WKScriptMessageHandler, NSWindowDelegate
     func run(_ script: String) { webView.evaluateJavaScript(script) }
 
     /// `open DeskPet.app --args panel-snapshot`: screenshots each control center page, then quits.
-    func snapshotPanel(pages: [String] = ["home", "rewards", "look", "focus", "agents", "behavior", "account", "about"]) {
+    func snapshotPanel(pages: [String] = ["home", "companion", "rewards", "look", "focus", "agents", "behavior", "account", "about"]) {
         let out = DeskPetPaths.root.appendingPathComponent("panel-snapshots")
         try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
         guard let page = pages.first else { return NSApp.terminate(nil) }

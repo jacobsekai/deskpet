@@ -135,3 +135,26 @@ textarea:focus { border-color: var(--accent); }
 .modal-card h2 { margin: 0 0 8px; }
 #confetti { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 20; }
 input, textarea { -webkit-user-select: text; user-select: text; }
+
+/* Companion */
+.bond-card { display: grid; grid-template-columns: 1fr 190px; gap: 16px; align-items: center; }
+.bond-card h2 { margin: 2px 0 6px; font-size: 26px; }
+.bond-hearts { font-size: 20px; letter-spacing: 3px; margin-bottom: 8px; color: #ff4f8b; }
+.bond-actions { display: flex; flex-direction: column; gap: 10px; align-items: stretch; }
+.bond-stats { font-size: 12px; color: var(--muted); font-weight: 600; line-height: 1.6; text-align: center; }
+.ladder { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+.rung { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 10px 8px; text-align: center; font-size: 12px; font-weight: 700; color: var(--muted); }
+.rung .h { font-size: 15px; margin-bottom: 3px; }
+.rung.reached { color: var(--ink); border-color: rgba(255, 79, 139, 0.35); background: linear-gradient(180deg, rgba(255, 214, 234, 0.6), var(--card)); }
+.rung.current { box-shadow: 0 0 0 3px rgba(255, 79, 139, 0.2); }
+.rung .at { font-size: 10.5px; font-weight: 600; color: var(--muted); }
+.setting-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 7px 0; font-size: 13.5px; font-weight: 600; }
+.setting-row .segmented button { padding: 6px 10px; font-size: 12px; }
+.field-label { font-size: 13.5px; font-weight: 600; margin-right: 4px; }
+.row-inline select { font: inherit; font-size: 13px; padding: 7px 10px; border-radius: 10px; border: 1px solid var(--line); background: white; color: var(--ink); }
+.memories { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.memory { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; background: rgba(255, 255, 255, 0.6); border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; }
+.memory .k { font-size: 11.5px; font-weight: 700; color: var(--muted); text-transform: capitalize; }
+.memory .v { font-size: 13.5px; font-weight: 650; }
+.memory button { border: none; background: rgba(42, 29, 24, 0.06); border-radius: 999px; width: 26px; height: 26px; cursor: pointer; color: var(--muted); }
+.memory button:hover { background: #ff5f57; color: white; }

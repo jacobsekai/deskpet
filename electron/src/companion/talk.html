@@ -1,0 +1,42 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'">
+  <title>Talk</title>
+  <link rel="stylesheet" href="talk.css">
+</head>
+<body>
+  <div class="box" id="box">
+    <header>
+      <div class="nametag" id="speaker">Mochi</div>
+      <div class="bond" id="bond" title="Your bond"><span class="hearts" id="hearts"></span><span id="tier"></span></div>
+      <button class="close" id="close" title="Close (Esc)">✕</button>
+    </header>
+
+    <section class="game" id="game" hidden>
+      <div class="score" id="score"></div>
+      <div id="arena"></div>
+    </section>
+
+    <section class="dialogue" id="dialogue">
+      <p class="text" id="text"></p>
+      <div class="choices" id="choices"></div>
+      <form class="answer" id="answer" hidden>
+        <input id="answer-text" maxlength="40" spellcheck="false" autocomplete="off">
+        <span class="date" id="answer-date" hidden>
+          <select id="answer-month"></select>
+          <select id="answer-day"></select>
+        </span>
+        <button class="primary" type="submit">OK</button>
+        <button class="ghost" type="button" id="answer-skip">Skip</button>
+      </form>
+      <button class="continue" id="continue" hidden>▸</button>
+    </section>
+    <canvas id="confetti"></canvas>
+  </div>
+  <script src="../renderer/color.js"></script>
+  <script src="games.js"></script>
+  <script src="talk.js"></script>
+</body>
+</html>

@@ -18,6 +18,7 @@
     <div class="layout">
       <nav class="sidebar" id="sidebar">
         <button data-page="home" class="on"><span>🏠</span>Home</button>
+        <button data-page="companion"><span>💞</span>Companion</button>
         <button data-page="rewards"><span>🏆</span>Rewards</button>
         <button data-page="look"><span>🎨</span>Look</button>
         <button data-page="focus"><span>🍅</span>Focus</button>
@@ -41,6 +42,7 @@
               <div class="actions">
                 <button class="primary" id="home-focus">🍅 Focus 25 min</button>
                 <button class="ghost-btn" id="home-bring">📍 Bring here</button>
+                <button class="ghost-btn" id="home-talk">💬 Talk</button>
                 <button class="ghost-btn" id="home-poses">🎭 Preview poses</button>
               </div>
             </div>
@@ -49,6 +51,45 @@
           <div class="tiles" id="today"></div>
           <h3>Agents right now</h3>
           <div class="sessions" id="home-sessions"></div>
+        </section>
+
+        <!-- Companion -->
+        <section class="page" data-page="companion">
+          <div class="card bond-card">
+            <div>
+              <p class="eyebrow" id="cp-personality">Personality</p>
+              <h2 id="cp-tier">New friends</h2>
+              <div class="bond-hearts" id="cp-hearts"></div>
+              <div class="xp"><div class="xp-bar"><div id="cp-fill"></div></div><span id="cp-next"></span></div>
+              <p class="sub" id="cp-hint"></p>
+            </div>
+            <div class="bond-actions">
+              <button class="primary" id="cp-talk">💬 Talk now</button>
+              <div class="bond-stats" id="cp-stats"></div>
+            </div>
+          </div>
+          <h3>Your bond</h3>
+          <div class="ladder" id="cp-ladder"></div>
+          <h3>Reminders and chatter</h3>
+          <div class="card">
+            <div class="setting-row"><span>💧 Drink water every</span><div class="segmented" id="cp-water"></div></div>
+            <div class="setting-row"><span>🙆 Stretch break after</span><div class="segmented" id="cp-breaks"></div></div>
+            <div class="setting-row"><span>💬 Starts conversations</span><div class="segmented" id="cp-chatter"></div></div>
+            <div class="toggle-row"><span>🌙 Bedtime nudges late at night</span><div class="switch-btn" data-companion="lateNight"></div></div>
+            <div class="toggle-row"><span>✨ Daily motivation</span><div class="switch-btn" data-companion="motivation"></div></div>
+            <div class="toggle-row"><span>👀 Comments on the apps you use</span><div class="switch-btn" data-companion="appComments"></div></div>
+            <div class="toggle-row"><span>🌆 Evening recap of your day</span><div class="switch-btn" data-companion="recap"></div></div>
+          </div>
+          <h3>Things <span id="cp-pet-name">your pet</span> remembers</h3>
+          <div class="card">
+            <div class="row-inline">
+              <span class="field-label">🎂 Your birthday</span>
+              <select id="cp-bday-month"></select><select id="cp-bday-day"></select>
+              <button class="ghost-btn" id="cp-bday-save">Save</button>
+            </div>
+            <div class="memories" id="cp-memories"></div>
+            <div class="actions"><button class="ghost-btn" id="cp-forget-all">Forget everything…</button></div>
+          </div>
         </section>
 
         <!-- Rewards -->

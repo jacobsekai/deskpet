@@ -68,6 +68,7 @@
     document.querySelectorAll('#sidebar button').forEach((b) => b.addEventListener('click', () => show(b.dataset.page)));
     $('#close').addEventListener('click', () => call('close'));
     wireHome();
+    wireCompanion();
     wireRewards();
     wireLook();
     wireFocus();
@@ -123,6 +124,7 @@
       }
     }
     renderSync();
+    renderCompanion();
     $('#about-update').textContent = state.update.available ? `Version ${state.update.available} is available!` : `You're on the latest version (${state.version}).`;
     $('#about-update-btn').textContent = state.update.available ? `⬆️ Update to v${state.update.available}` : 'Check for updates';
   }
@@ -165,6 +167,7 @@
     $('#home-focus').addEventListener('click', () => (state.focus.phase === 'off' ? call('focusStart', { minutes: 25 }) : call('focusStop')).then(refresh));
     $('#home-bring').addEventListener('click', () => call('bringHere'));
     $('#home-poses').addEventListener('click', () => call('previewPoses'));
+    $('#home-talk').addEventListener('click', () => call('talk'));
   }
 
   function renderHome() {
@@ -181,6 +184,86 @@
     ];
     $('#today').innerHTML = tiles.map(([n, l]) => `<div class="tile"><div class="num">${esc(n)}</div><div class="lbl">${esc(l)}</div></div>`).join('');
     sessionRows(state.sessions, $('#home-sessions'));
+  }
+
+  // MARK: Companion
+
+  const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+  function companion(op, payload) {
+    return call('companion', { op, ...(payload || {}) }).then((summary) => { if (summary && state) state.companion = summary; lastCompanion = ''; renderCompanion(); });
+  }
+
+  function wireCompanion() {
+    $('#cp-talk').addEventListener('click', () => call('talk'));
+    document.querySelectorAll('.switch-btn[data-companion]').forEach((sw) => sw.addEventListener('click', () => companion('setting', { key: sw.dataset.companion, value: !sw.classList.contains('on') })));
+    for (let m = 1; m <= 12; m++) $('#cp-bday-month').add(new Option(MONTHS[m - 1], m));
+    for (let d = 1; d <= 31; d++) $('#cp-bday-day').add(new Option(d, d));
+    $('#cp-bday-save').addEventListener('click', () => {
+      const v = `${String($('#cp-bday-month').value).padStart(2, '0')}-${String($('#cp-bday-day').value).padStart(2, '0')}`;
+      companion('remember', { key: 'birthday', value: v });
+    });
+    $('#cp-forget-all').addEventListener('click', () => {
+      $('#modal-emblem').textContent = '🧠';
+      $('#modal-title').textContent = 'Forget everything?';
+      $('#modal-text').textContent = `${state.names.petName} forgets everything you've told them: your birthday, favorites, nickname, and the rest. Your bond and progress stay.`;
+      openModal({ ok: 'Forget', cancel: 'Keep', onOk: () => companion('forget', { key: '*' }) });
+    });
+  }
+
+  function segmented(container, values, current, label, key) {
+    container.innerHTML = '';
+    for (const v of values) {
+      const b = el('button', v === current ? 'on' : '', esc(label(v)));
+      b.addEventListener('click', () => companion('setting', { key, value: v }));
+      container.appendChild(b);
+    }
+  }
+
+  let lastCompanion = '';
+  function renderCompanion() {
+    const c = state.companion;
+    if (!c) return;
+    const key = JSON.stringify(c);
+    if (key === lastCompanion) return;
+    lastCompanion = key;
+    const a = c.affection;
+    const p = c.personality || {};
+    $('#cp-personality').textContent = `${p.name || 'Friend'} personality${p.source ? ` · ${p.source}` : ''}`;
+    $('#cp-tier').textContent = a.tier;
+    $('#cp-hearts').textContent = a.upset ? '💔' : '♥'.repeat(a.hearts) + '♡'.repeat(Math.max(0, a.maxHearts - a.hearts));
+    $('#cp-fill').style.width = `${Math.round(a.progress * 100)}%`;
+    $('#cp-next').textContent = a.next ? `on the way to ${a.next}` : 'closest there is 💕';
+    $('#cp-hint').textContent = a.upset
+      ? `${state.names.petName} is upset. Kind words, an apology (Talk → Tell…), and time together help.`
+      : `Your bond grows when you talk, play, pet, and say goodbye before quitting (up to ${a.todayLeft} more today). Unkindness, too much throwing, and long absences make it shrink.`;
+    const n = c.counters || {};
+    $('#cp-stats').innerHTML = `${n.talks || 0} conversations · ${n.games || 0} games (${n.wins || 0} won)<br>${c.topics.seen} of ${c.topics.total} topics heard`;
+    $('#cp-pet-name').textContent = state.names.petName;
+    const tierIndex = c.tiers.findIndex((t) => t.name === a.tier);
+    $('#cp-ladder').innerHTML = c.tiers.map((t, i) => `<div class="rung${t.reached ? ' reached' : ''}${i === tierIndex ? ' current' : ''}"><div class="h">${i === 0 ? '🤝' : '♥'.repeat(i)}</div>${esc(t.name)}</div>`).join('');
+    const s = c.settings;
+    segmented($('#cp-water'), c.choices.water, s.water, (v) => (v ? `${v} min` : 'Off'), 'water');
+    segmented($('#cp-breaks'), c.choices.breaks, s.breaks, (v) => (v ? `${v} min` : 'Off'), 'breaks');
+    segmented($('#cp-chatter'), c.choices.chatter, s.chatter, (v) => v[0].toUpperCase() + v.slice(1), 'chatter');
+    document.querySelectorAll('.switch-btn[data-companion]').forEach((sw) => sw.classList.toggle('on', !!s[sw.dataset.companion]));
+    const bday = c.memories.find((m) => m.key === 'birthday');
+    if (bday && document.activeElement.tagName !== 'SELECT') {
+      const m = MONTHS.indexOf(bday.value.split(' ')[0]) + 1;
+      if (m) { $('#cp-bday-month').value = m; $('#cp-bday-day').value = Number(bday.value.split(' ')[1]); }
+    }
+    const list = $('#cp-memories');
+    list.innerHTML = '';
+    const items = c.memories.filter((m) => m.key !== 'birthday');
+    if (!items.length) list.appendChild(el('div', 'empty', `Nothing yet. ${state.names.petName} asks about you in conversations, or pick "Ask me about me" when you talk.`));
+    for (const m of items) {
+      const row = el('div', 'memory', `<div><div class="k">${esc(m.label)}</div><div class="v">${esc(m.value)}</div></div>`);
+      const forget = el('button', '', '✕');
+      forget.title = 'Forget this';
+      forget.addEventListener('click', () => companion('forget', { key: m.key }));
+      row.appendChild(forget);
+      list.appendChild(row);
+    }
   }
 
   // MARK: Rewards

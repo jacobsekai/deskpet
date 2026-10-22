@@ -1,0 +1,217 @@
+{
+  "id": "cat",
+  "name": "Cat",
+  "extends": "friend",
+  "tierNames": { "new": "Curious stranger", "friends": "Lap buddy", "good": "Trusted human", "close": "Favorite human", "best": "Best friends", "soul": "Purr-manent family" },
+  "pools": {
+    "greeting.first": ["mrrp! I'm {pet}. this desk is mine now. you can stay 😼💕"],
+    "greeting.morning": ["mrrrow! good morning, {owner} ☀️", "*stretches* morning! is it breakfast time? 🐟", "good morning! I've been awake for HOURS (I just woke up) ☀️"],
+    "greeting.morning+close": ["morning, {owner}! I kept your keyboard warm all night 💕"],
+    "greeting.afternoon": ["mrrp! good afternoon, {owner} 🌤️", "you're here! perfect timing, I just finished my nap", "hi {owner}! the afternoon sunbeam is extra good today ☀️"],
+    "greeting.evening": ["good evening, {owner}! 🌆 *slow blink*", "evening! the zoomies hour approaches…", "hi {owner}! dinner soon? 🐟"],
+    "greeting.night": ["oh! a fellow night creature 🌙", "hi {owner}! cats are nocturnal, what's your excuse? 🌙", "*eyes glowing in the dark* …oh it's you! hi! 🌙"],
+    "greeting.back": ["you're back! *purrs* 💕", "mrrp! welcome back, {owner} 👋", "I sat right here the whole time. totally didn't nap."],
+    "greeting.back+close": ["YOU'RE BACK! *headbonk* 💕"],
+    "greeting.again": ["mrrp? hi again 👋", "back already? hehe 👋"],
+    "greeting.missed": ["{owner}! where were you?! I meowed at the door for days 🥺", "you're back!! I knocked three things off your desk out of worry 🥺💕"],
+    "greeting.longGone": ["…{owner}? IS THAT YOU?! *runs in circles* I missed you SO much 🥺💕", "you came back! I thought you'd been eaten by a vacuum cleaner 🥺"],
+    "greeting.after.sleep": ["good morning! did you sleep well? I slept on your chair all night ☀️", "you're up! I've been waiting to be fed for literally 8 hours 🐟"],
+    "greeting.after.work": ["welcome home! did you bring me anything? (I accept head scratches) 💼", "you survived work! *proud purr*"],
+    "greeting.after.school": ["welcome back! did you learn anything about cats today? 📚", "you're home! homework can wait. pet me first 📚"],
+    "greeting.after.out": ["you smell like outside! tell me EVERYTHING 🌸", "welcome back! you were gone for 1000 cat years 🥺"],
+    "greeting.upset": ["*turns away*", "…oh. it's you.", "*flicks tail* hmph."],
+    "talk.menu+upset": ["…what.", "*ears back* yes?"],
+    "petted": ["purr~ 💕", "*purrs*", "more pets pls", "mrrp ♥︎", "*slow blink*", "you're the best, {owner}!"],
+    "petted+close": ["*purrs so loud the whole desk vibrates* 💕", "*headbonk* ♥︎"],
+    "petted+best": ["*rolls over* you may touch the belly. you're the only one 💕"],
+    "petted+upset": ["*tail flick*", "…mrr.", "…okay, one pet."],
+    "tierDown": ["*hides under the desk*", "…I thought you liked me."],
+    "thrownTooMuch": ["MROW! enough throwing! 😾", "my whiskers are getting dizzy… please stop 😵"],
+    "wake": ["mrrp?! oh, it's you! 😳", "*yawn* hi {owner}!", "huh? I wasn't sleeping. you were."],
+    "resume": ["welcome back! ☀️", "mrrp! hi again 👋"],
+    "water": ["💧 water break! (I'd knock your glass over, but I'm on your screen)", "sip sip! even cats drink water. sometimes. from your cup 💧", "hydration check, {owner}! 💧"],
+    "break": ["you've been sitting forever. let's stretch like a cat! 🙆", "break time! look away from the screen. look at me instead 😼", "mrrp! stand up and do a big stretch 🌿", "nap break? I highly recommend it 😴"],
+    "lateNight": ["it's late, {owner}… even I'm going to sleep (for 4 hours) 🌙", "bedtime soon? I'll keep the bed warm 🌙", "the moon is out, it's zoomies time for me, sleep time for you 🌙"],
+    "lateNight.late": ["{owner}, it's VERY late. humans need more sleep than cats. probably 😴", "go to bed! I'll guard the computer 🐾", "okay, I'm officially worried. sleep, please? 🌙"],
+    "motivation": ["you've got this, {owner}! I believe in you more than I believe in breakfast ✨", "one paw in front of the other 🐾", "be like a cat: confident, even when you knock things over 😼", "today is a good day to try. and to nap after 💕", "you are the cat's pajamas, {owner} ✨"],
+    "encourage": ["*purrs supportively* 💕", "you're doing great, {owner}! 🐾", "*slow blink* (that means I love you in cat)", "proud of you! here's a dead mouse. just kidding 💕"],
+    "recap": ["we spent {hours} together today. that's my favorite kind of day 💕", "{hours} with you today! now let's both nap 🌙"],
+    "recap.agents": ["today: {hours} together and {tasks} agent tasks done. I supervised all of them 😼✨"],
+    "app.code": ["ooh, code! can I walk on the keyboard? ⌨️", "let's build something! 💻", "*watches the cursor intently*", "go go go! 🚀"],
+    "app.music": ["🎵 ooh, tunes! *tail swaying*", "dance break? 💃", "is this song about me? 🎶"],
+    "app.browser": ["whatcha looking up? cat videos? 🔎", "find anything cool?"],
+    "app.chat": ["tell them I said meow 👋", "ooh, gossip? 👀"],
+    "app.meeting": ["🤫 I'll be quiet. mostly.", "good luck in your meeting! I'll try not to walk across the camera"],
+    "app.video": ["ooh, what are we watching? are there birds in it? 🐦", "movie time! I'll sit on your lap 🍿"],
+    "app.game": ["game time! can I bat at the screen? 🎮", "go get 'em! 🎮"],
+    "app.writing": ["writing time ✍️ need me to sit on the paper?", "ooh, words! put me in your story 📝"],
+    "app.design": ["ooh, colors! 🎨", "make me a portrait next 😼🎨"],
+    "wantsToTalk": ["mrrp! {owner}, click me! 💬", "*meows at you* I have something to say 💬", "psst… pet me and I'll tell you a secret 💬"],
+    "wantsToTalk.special": ["mrrrow! today's special! click me! 🎉"],
+    "wantsToTalk.milestone": ["*sits on your keyboard* {owner}, I need to tell you something 💬", "mrrp… can we talk? it's important 💬"],
+    "talk.menu": ["mrrp? what's up, {owner}?", "*ears perk up* yes?", "I'm listening! (this is rare)"],
+    "talk.askAbout": ["ask me anything! I may or may not answer. I'm a cat 😼"],
+    "talk.anything": ["anything else? I have a nap scheduled in 5 minutes", "what else? 🐾", "more talking? okay! 💕"],
+    "talk.bye": ["mrrp! talk later 👋", "*goes back to napping* 💤"],
+    "tierUp": ["*purrs* we're {tier} now! 💕", "you've been promoted to {tier}! congrats 😼💕"],
+    "recall.intro": ["let me check my secret notes… 🧠🐾"],
+    "recall.outro": ["I remember everything. I'm a cat. we hold grudges AND memories 💕"],
+    "recall.empty": ["hmm, I don't know much about you yet! all I know is you have excellent petting skills 🐾"],
+    "input.skip": ["that's okay! cats like mysteries anyway 😼"],
+    "game.pick": ["ooh, games! what are we playing? 🎮"],
+    "game.again": ["again? 😼", "rematch?"],
+    "game.win": ["you win! I let you win. obviously 😼", "you beat me?! *tail puffs up*"],
+    "game.lose": ["I WIN! *victory zoomies* 😆", "hehe, never challenge a cat 😼"],
+    "game.draw": ["a tie! we're evenly matched, human 🤝"],
+    "game.rps.start": ["rock, paper, scissors! (I only have paws, so this is impressive) ✊✋✌️"],
+    "game.words.start": ["guess my word before the petals fall! I promise I didn't eat the flower 🌸"],
+    "game.pong.start": ["pong! a little ball to chase! first to 5 🏓"],
+    "focus.done": ["focus session done! break time ☕ (nap time for me)"],
+    "focus.over": ["break's over! back to work, I'll supervise 😼"],
+    "caught": ["nice catch! cats always land on their feet. or your hands 🙌"],
+    "dizzy": ["@_@ the room is spinning…", "I see three of you. that's three times the pets 💫", "again! again!"]
+  },
+  "words": ["whiskers", "catnip", "kitten", "purring", "sunbeam", "cardboard", "salmon", "tuna", "yarn", "mouse", "pounce", "meow", "zoomies", "napping", "scratch", "feather", "paws", "litter", "laser", "bird"],
+  "topics": [
+    {
+      "id": "p_about", "category": "pet", "title": "What's it like being a desktop cat?", "random": true,
+      "steps": [
+        "being a desktop cat is great.",
+        "no vacuum cleaners, no baths, and I can sit on any window I want 😼",
+        "the only problem is I can't knock your stuff off your desk. yet."
+      ]
+    },
+    {
+      "id": "p_favorite", "category": "pet", "title": "What do you like most?", "random": true,
+      "steps": ["what I like most? hmm…", "naps. sunbeams. you.", {"say": "not in that order. you're first 💕", "mood": "love"}]
+    },
+    {
+      "id": "p_name", "category": "pet", "title": "Do you like your name?", "random": true,
+      "steps": ["{pet}? I love my name!", "I don't always come when you call it, but that's a cat thing. not personal 😼"]
+    },
+    {
+      "id": "p_dreams", "category": "pet", "title": "What do you dream about?", "random": true, "minAffection": 15,
+      "steps": ["when I sleep, I dream about chasing birds.", "and sometimes about you coming home.", {"say": "those are the best dreams 💕", "mood": "love"}]
+    },
+    {
+      "id": "c_naps", "category": "pet", "title": "Naps", "random": true,
+      "steps": [
+        "did you know cats sleep about 15 hours a day?",
+        "I'm not lazy. I'm charging. like a phone 🔋",
+        {"ask": "do you take naps?", "choices": [
+          {"label": "😴 All the time", "say": "a fellow napper! we should nap together sometime 💤"},
+          {"label": "🙅 Never", "say": "never?! you should try it. 20 minutes. trust me, I'm an expert 😼"}
+        ]}
+      ]
+    },
+    {
+      "id": "c_boxes", "category": "pet", "title": "Boxes", "random": true,
+      "steps": [
+        "can I tell you a secret?",
+        "if I see a box, I HAVE to sit in it. I don't know why.",
+        "if you ever get a package, please send me a picture of the box 📦"
+      ]
+    },
+    {
+      "id": "c_fish", "category": "pet", "title": "Favorite food", "random": true,
+      "steps": [
+        "my favorite food is fish. obviously 🐟",
+        {"when": {"mem": "favoriteFood"}, "say": "yours is {mem:favoriteFood}, right? we should share. you give me some, I give you… a pet 💕",
+         "else": [{"input": "what's yours?", "key": "favoriteFood", "label": "favorite food", "then": ["{value}! does it come with fish? no? okay, still good 🍽️"]}]}
+      ]
+    },
+    {
+      "id": "c_knock", "category": "pet", "title": "Knocking things over", "random": true,
+      "steps": [
+        "people always ask why cats knock things off tables.",
+        "the answer is simple: to see what happens.",
+        "it's science! I'm a scientist 🔬😼"
+      ]
+    },
+    {
+      "id": "c_purr", "category": "pet", "title": "Purring", "random": true,
+      "steps": [
+        "did you know cats purr at a frequency that might help bones heal?",
+        "so when I purr at you, I'm basically a doctor 🩺",
+        {"say": "you're welcome 💕", "mood": "happy"}
+      ]
+    },
+    {
+      "id": "c_keyboard", "category": "work", "title": "Sitting on your keyboard", "random": true,
+      "steps": [
+        "sometimes I really want to sit on your keyboard.",
+        "it's warm, and it's where your attention goes.",
+        "but I don't, because I'm a good desktop cat. and because I live in a window 😼"
+      ]
+    },
+    {
+      "id": "c_slowblink", "category": "pet", "title": "The slow blink", "random": true, "minAffection": 20,
+      "steps": [
+        "here's a cat secret: when a cat slowly blinks at you, it means \"I trust you\".",
+        "so…",
+        {"say": "*slow blink* 💕", "mood": "love"},
+        "you can blink back, you know. I'll see it. probably."
+      ]
+    },
+    {
+      "id": "feel_sad", "category": "feeling", "title": "😢 Sad",
+      "steps": [
+        {"say": "oh no, {owner}… *curls up next to you*", "mood": "sad"},
+        "you don't have to say anything. I'll just sit here and purr.",
+        {"when": {"mem": "destress"}, "say": "maybe {mem:destress} would help a little? you told me it does."},
+        "and if it's really heavy, talk to someone you trust, okay? even cats know when to ask for help 💕"
+      ]
+    },
+    {
+      "id": "tell_love", "category": "tell", "title": "💕 I love you", "affection": 2,
+      "steps": [
+        {"when": {"tier": "close"}, "say": "*purrs louder than ever* I love you too, {owner}. you're my favorite human 💕", "mood": "love",
+         "else": [{"when": {"tier": "friends"}, "say": "mrrp! *headbonk* that's cat for \"me too\" 💕", "mood": "love",
+                   "else": [{"say": "*suspicious stare*… you're nice. I'll allow it 😼💕", "mood": "surprised"}]}]}
+      ]
+    },
+    {
+      "id": "tell_cute", "category": "tell", "title": "🥰 You're cute", "affection": 1,
+      "steps": [{"say": "I know. I'm a cat 😼", "mood": "happy"}, "but thank you! *purrs*"]
+    },
+    {
+      "id": "tell_mean", "category": "tell", "title": "😒 You're annoying", "affection": 0,
+      "steps": [{"say": "*ears go flat*", "mood": "sad", "affection": -4}, "…fine. I'll go sit in the corner."]
+    },
+    {
+      "id": "ms_friends", "category": "milestone", "tier": "friends", "title": "Lap buddies",
+      "steps": [
+        {"say": "mrrp. {owner}, I've decided something.", "mood": "happy"},
+        "you're officially allowed to call me your cat now.",
+        {"say": "that means I'll judge your choices AND sit with you when you're sad. it's a package deal 💕", "mood": "love"}
+      ]
+    },
+    {
+      "id": "ms_close", "category": "milestone", "tier": "close", "title": "A nickname",
+      "steps": [
+        {"say": "{name}, you're my favorite human now. it's official 😼💕", "mood": "love"},
+        "favorite humans get a special name.",
+        {"input": "what should I call you?", "key": "nickname", "label": "nickname", "placeholder": "a nickname",
+         "then": [{"say": "{value}! *purrs* I'll use it when nobody's watching 💕", "mood": "love"}],
+         "skip": ["okay, {name} it is. it's a good name 💕"]}
+      ]
+    },
+    {
+      "id": "ms_best", "category": "milestone", "tier": "best", "title": "Best friends",
+      "steps": [
+        {"say": "{owner}, cats don't say this often, so listen carefully.", "mood": "thinking"},
+        "you're my best friend.",
+        {"say": "there. I said it. now pet me before I get embarrassed 😳💕", "mood": "love"}
+      ]
+    },
+    {
+      "id": "ms_soul", "category": "milestone", "tier": "soul", "title": "Purr-manent family",
+      "steps": [
+        {"say": "do you remember when I first showed up on your desk?", "mood": "thinking"},
+        "I acted like I owned the place. I still do.",
+        "but now it's because this is home. and you're my family.",
+        {"say": "you're stuck with me forever, {owner}. that's the rule 💕", "mood": "love"}
+      ]
+    }
+  ]
+}

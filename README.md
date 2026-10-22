@@ -47,6 +47,8 @@ npm install
 npm start                          # run it (works on macOS too)
 npm run snapshot                   # render every pose to test-output/snapshot.png
 npm run snapshot -- --pack minori  # same, with a sprite pack
+npm test                           # play through every conversation, plus reputation, reminders, and sync
+npx electron . --talk-snapshot --personality minori   # screenshot the talk window and games
 npm run package:win                # build dist/DeskPet-win32-x64 (no Windows machine needed)
 npm run package:linux              # build the AppImages and tar.gz (on Linux; CI does this)
 ```
@@ -68,12 +70,45 @@ npm run package:linux              # build the AppImages and tar.gz (on Linux; C
 | You type | bobs along |
 | Mouse | eyes follow the cursor |
 | Idle 75s / 4 min | sleepy / asleep in a nightcap; startles awake when you return |
-| Music / IDE / browser / chat apps | headphones, glasses, comments |
-| After 11pm, 50 min without a break | bedtime and stretch reminders |
-| Click / drag | purrs with hearts / dangles from the scruff |
+| Music / IDE / browser / chat / video / game apps | headphones, glasses, comments in its own voice |
+| Water, breaks, late nights, mornings, evenings | water and stretch reminders, bedtime nudges, daily motivation, an evening recap |
+| Click / double-click / drag | purrs with hearts / opens the talk window / dangles from the scruff |
 | Throw (flick and release) | flies, spins, and bounces off the screen edges; dizzy after a wild throw. With Gravity off it drifts and ricochets instead of falling |
 
-**Control center:** 🐾 → **Open DeskPet…** (⌘, / Ctrl+,) has everything, in the same style as setup: Home (your pet, rank, today's stats, live agents), Rewards (live previews of each reward on your pet, prestige), Look (sprite packs, theme, thought bubble, size), Focus (timer and blocklist), Agents (connections and live sessions), Behavior, Account (rename, transfer keys), and About (updates). The 🐾 menu and right-clicking the pet give a quick menu: status, agents, quick focus, and Open DeskPet.
+**Control center:** 🐾 → **Open DeskPet…** (⌘, / Ctrl+,) has everything, in the same style as setup: Home (your pet, rank, today's stats, live agents), Companion (your bond, reminders, and what the pet remembers), Rewards (live previews of each reward on your pet, prestige), Look (sprite packs, theme, thought bubble, size), Focus (timer and blocklist), Agents (connections and live sessions), Behavior, Account (rename, transfer keys), and About (updates). The 🐾 menu and right-clicking the pet give a quick menu: status, agents, quick focus, and Open DeskPet.
+
+### Talking with your pet
+Inspired by Monika After Story. **Double-click the pet** (or 🐾 → 💬 Talk to …) to open a dialogue box beside it:
+- **Talk to me:** a random topic. **Ask … about…:** topics by category (the pet itself, life, work and focus, fun stuff, plus character ones).
+- **Ask me about me:** the pet asks about you (favorite food, color, music, birthday, work or school, pets, dreams…) and **remembers your answers**, bringing them up later. **What do you know about me?** lists them; edit or forget them in the control center → Companion.
+- **I'm feeling…:** happy, sad, stressed, tired, anxious, bored, lonely, angry, proud. **Tell …:** I love you, thank you, you're cute, I'm sorry… (and one unkind option).
+- **Play a game:** rock, paper, scissors, tic-tac-toe, word guess, and pong. Games count toward XP and your bond.
+- **Goodbye…:** going to sleep, to work, to school, out. The pet says goodbye, closes DeskPet, and greets you accordingly next time.
+- Every so often the pet **starts a conversation** itself ("psst… click me 💬"): click it within two minutes to hear it. Choose how often (or never) in Companion.
+- **Reminders:** drink water, stretch breaks, bedtime nudges, daily motivation, encouragement, and an evening recap of your day. Each can be changed or turned off in the control center → Companion. Everything stays quiet during focus sessions and calls.
+- **Holidays and birthdays:** New Year, Valentine's Day, Halloween, Christmas, your birthday, and your anniversary with the pet (plus Minori's birthday on April 14).
+
+**Your bond (reputation):** affection grows a little with every conversation, game, pet, and goodbye (up to 12 a day, so it reflects time together). It goes down if you're unkind, quit without saying goodbye, throw the pet around too much, or disappear for a week or more. When it drops below zero the pet is **Upset** or **Hurt** and talks coldly until you make up (Tell → I'm sorry helps). The tiers are New friends → Friends → Good friends → Close friends → Best friends → Inseparable. Each one changes how warmly the pet greets and talks to you and unlocks more personal topics, and reaching one plays a **milestone conversation** (at Close friends the pet asks for a nickname to call you). Replay them from **Our special moments**.
+
+**Personalities:** the built-in cat talks like a cat (tiers from *Curious stranger* to *Purr-manent family*). Sprite packs named Minori get Minori's personality (*New fan* to *Like family*): fan-made, upbeat lines about idols, MORE MORE JUMP!, and never giving up. Her bond stays platonic because she's a high school student. Other packs get a warm, friendly personality. A pack can choose one with `"personality": "minori"` in `pack.json`, or ship its own `dialogue.json` that extends a built-in one:
+
+```json
+{
+  "extends": "friend",
+  "name": "Tama",
+  "tierNames": { "best": "Partners in crime" },
+  "pools": { "petted": ["nya~ 💕", "*happy wiggle*"], "greeting.morning": ["Morning, {owner}!"] },
+  "topics": [
+    { "id": "tama_fish", "category": "pet", "title": "Fish", "random": true,
+      "steps": ["I like fish.", { "ask": "Do you?", "choices": [
+        { "label": "Yes!", "say": "Best friends forever 🐟", "affection": 1 },
+        { "label": "Not really", "say": "More for me, then." }
+      ] }] }
+  ]
+}
+```
+
+The full format (steps, questions, remembered answers, conditions, moods, games, milestones) is shown by the built-in personalities in `electron/src/companion/personalities/`. Conversations, affection, and memories are stored in `~/.deskpet/companion.json`, and they travel with transfer keys and cloud sync.
 
 ### Agents
 - **Claude Code:** exact states through hooks (🐾 → Agents → Claude Code hooks, or the setup wizard).
@@ -112,7 +147,7 @@ npm run package:linux              # build the AppImages and tar.gz (on Linux; C
 - **Rename:** 🐾 → Rename… changes the pet's name or yours any time.
 - **Focus timer:** 15/25/50-minute sessions with a break afterwards (🐾 → Focus timer).
   - **Blocklist:** during focus, the pet calls you out when you open a listed site, or closes the tab in strict mode (🐾 → Focus timer → Edit blocklist…). On macOS it reads the active tab in Safari, Chrome, Edge, Brave, Arc, Vivaldi, and Opera (macOS asks once per browser); on Windows it matches the browser window's title.
-- **Quiet during calls:** no sounds or chatty remarks while any app uses the microphone or camera.
+- **Quiet during calls:** no sounds, remarks, or reminders while any app uses the microphone or camera.
 - **Sounds:** system sounds on macOS, synthesized ones on Windows; a sprite pack can bring its own as `sounds/<event>.(wav|mp3|m4a|aiff|caf|ogg)` with events `pet`, `done`, `needs-you`, `bounce`, `wake`, `level-up`, `focus-done`.
 
 ### Sync across devices
@@ -121,7 +156,7 @@ Control center → Account → **Sync across devices**: pick a folder your cloud
 If the folder already has progress when you join, you choose **Combine** (add both) or **Use synced progress** (start this device fresh, with a backup), so progress you already moved with a transfer key isn't counted twice.
 
 ### Moving to another device
-🐾 → Move to another device → Export transfer key… gives you one pasteable code (`DESKPET-1:…`) with your names, level and stats, look, size, and settings. Import it on the other machine from the same menu, or with "Have a transfer key?" in setup. Keys work between macOS and Windows. Sprite pack images aren't in the key: move packs with Sprites → Export.
+🐾 → Move to another device → Export transfer key… gives you one pasteable code (`DESKPET-1:…`) with your names, level and stats, your bond and what the pet remembers, look, size, and settings. Import it on the other machine from the same menu, or with "Have a transfer key?" in setup. Keys work between macOS and Windows. Sprite pack images aren't in the key: move packs with Sprites → Export.
 
 ### Updates
 DeskPet checks GitHub Releases every 6 hours (🐾 → Check for updates…) and can update itself in place. On macOS, move the app to Applications first.

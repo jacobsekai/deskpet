@@ -13,6 +13,7 @@ const {
 const { paths, Settings, loadConfig, saveConfig, hooksLive, readJSON, setSpritesOverride } = require('./settings');
 const { Sync } = require('./sync');
 const hooks = require('./hooks');
+const { createCompanion, personalityFor } = require('./companion-host');
 const { spawn } = require('child_process');
 
 const GROUND = 34;
@@ -49,14 +50,6 @@ function categorize(appName) {
   return 'other';
 }
 
-const REMARKS = {
-  music: ['🎵 ooh, tunes!', 'dance break? 💃', 'turn it up! 🎶'],
-  code: ["let's build something! 💻", 'coding time ⌨️', 'go go go! 🚀'],
-  browser: ['whatcha looking up? 🔎', 'find anything cool?'],
-  chat: ['say hi for me 👋', 'ooh, gossip? 👀'],
-  meeting: ["🤫 I'll be quiet", 'good luck in your meeting!'],
-  other: [],
-};
 
 const ACTIVITY_MOOD = {
   idle: 'idle', done: 'done', tidying: 'tidying', thinking: 'thinking', reading: 'reading', searching: 'searching',
@@ -86,9 +79,6 @@ class Pet {
     this.bounces = 0;
     this.lastBumpRemark = 0;
     this.wasAsleep = false;
-    this.lastRemark = 0;
-    this.lastNightNag = -10000;
-    this.streakStart = now();
     this.lastLogic = 0;
     this.lastTick = now();
     this.geometry = null;
@@ -118,6 +108,12 @@ class Pet {
     this.xpPopup = null;
     this.lastBrowserCheck = 0;
     this.lastBlockNag = 0;
+    this.companion = createCompanion(isWindows ? 'windows' : process.platform === 'darwin' ? 'mac' : 'linux');
+    this.companion.setNames(this.config.ownerName, this.config.petName);
+    this.setPersonality();
+    this.lastCompanionTick = 0;
+    this.lastTap = 0;
+    this.talk = null;
     this.sync = new Sync(this.settings);
     this.lastSyncTick = 0;
     if (this.settings.get('syncPacks', false) && this.sync.enabled) setSpritesOverride(this.sync.spritesFolder);
@@ -164,7 +160,7 @@ class Pet {
     powerMonitor.on('resume', () => this.welcomeBack());
     powerMonitor.on('unlock-screen', () => this.welcomeBack());
     this.timer = setInterval(() => this.tick(), 1000 / 30);
-    if (this.settings.get('setupComplete', false)) this.say(`hi ${this.config.ownerName}! 👋`, 4);
+    if (this.settings.get('setupComplete', false)) this.applyCompanion(this.companion.event('launch'));
     else this.openWizard();
 
     if (isWindows) app.setAppUserModelId('local.deskpet');
@@ -252,34 +248,29 @@ class Pet {
     if (this.wasAsleep && idle < 1) {
       this.wasAsleep = false;
       this.transient = { mood: 'startled', until: t + 1.2 };
-      this.say('huh?! oh, hi! 😳', 3);
+      this.applyCompanion(this.companion.event('wake'));
       this.playSound('wake');
     }
     const top = this.topSession;
     if (idle > 240 && (!top || top.activity === 'idle')) this.wasAsleep = true;
 
-    if (idle > 300) this.streakStart = t;
-    else if (t - this.streakStart > 50 * 60) {
-      this.streakStart = t;
-      if (!this.quiet && this.focus.phase === 'off') this.say('50 minutes straight — stretch break? 🙆', 6);
-    }
-
     const hour = new Date().getHours();
     this.night = hour >= 23 || hour < 6;
-    if (this.night && idle < 5 && t - this.lastNightNag > 3600 && !this.quiet) {
-      this.lastNightNag = t;
-      this.say(`it's late, ${this.config.ownerName}… bedtime soon? 🌙`, 5);
+    // Greetings, reminders (water, breaks, bedtime), remarks about your day, and conversations it starts.
+    if (t - this.lastCompanionTick >= 5) {
+      this.lastCompanionTick = t;
+      this.tickCompanion(t, idle);
     }
 
     const finished = this.focus.tick();
     if (finished === 'focus') {
       this.transient = { mood: 'done', until: t + 3 };
-      this.say('focus session done! take a break ☕', 5);
+      this.say(this.companion.line('focus.done', 'focus session done! take a break ☕'), 5);
       this.playSound('focus-done');
       this.notify('Focus session done', `Take a ${Math.max(5, Math.round(this.focus.minutes / 5))} minute break ☕`, 0);
       this.gainXP(15, false, (d) => { d.focusSessions++; });
     } else if (finished === 'rest') {
-      this.say("break's over! ready for another round? 💪", 5);
+      this.say(this.companion.line('focus.over', "break's over! ready for another round? 💪"), 5);
       this.notify("Break's over", 'Ready for another focus session?', 0);
     }
     if (this.focus.phase === 'focus' && this.blockDuringFocus && this.blocklist.length && t - this.lastBrowserCheck > 2) {
@@ -303,7 +294,6 @@ class Pet {
     }
     if (!this.stats.today.greeted) {
       this.gainXP(10, false, (d) => { d.greeted = true; });
-      this.say('daily hello! +10 XP ☀️', 3);
     }
     if (t - this.lastStatsSave > 30) { this.lastStatsSave = t; this.stats.saveIfNeeded(); }
     if (this.kiroHooksOn && t - this.lastKiroCheck > 600) {
@@ -313,7 +303,7 @@ class Pet {
     if (this.perch && !this.walkOnWindows) this.dropFromPerch();
 
     this.mood = this.resolveMood(t, idle, sinceKey);
-    if (this.mood === 'idle' && this.wander && this.win.isVisible() && t > this.nextWalkAt && !this.velocity && !this.resizing) this.startWalk(t);
+    if (this.mood === 'idle' && this.wander && this.win.isVisible() && t > this.nextWalkAt && !this.velocity && !this.resizing && !this.talkOpen) this.startWalk(t);
   }
 
   resolveMood(t, idle, sinceKey) {
@@ -603,7 +593,7 @@ class Pet {
     if (this.bounces >= 3) {
       this.gainXP(5, true);
       this.transient = { mood: 'dizzy', until: t + 2.5 };
-      this.say(pick(['@_@ the room is spinning…', 'again! again!', 'I saw stars 💫']), 2.5);
+      this.say(this.companion.line('dizzy', '@_@ the room is spinning…'), 2.5);
     } else {
       this.transient = { mood: 'startled', until: t + 0.6 };
     }
@@ -626,18 +616,13 @@ class Pet {
 
   welcomeBack() {
     this.transient = { mood: 'startled', until: now() + 1.2 };
-    this.say('welcome back! ☀️', 4);
+    this.applyCompanion(this.companion.event('resume'));
   }
 
   appActivated(name) {
     const category = categorize(name);
     this.accessory = category === 'music' ? 'headphones' : category === 'code' ? 'glasses' : 'none';
-    const t = now();
-    const top = this.topSession;
-    const remarks = REMARKS[category];
-    if (this.quiet || this.focus.phase !== 'off' || !remarks.length || t - this.lastRemark < 45 || Math.random() > 0.4 || (top && top.activity !== 'idle')) return;
-    this.lastRemark = t;
-    this.say(pick(remarks), 3);
+    this.applyCompanion(this.companion.event('app', { name, title: this.agents.foregroundTitle }));
   }
 
   tapped() {
@@ -650,6 +635,10 @@ class Pet {
       this.jump(top.pid).then((ok) => this.say(ok ? `taking you to ${top.name} 👉` : `go check on ${top.name}! 👉`, 2.5));
       return;
     }
+    // The pet wants to talk (it said so in a bubble), or a quick double-click: open the talk window.
+    if (this.companion.hasOffer()) { this.openTalk('offer'); return; }
+    if (t - this.lastTap < 0.45) { this.lastTap = 0; this.openTalk(); return; }
+    this.lastTap = t;
     this.playSound('pet');
     this.gainXP(2, true, (d) => { d.pets++; });
     if (top && top.activity !== 'idle' && top.activity !== 'done') {
@@ -657,14 +646,14 @@ class Pet {
       this.say(top.activity === 'needsYou' ? `go check on ${top.name}! 👉` : `shh, ${top.name} is working 🤫`, 2.5);
     } else {
       this.transient = { mood: 'petted', until: t + 2.2 };
-      this.say(pick(['purr~ 💕', 'hehe', 'more pets pls', '♥︎', `you're the best, ${this.config.ownerName}!`]), 2.2);
+      this.applyCompanion(this.companion.event('petted'));
     }
   }
 
   dragBegan() {
     if (this.velocity) {
       this.gainXP(3, true);
-      this.say('nice catch! 🙌', 1.5);
+      this.say(this.companion.line('caught', 'nice catch! 🙌'), 1.5);
     }
     this.walkTarget = null;
     this.perch = null;
@@ -686,7 +675,10 @@ class Pet {
     const k = speed > limit ? limit / speed : 1;
     this.velocity = { x: v.x * k, y: v.y * k };
     if (speed > 1200) this.say('yeeeet! 🚀', 1.2);
-    if (speed > 400) this.gainXP(3, true, (d) => { d.throwsCount++; });
+    if (speed > 400) {
+      this.gainXP(3, true, (d) => { d.throwsCount++; });
+      this.applyCompanion(this.companion.event('thrown'));
+    }
   }
 
   // MARK: Size & sprites
@@ -713,6 +705,7 @@ class Pet {
   loadSprites(announce) {
     const name = this.spritePackName;
     this.scale = this.settings.get(this.scaleKey, 1);
+    this.setPersonality();
     if (!name) {
       this.pack = null;
       this.packFingerprint = 0;
@@ -770,6 +763,7 @@ class Pet {
       { type: 'separator' },
       ...agentItems,
       { type: 'separator' },
+      { label: `💬 Talk to ${this.config.petName}…`, click: () => this.openTalk() },
       { label: 'Open DeskPet…', accelerator: 'CmdOrCtrl+,', click: () => this.openPanel() },
       this.focus.phase === 'off'
         ? { label: '🍅 Focus for 25 minutes', click: () => this.startFocus(25) }
@@ -778,9 +772,130 @@ class Pet {
       { label: `Bring ${this.config.petName} here`, click: () => this.bringHere() },
       { label: this.win.isVisible() ? `Hide ${this.config.petName}` : `Show ${this.config.petName}`, click: () => this.toggleVisible() },
       { type: 'separator' },
-      { label: 'Quit DeskPet', click: () => quitApp() },
+      { label: 'Quit DeskPet', click: () => this.quit() },
     ];
     return Menu.buildFromTemplate(template);
+  }
+
+  // MARK: Companion (conversations, affection, reminders: src/companion)
+
+  setPersonality() {
+    // `--personality minori` (for screenshots) overrides the sprite pack's.
+    const forced = process.argv.indexOf('--personality');
+    const { personality, source } = forced > 0 ? { personality: process.argv[forced + 1], source: 'command line' } : personalityFor(this.spritePackName);
+    this.companion.setPersonality(personality, source);
+  }
+
+  tickCompanion(t, idle) {
+    const top = this.topSession;
+    const today = this.stats.today;
+    this.applyCompanion(this.companion.tick({
+      idle, owner: this.config.ownerName, pet: this.config.petName, focus: this.focus.phase, quiet: this.quiet,
+      speaking: !!(this.speech && this.speech.until > t), talking: this.talkOpen,
+      attention: !!(top && ['needsYou', 'error'].includes(top.activity)) || !this.win.isVisible(),
+      activeMinutes: today.activeMinutes || 0, tasks: today.tasks || 0, focusSessions: today.focusSessions || 0,
+    }));
+    // Browser tabs change without the app changing, so the title is checked on every tick too.
+    if (this.agents.foreground) this.applyCompanion(this.companion.event('app', { name: this.agents.foreground, title: this.agents.foregroundTitle }));
+  }
+
+  /** Carries out what the companion engine asks for. */
+  applyCompanion(effects) {
+    for (const f of effects || []) {
+      switch (f.type) {
+        case 'say': this.say(f.text, f.seconds || 4); break;
+        case 'mood': this.transient = { mood: f.mood, until: now() + (f.seconds || 6) }; break;
+        case 'xp': this.gainXP(f.amount, !!f.play); break;
+        case 'offer': this.transient = { mood: 'startled', until: now() + 0.8 }; this.playSound('needs-you'); break;
+        case 'tier': if (!f.down) this.playSound('level-up'); break;
+        case 'quit':
+          setTimeout(() => {
+            if (this.talk && !this.talk.isDestroyed()) this.talk.close();
+            this.quit();
+          }, f.delay || 500);
+          break;
+        default: break;
+      }
+    }
+  }
+
+  /** Quit from a menu: the pet counts it as a goodbye. */
+  quit() {
+    this.companion.event('quit');
+    quitApp();
+  }
+
+  get talkOpen() { return !!(this.talk && !this.talk.isDestroyed() && this.talk.isVisible()); }
+
+  openTalk(topic) {
+    this.walkTarget = null;
+    if (this.talk && !this.talk.isDestroyed()) {
+      this.talk.show();
+      this.talk.focus();
+      if (topic) this.talk.webContents.executeJavaScript(`window.__talkOpen(${JSON.stringify(topic)})`);
+      return;
+    }
+    this.talkStart = topic || null;
+    const bounds = this.talkBounds(230);
+    this.talk = new BrowserWindow({
+      ...bounds, frame: false, transparent: true, resizable: false, maximizable: false, minimizable: false, fullscreenable: false,
+      alwaysOnTop: true, skipTaskbar: true, hasShadow: false, show: false, backgroundColor: '#00000000', title: `Talk to ${this.config.petName}`,
+      webPreferences: { preload: path.join(__dirname, 'preload-talk.js') },
+    });
+    this.talk.setAlwaysOnTop(true, 'floating');
+    this.talk.loadFile(path.join(__dirname, 'companion', 'talk.html'));
+    this.talk.once('ready-to-show', () => { this.talk.show(); this.talk.focus(); });
+    this.talk.on('closed', () => { this.talk = null; });
+    // Face the window while talking.
+    this.walkDirection = bounds.x + bounds.width / 2 < this.win.getBounds().x + this.win.getBounds().width / 2 ? -1 : 1;
+  }
+
+  /** Beside the pet, bottom-aligned with its feet, on whichever side has room. */
+  talkBounds(height) {
+    const b = this.win.getBounds();
+    const wa = this.display().workArea;
+    const width = 460;
+    const g = this.geometry && this.geometry.hitRect;
+    const left = g ? b.x + g.x : b.x + b.width / 2 - 50;
+    const right = g ? b.x + g.x + g.width : b.x + b.width / 2 + 50;
+    const roomRight = wa.x + wa.width - right, roomLeft = left - wa.x;
+    let x = (roomRight >= width || roomRight > roomLeft) && b.x + b.width / 2 < wa.x + wa.width * 0.6 ? right - 4 : left - width + 4;
+    x = Math.max(wa.x, Math.min(wa.x + wa.width - width, x));
+    const feet = b.y + b.height - GROUND + 10;
+    const y = Math.max(wa.y, Math.min(wa.y + wa.height - height, feet - height));
+    return { x: Math.round(x), y: Math.round(y), width, height };
+  }
+
+  talkCall(action, payload) {
+    payload = payload || {};
+    switch (action) {
+      case 'init': {
+        const start = this.talkStart;
+        this.talkStart = null;
+        return { theme: this.themeHex || null, start, platform: process.platform };
+      }
+      case 'resize': {
+        if (!this.talk || this.talk.isDestroyed()) return { ok: false };
+        const h = Math.round(Math.min(600, Math.max(150, Number(payload.height) || 230)));
+        const cur = this.talk.getBounds();
+        const wa = screen.getDisplayMatching(cur).workArea;
+        // Grow upward, keeping the bottom edge where it was.
+        const y = Math.max(wa.y, Math.min(wa.y + wa.height - h, cur.y + cur.height - h));
+        this.talk.setBounds({ x: cur.x, y, width: cur.width, height: h });
+        return { ok: true };
+      }
+      case 'close': {
+        this.applyCompanion(this.companion.ui('close').effects);
+        if (this.talk && !this.talk.isDestroyed()) this.talk.close();
+        return { ok: true };
+      }
+      case 'log': console.error(payload.message); return { ok: true };
+      default: {
+        const r = this.companion.ui(action, payload);
+        this.applyCompanion(r.effects);
+        return r.result;
+      }
+    }
   }
 
   // MARK: Control center (shared HTML in src/panel, also used by the macOS app)
@@ -836,6 +951,7 @@ class Pet {
       hooks: { claudeInstalled: hooks.installed(), claudeLive: hooks.installed() && hooksLive(), kiroInstalled: this.kiroHooksOn && kiroHooks.installed(), kiroSupported: process.platform !== 'darwin' },
       update: { available: this.updater.available ? this.updater.available.version : null },
       sync: this.syncState(),
+      companion: this.companion.summary(),
       preview: (() => { const p = this.pose(t); return { hat: p.hat, trail: p.trail, aura: p.aura, companion: p.companion, golden: p.golden, prestige: p.prestige }; })(),
     };
   }
@@ -898,7 +1014,13 @@ class Pet {
       case 'checkUpdates': await this.checkForUpdates(true); return { ok: true };
       case 'installUpdate': this.installUpdate(); return { ok: true };
       case 'openWizard': this.openWizard(); return { ok: true };
-      case 'quit': quitApp(); return { ok: true };
+      case 'quit': this.quit(); return { ok: true };
+      case 'talk': this.openTalk(payload.topic || null); return { ok: true };
+      case 'companion': {
+        const r = this.companion.ui(String(payload.op || 'summary'), payload);
+        this.applyCompanion(r.effects);
+        return r.result;
+      }
       case 'close': if (this.panel && !this.panel.isDestroyed()) this.panel.close(); return { ok: true };
       case 'log': console.error('panel:', payload.message); return { ok: true };
       default: return null;
@@ -1197,7 +1319,10 @@ class Pet {
   syncProfile() {
     const settings = {};
     for (const key of TRANSFER_SETTINGS) if (key in this.settings.values) settings[key] = this.settings.values[key];
-    return { names: { petName: this.config.petName, ownerName: this.config.ownerName }, settings, prestige: this.stats.prestige, prestigeBase: this.stats.prestigeBase };
+    return {
+      names: { petName: this.config.petName, ownerName: this.config.ownerName }, settings, prestige: this.stats.prestige, prestigeBase: this.stats.prestigeBase,
+      companion: this.companion.exportData(),
+    };
   }
 
   syncTick() {
@@ -1224,6 +1349,7 @@ class Pet {
     }
     for (const [k, v] of Object.entries(p.settings || {})) if (TRANSFER_SETTINGS.includes(k) && v !== null) this.settings.set(k, v);
     if (typeof p.prestige === 'number' && typeof p.prestigeBase === 'number') this.stats.remote.prestige = { rank: p.prestige, base: p.prestigeBase };
+    if (p.companion) this.companion.mergeData(p.companion);
     if (this.spritePackName !== packBefore) this.loadSprites(false);
     this.sync.accept(this.syncProfile());
   }
@@ -1320,6 +1446,7 @@ class Pet {
     return {
       app: 'deskpet', v: 1, exported: new Date().toISOString(), from: isWindows ? 'Windows' : process.platform,
       config: { ownerName: this.config.ownerName, petName: this.config.petName }, settings, stats: this.stats.exported,
+      companion: this.companion.exportData(),
     };
   }
 
@@ -1333,6 +1460,7 @@ class Pet {
     for (const key of TRANSFER_SETTINGS) if (key in s && s[key] !== null) this.settings.set(key, s[key]);
     for (const [name, value] of Object.entries(s.scales || {})) this.settings.set(`scale.${name}`, value);
     if (payload.stats) this.stats.replace(payload.stats);
+    if (payload.companion) this.companion.replaceData(payload.companion);
     this.settings.set('setupComplete', true);
     let note = '';
     if (this.spritePackName && !listPacks().includes(this.spritePackName)) {
@@ -1705,6 +1833,7 @@ if (process.argv.includes('--snapshot')) {
     ipcMain.handle('wizard', (_e, action, payload) => pet.wizardCall(action, payload));
     ipcMain.handle('dialog', (_e, action, payload) => pet.dialogCall(action, payload));
     ipcMain.handle('panel', (_e, action, payload) => pet.panelCall(action, payload));
+    ipcMain.handle('talk', (_e, action, payload) => pet.talkCall(action, payload));
     ipcMain.on('drop-files', (_e, files) => pet.onDropFiles(files));
     ipcMain.on('drag-hover', () => { pet.transient = { mood: 'startled', until: now() + 1 }; pet.say("ooh, what's that? 👀", 1.5); });
     ipcMain.on('card-size', (_e, size) => { pet.cardSize = size; if (pet.card.isVisible()) pet.positionCard(); });
@@ -1738,7 +1867,7 @@ if (process.argv.includes('--snapshot')) {
         fs.mkdirSync(out, { recursive: true });
         const wait = (ms) => new Promise((r) => setTimeout(r, ms));
         await wait(1500);
-        for (const page of ['home', 'rewards', 'look', 'focus', 'agents', 'behavior', 'account', 'about']) {
+        for (const page of ['home', 'companion', 'rewards', 'look', 'focus', 'agents', 'behavior', 'account', 'about']) {
           await pet.panel.webContents.executeJavaScript(`window.__panelShow('${page}')`);
           await wait(page === 'look' || page === 'rewards' ? 1800 : 900);
           fs.writeFileSync(path.join(out, `panel-${page}.png`), (await pet.panel.webContents.capturePage()).toPNG());
@@ -1746,6 +1875,28 @@ if (process.argv.includes('--snapshot')) {
         console.log('panel screenshots written');
         quitApp(); // the same path as Quit in the control center
       });
+    }
+    // `--talk-snapshot`: screenshot the talk window (menu, a conversation, each game) to test-output/, then quit.
+    if (process.argv.includes('--talk-snapshot')) {
+      setTimeout(() => { console.error('talk snapshot timed out'); exitNow(2); }, 60000);
+      setTimeout(() => {
+        pet.openTalk();
+        pet.talk.webContents.on('console-message', (e) => console.log('talk:', e.message));
+        pet.talk.webContents.once('did-finish-load', async () => {
+          const out = path.join(__dirname, '..', 'test-output');
+          fs.mkdirSync(out, { recursive: true });
+          const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+          const shot = async (name) => fs.writeFileSync(path.join(out, `talk-${name}.png`), (await pet.talk.webContents.capturePage()).toPNG());
+          const demo = (action, payload) => pet.talk.webContents.executeJavaScript(`window.__talkDemo(${JSON.stringify(action)}, ${JSON.stringify(payload || {})})`);
+          await wait(1500); await shot('menu');
+          await demo('menu', { id: 'cats' }); await wait(900); await shot('ask-about');
+          await demo('menu', { id: 'topic:q_chronotype' }); await wait(1600); await shot('question');
+          await demo('menu', { id: 'cat:feeling' }); await wait(900); await shot('feelings');
+          for (const g of ['rps', 'ttt', 'words', 'pong']) { await demo('menu', { id: `game:${g}` }); await wait(1400); await shot(`game-${g}`); }
+          console.log('talk screenshots written');
+          quitApp();
+        });
+      }, 2500);
     }
     // `--card-snapshot`: render the hover card to test-output/card.png, then quit.
     if (process.argv.includes('--card-snapshot')) {
@@ -1784,5 +1935,6 @@ if (process.argv.includes('--snapshot')) {
     pet.platforms.stop();
     pet.stats.saveIfNeeded();
     pet.settings.flush();
+    pet.companion.flush();
   });
 }

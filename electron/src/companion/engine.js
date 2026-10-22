@@ -1,0 +1,890 @@
+// DeskPet companion: conversations, affection, memories, reminders, and remarks about your day.
+//
+// Pure JavaScript with no DOM or Node APIs, so the same file runs in Electron's main process (require)
+// and in the macOS app's JavaScriptCore context (as globalThis.DeskPetCompanion). The host feeds it
+// context every few seconds and carries out the effects it returns: speech bubbles, moods, XP, quitting.
+// What the pet says lives in personalities/*.json (see README → "Talking with your pet").
+(function (root) {
+  'use strict';
+
+  // Affection works like Monika After Story's: it grows with care, can drop when you're unkind or vanish
+  // for a long time, and each tier changes how the pet talks to you. Personalities can rename tiers.
+  const TIERS = [
+    { id: 'hurt', name: 'Hurt', at: -Infinity },
+    { id: 'upset', name: 'Upset', at: -30 },
+    { id: 'new', name: 'New friends', at: 0 },
+    { id: 'friends', name: 'Friends', at: 15 },
+    { id: 'good', name: 'Good friends', at: 50 },
+    { id: 'close', name: 'Close friends', at: 120 },
+    { id: 'best', name: 'Best friends', at: 250 },
+    { id: 'soul', name: 'Inseparable', at: 500 },
+  ];
+  const BASE_TIER = 2; // "new": where everyone starts
+  const MIN_AFFECTION = -100;
+  const MAX_AFFECTION = 1000;
+  /** More than this many throws a day starts to feel mean. */
+  const THROW_LIMIT = 15;
+  /** Affection can only grow this much a day, so it reflects time together rather than clicking. */
+  const DAILY_GAIN_CAP = 12;
+  const MINUTE = 60000;
+
+  const DEFAULT_SETTINGS = { chatter: 'sometimes', water: 90, breaks: 50, lateNight: true, motivation: true, appComments: true, recap: true };
+  /** Minutes of activity between conversations the pet starts. */
+  const CHATTER = { off: null, sometimes: [45, 90], often: [18, 35] };
+  const WATER_CHOICES = [0, 45, 60, 90, 120];
+  const BREAK_CHOICES = [0, 30, 50, 60, 90];
+
+  /** Dialogue moods → poses every character has. */
+  const MOODS = {
+    happy: 'petted', love: 'petted', excited: 'done', proud: 'done', thinking: 'thinking', sleepy: 'sleepy', surprised: 'startled',
+    nervous: 'oops', sad: 'oops', worried: 'oops', reading: 'reading', idle: 'idle', dizzy: 'dizzy', typing: 'typing',
+  };
+
+  const GAMES = [
+    { id: 'rps', title: 'Rock, paper, scissors', icon: '✊' },
+    { id: 'ttt', title: 'Tic-tac-toe', icon: '⭕' },
+    { id: 'words', title: 'Word guess', icon: '🌸' },
+    { id: 'pong', title: 'Pong', icon: '🏓' },
+  ];
+
+  const CATEGORY_TITLES = {
+    pet: 'About {pet}', life: 'Life', work: 'Work and focus', fun: 'Fun stuff',
+    you: 'About me', feeling: "I'm feeling…", tell: 'Tell {pet}…', goodbye: 'Goodbye…',
+  };
+  /** Categories with their own main-menu entries (the rest are listed under "Ask {pet} about…"). */
+  const OWN_ENTRY = ['you', 'feeling', 'tell', 'goodbye', 'special', 'milestone'];
+  /** Topics that only come up on their own: holidays, birthdays, and relationship milestones. */
+  const HIDDEN = ['special', 'milestone'];
+
+  /** What you're doing, from the foreground app (and window title, where the platform provides it). */
+  const APP_CATEGORIES = [
+    ['meeting', /\bzoom\b|webex|facetime|google meet|meet\.google|\bteams\b.*(meeting|call)|\bchime\b.*meeting/],
+    ['game', /steam|epic games|minecraft|roblox|league of legends|valorant|genshin|battle\.net|riot client|\bosu!|fortnite|overwatch|hoyoplay|\bitch\.io/],
+    ['video', /youtube(?! music)|netflix|twitch|\bhulu\b|disney\+|prime video|crunchyroll|\bvlc\b|\biina\b|quicktime|\bplex\b|\bmpv\b/],
+    ['music', /spotify|apple music|^music\b|\btidal\b|deezer|soundcloud|podcasts|youtube music/],
+    ['design', /figma|photoshop|illustrator|procreate|krita|\bgimp\b|blender|affinity|\bsketch\b|canva|clip studio|aseprite/],
+    ['writing', /\bword\b|\bpages\b|google docs|notion|obsidian|\bbear\b|ulysses|scrivener|onenote|libreoffice|quip/],
+    ['code', /\bcode\b|terminal|powershell|cmd\.exe|iterm|kiro|devenv|intellij|\bidea\b|pycharm|webstorm|jetbrains|cursor|ghostty|warp|\bzed\b|sublime|alacritty|wezterm|xcode|konsole|kitty|android studio|\bvim\b|emacs/],
+    ['chat', /slack|\bchime\b|outlook|\bolk\b|\bteams\b|discord|\bmail\b|whatsapp|telegram|^messages$|signal/],
+    ['browser', /chrome|msedge|\bedge\b|firefox|brave|opera|safari|\barc\b|vivaldi|chromium/],
+  ];
+
+  function categorize(name, title) {
+    const s = `${name || ''} ${title || ''}`.toLowerCase().trim();
+    for (const [id, re] of APP_CATEGORIES) if (re.test(s)) return id;
+    return 'other';
+  }
+
+  const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const pad = (n) => String(n).padStart(2, '0');
+  const dayKey = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const monthDay = (d = new Date()) => `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
+  const num = (v, fallback) => (typeof v === 'number' && isFinite(v) ? v : fallback);
+  const pickOne = (list) => list[Math.floor(Math.random() * list.length)];
+  const between = ([lo, hi]) => (lo + Math.random() * (hi - lo)) * MINUTE;
+  const clean = (s, max) => String(s == null ? '' : s).replace(/[{}<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, max);
+  /** "🍵 Tea" → "tea": choice labels become remembered values. */
+  const plain = (s) => String(s).replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu, '').trim().replace(/^./, (c) => c.toLowerCase());
+
+  function displayDate(mmdd) {
+    const [m, d] = String(mmdd).split('-').map(Number);
+    return m >= 1 && m <= 12 && d >= 1 && d <= 31 ? `${MONTHS[m - 1]} ${d}` : String(mmdd);
+  }
+
+  function normalize(s) {
+    s = isObj(s) ? s : {};
+    const settings = { ...DEFAULT_SETTINGS };
+    for (const [k, v] of Object.entries(isObj(s.settings) ? s.settings : {})) if (k in DEFAULT_SETTINGS && typeof v === typeof DEFAULT_SETTINGS[k]) settings[k] = v;
+    return {
+      v: 1,
+      affection: Math.max(MIN_AFFECTION, Math.min(MAX_AFFECTION, num(s.affection, 0))),
+      milestones: isObj(s.milestones) ? s.milestones : {},
+      cleanExit: s.cleanExit !== false,
+      gained: isObj(s.gained) && typeof s.gained.day === 'string' ? { day: s.gained.day, amount: num(s.gained.amount, 0) } : { day: '', amount: 0 },
+      memory: isObj(s.memory) ? s.memory : {},
+      seen: isObj(s.seen) ? s.seen : {},
+      settings,
+      days: isObj(s.days) ? s.days : {},
+      counters: { talks: 0, games: 0, wins: 0, ...(isObj(s.counters) ? s.counters : {}) },
+      lastSeen: num(s.lastSeen, 0),
+      farewell: isObj(s.farewell) ? s.farewell : null,
+      firstMet: typeof s.firstMet === 'string' ? s.firstMet : dayKey(),
+    };
+  }
+
+  function create(options) {
+    options = options || {};
+    const personalities = options.personalities || {};
+    const host = options.host || {};
+    const now = () => Date.now();
+
+    let state = normalize(options.state);
+    let persona = null;
+    let personaInfo = { id: 'friend', name: 'Friend', source: 'built-in' };
+    let names = { owner: 'friend', pet: 'Mochi' };
+    let ctx = { idle: 0 };
+    let effects = [];
+    let convo = null;
+    let offer = null;
+    let scheduled = [];
+    const recent = new Map();
+
+    const startedAt = now();
+    let lastTick = startedAt;
+    let lastAmbient = startedAt;
+    let lastSave = 0;
+    let dirty = false;
+    let activeMs = 0;
+    let waterMs = 0;
+    let chatterMs = 0;
+    let chatterDue = 0;
+    let encourageMs = 0;
+    let encourageDue = between([80, 150]);
+    let streakStart = startedAt;
+    let lastNight = 0;
+    let lastCategory = '';
+    const appCooldown = {};
+
+    // MARK: Personalities
+
+    /** Merges `extends` chains. A pool a personality defines replaces the base pool and its "+tier" variants. */
+    function resolve(p, depth) {
+      if (typeof p === 'string') p = personalities[p];
+      if (!isObj(p)) return null;
+      const base = p.extends && depth < 5 ? resolve(p.extends, depth + 1) : null;
+      const pools = base ? { ...base.pools } : {};
+      for (const key of Object.keys(p.pools || {})) {
+        for (const k of Object.keys(pools)) if (k === key || k.startsWith(`${key}+`)) delete pools[k];
+      }
+      Object.assign(pools, p.pools || {});
+      const topics = new Map(base ? base.topics.map((t) => [t.id, t]) : []);
+      for (const t of p.topics || []) {
+        if (!t || !t.id) continue;
+        if (t.remove) topics.delete(t.id);
+        else topics.set(t.id, t);
+      }
+      return {
+        id: p.id || (base && base.id) || 'custom',
+        name: p.name || (base && base.name) || 'Custom',
+        pools,
+        topics: [...topics.values()],
+        categories: { ...(base ? base.categories : {}), ...(p.categories || {}) },
+      tierNames: { ...(base ? base.tierNames : {}), ...(p.tierNames || {}) },
+        words: [...new Set([...(p.replaceWords || !base ? [] : base.words), ...(p.words || [])])],
+      };
+    }
+
+    function setPersonality(p, source) {
+      const resolved = resolve(p, 0) || resolve('friend', 0) || { id: 'none', name: 'None', pools: {}, topics: [], categories: {}, words: [] };
+      persona = resolved;
+      personaInfo = { id: resolved.id, name: resolved.name, source: source || 'built-in' };
+      if (convo) convo = null;
+      if (offer && !persona.topics.includes(offer.topic)) offer = null;
+    }
+    setPersonality(options.personality || 'friend');
+
+    // MARK: Text
+
+    function timeOfDay(h = new Date().getHours()) {
+      return h >= 5 && h < 12 ? 'morning' : h >= 12 && h < 17 ? 'afternoon' : h >= 17 && h < 22 ? 'evening' : 'night';
+    }
+
+    function fill(text, extra) {
+      return String(text).replace(/\{(\w+)(?::(\w+))?(?:\|([^}]*))?\}/g, (m, name, arg, fallback) => {
+        if (name === 'owner') return state.memory.nickname && tierIndex() >= BASE_TIER && Math.random() < 0.5 ? state.memory.nickname.value : names.owner;
+        if (name === 'name') return names.owner;
+        if (name === 'pet') return names.pet;
+        if (name === 'mem') { const v = state.memory[arg]; return v ? String(v.display || v.value) : (fallback != null ? fallback : 'that'); }
+        if (name === 'timeOfDay') return timeOfDay();
+        if (name === 'weekday') return WEEKDAYS[new Date().getDay()];
+        if (name === 'tier') return tier().name.toLowerCase();
+        const vars = extra || (convo && convo.vars);
+        if (vars && name in vars) return String(vars[name]);
+        return fallback != null ? fallback : m;
+      });
+    }
+
+    function poolLines(key) {
+      const t = tierIndex();
+      // When the pet is upset, "+upset"/"+hurt" lines replace the usual ones.
+      if (t < BASE_TIER) {
+        const sad = persona.pools[`${key}+${TIERS[t].id}`] || persona.pools[`${key}+upset`];
+        if (sad) return [...sad];
+      }
+      let lines = [...(persona.pools[key] || [])];
+      TIERS.forEach((tr, i) => {
+        const extra = persona.pools[`${key}+${tr.id}`];
+        if (i > BASE_TIER && i <= t && extra) lines = lines.concat(extra, extra); // closer friends hear the warmer lines more often
+      });
+      return lines;
+    }
+
+    /** A random line from a pool (never the same one twice in a row), or the fallback. */
+    function line(key, fallback, extra) {
+      const lines = poolLines(key);
+      if (!lines.length) return fallback == null ? null : fill(fallback, extra);
+      let choice = pickOne(lines);
+      if (lines.length > 1 && recent.get(key) === choice) choice = lines.find((l) => l !== choice) || choice;
+      recent.set(key, choice);
+      return fill(choice, extra);
+    }
+
+    // MARK: Affection and memory
+
+    function tierIndex(a = state.affection) {
+      let i = 0;
+      TIERS.forEach((t, j) => { if (a >= t.at) i = j; });
+      return i;
+    }
+    const tierName = (i) => persona.tierNames[TIERS[i].id] || TIERS[i].name;
+    const tier = () => ({ ...TIERS[tierIndex()], name: tierName(tierIndex()) });
+
+    function affectionInfo() {
+      const i = tierIndex();
+      const next = TIERS[i + 1];
+      const cur = TIERS[i];
+      const from = isFinite(cur.at) ? cur.at : MIN_AFFECTION;
+      return {
+        value: Math.round(state.affection * 10) / 10, tier: tierName(i), tierId: cur.id, hearts: Math.max(0, i - BASE_TIER), maxHearts: TIERS.length - 1 - BASE_TIER,
+        upset: i < BASE_TIER, next: next ? tierName(i + 1) : null, progress: next ? Math.max(0, Math.min(1, (state.affection - from) / (next.at - from))) : 1,
+        todayLeft: Math.max(0, Math.round((DAILY_GAIN_CAP - (state.gained.day === dayKey() ? state.gained.amount : 0)) * 10) / 10),
+      };
+    }
+
+    function changeAffection(amount) {
+      if (!amount) return;
+      if (amount > 0) {
+        const d = dayKey();
+        if (state.gained.day !== d) state.gained = { day: d, amount: 0 };
+        amount = Math.min(amount, DAILY_GAIN_CAP - state.gained.amount);
+        if (amount <= 0) return;
+        state.gained.amount += amount;
+      }
+      const before = tierIndex();
+      state.affection = Math.max(MIN_AFFECTION, Math.min(MAX_AFFECTION, state.affection + amount));
+      dirty = true;
+      const after = tierIndex();
+      if (after > before && after > BASE_TIER) {
+        effects.push({ type: 'tier', tier: tierName(after) });
+        // The first time you reach a tier there may be a milestone conversation waiting.
+        const id = TIERS[after].id;
+        const milestone = !state.milestones[id] && persona.topics.find((t) => t.category === 'milestone' && t.tier === id);
+        state.milestones[id] = state.milestones[id] || dayKey();
+        if (milestone) {
+          offer = { topic: milestone, until: now() + 60 * MINUTE };
+          later(convo ? 2000 : 1500, { type: 'say', text: line('wantsToTalk.milestone', null) || line('wantsToTalk', 'psst… click me! 💬'), seconds: 10 });
+          later(convo ? 2000 : 1500, { type: 'offer' });
+        } else {
+          later(convo ? 0 : 1500, { type: 'say', text: line('tierUp', "We're {tier} now! 💕"), seconds: 6 });
+        }
+      } else if (after < before) {
+        effects.push({ type: 'tier', tier: tierName(after), down: true });
+        if (after < BASE_TIER) later(1500, { type: 'say', text: line('tierDown', null) || '…', seconds: 5 });
+      }
+    }
+
+    function remember(key, value, label, display) {
+      key = clean(key, 40);
+      if (!key) return;
+      const prev = state.memory[key];
+      state.memory[key] = { value: clean(value, 60), label: label || (prev && prev.label) || key, at: now() };
+      if (display) state.memory[key].display = display;
+      dirty = true;
+    }
+
+    function forget(key) {
+      if (key === '*') state.memory = {};
+      else delete state.memory[key];
+      dirty = true;
+    }
+
+    // MARK: Conditions
+
+    function check(cond) {
+      if (!cond) return true;
+      if (Array.isArray(cond)) return cond.every(check);
+      const d = new Date();
+      const h = d.getHours();
+      const md = monthDay(d);
+      if (cond.mem && !state.memory[cond.mem]) return false;
+      if (cond.noMem && state.memory[cond.noMem]) return false;
+      if (cond.memIs) {
+        for (const [k, v] of Object.entries(cond.memIs)) {
+          const m = state.memory[k];
+          if (!m || ![].concat(v).map((x) => String(x).toLowerCase()).includes(String(m.value).toLowerCase())) return false;
+        }
+      }
+      if (cond.minAffection != null && state.affection < cond.minAffection) return false;
+      if (cond.maxAffection != null && state.affection > cond.maxAffection) return false;
+      if (cond.tier && tierIndex() < TIERS.findIndex((t) => t.id === cond.tier)) return false;
+      if (cond.belowTier && tierIndex() >= TIERS.findIndex((t) => t.id === cond.belowTier)) return false;
+      if (cond.upset != null && (tierIndex() < BASE_TIER) !== !!cond.upset) return false;
+      if (cond.hours) {
+        const [a, b] = cond.hours;
+        if (a <= b ? !(h >= a && h < b) : !(h >= a || h < b)) return false;
+      }
+      if (cond.timeOfDay && ![].concat(cond.timeOfDay).includes(timeOfDay(h))) return false;
+      if (cond.date && ![].concat(cond.date).includes(md)) return false;
+      if (cond.month && ![].concat(cond.month).includes(d.getMonth() + 1)) return false;
+      if (cond.weekday && ![].concat(cond.weekday).includes(d.getDay())) return false;
+      if (cond.seen && !state.seen[cond.seen]) return false;
+      if (cond.notSeen && state.seen[cond.notSeen]) return false;
+      if (cond.birthday && !(state.memory.birthday && state.memory.birthday.value === md)) return false;
+      if (cond.anniversary && !(state.firstMet.slice(5) === md && state.firstMet !== dayKey(d))) return false;
+      if (cond.platform && cond.platform !== host.platform) return false;
+      if (cond.agentsToday && !(ctx.tasks > 0)) return false;
+      if (cond.chance != null && Math.random() > cond.chance) return false;
+      return true;
+    }
+
+    const available = (t) => check(t.when) && (t.minAffection || 0) <= state.affection;
+
+    // MARK: Conversations
+
+    function node(kind, text, mood, extra) {
+      if (mood) effects.push({ type: 'mood', mood: MOODS[mood] || mood, seconds: 8 });
+      return { kind, speaker: names.pet, text: text == null ? null : String(text), mood: mood || null, affection: affectionInfo(), ...(extra || {}) };
+    }
+
+    function startTopic(topic) {
+      if (!topic) return menuNode('main', line('talk.allSeen', "I'm out of new things to say for now. Let's play a game?"));
+      convo = { topic, queue: [...(topic.steps || [])], pending: null };
+      if (topic.confetti) effects.push({ type: 'confetti' });
+      const first = advance();
+      if (topic.confetti) first.confetti = true;
+      return first;
+    }
+
+    function advance() {
+      while (convo && convo.queue.length) {
+        const result = run(convo.queue.shift());
+        if (result) return result;
+      }
+      return finish();
+    }
+
+    /** Runs one dialogue step; returns a node when there's something to show. */
+    function run(step) {
+      if (typeof step === 'string') return node('line', fill(step));
+      if (Array.isArray(step)) { convo.queue.unshift(...step); return null; }
+      if (!isObj(step)) return null;
+      if (step.when && !check(step.when)) {
+        if (step.else) convo.queue.unshift(...[].concat(step.else));
+        return null;
+      }
+      if (step.affection) changeAffection(step.affection);
+      if (step.remember) for (const [k, v] of Object.entries(step.remember)) remember(k, v, step.label);
+      if (step.forget) forget(step.forget);
+      if (step.farewell) { state.farewell = { reason: step.farewell, at: now() }; dirty = true; }
+      if (step.steps) convo.queue.unshift(...step.steps);
+      if (step.action === 'quit') convo.quit = true;
+      if (step.action === 'recall') convo.queue.unshift(...recallSteps());
+      if (step.random) { convo.queue.unshift(pickOne(step.random)); return null; }
+      if (step.say) return node('line', fill(step.say), step.mood);
+      if (step.pick) return node('line', fill(pickOne(step.pick)), step.mood);
+      if (step.pool) return node('line', line(step.pool, '…'), step.mood);
+      if (step.ask) {
+        const choices = (step.choices || []).filter((c) => check(c.when));
+        convo.pending = { type: 'ask', step, choices };
+        return node('ask', fill(step.ask), step.mood, { choices: choices.map((c) => fill(c.label)) });
+      }
+      if (step.input) {
+        convo.pending = { type: 'input', step };
+        return node('input', fill(step.input), step.mood, { input: { placeholder: step.placeholder || '', kind: step.kind || 'text', max: 40 } });
+      }
+      if (step.game) {
+        convo.pending = { type: 'game', step };
+        const extra = { game: step.game };
+        if (step.game === 'words') extra.words = persona.words.length ? persona.words : ['friend', 'sunshine', 'coffee'];
+        return node('game', fill(step.text || line(`game.${step.game}.start`, "Let's play!")), step.mood || 'excited', extra);
+      }
+      if (step.mood) effects.push({ type: 'mood', mood: MOODS[step.mood] || step.mood, seconds: 8 });
+      return null;
+    }
+
+    function finish() {
+      const c = convo;
+      convo = null;
+      if (c && c.topic && c.topic.id) {
+        state.seen[c.topic.id] = (state.seen[c.topic.id] || 0) + 1;
+        state.counters.talks++;
+        changeAffection(c.topic.affection != null ? c.topic.affection : 1);
+        dirty = true;
+      }
+      if (c && c.quit) {
+        effects.push({ type: 'quit', delay: 600 });
+        return node('end', null, null, { quit: true });
+      }
+      return menuNode('main', line('talk.anything', 'Anything else?'));
+    }
+
+    function choose(index) {
+      if (!convo || !convo.pending || convo.pending.type !== 'ask') return menuNode('main', line('talk.menu', "What's up?"));
+      const { step, choices } = convo.pending;
+      const c = choices[index];
+      convo.pending = null;
+      if (!c) return advance();
+      if (c.affection) changeAffection(c.affection);
+      if (step.key) {
+        const value = 'value' in c ? c.value : plain(c.label);
+        if (value !== null && value !== '') remember(step.key, value, step.label);
+      }
+      if (c.remember) for (const [k, v] of Object.entries(c.remember)) remember(k, v, c.label);
+      if (c.farewell) { state.farewell = { reason: c.farewell, at: now() }; dirty = true; }
+      convo.queue.unshift(...(c.steps || []));
+      if (c.say) convo.queue.unshift({ say: c.say, mood: c.mood });
+      else if (c.mood) effects.push({ type: 'mood', mood: MOODS[c.mood] || c.mood, seconds: 8 });
+      return advance();
+    }
+
+    function input(raw) {
+      if (!convo || !convo.pending || convo.pending.type !== 'input') return menuNode('main', line('talk.menu', "What's up?"));
+      const { step } = convo.pending;
+      convo.pending = null;
+      let value = clean(raw, 40);
+      let display = null;
+      if (step.kind === 'date') {
+        const m = /^(\d{1,2})-(\d{1,2})$/.exec(value);
+        value = m && +m[1] >= 1 && +m[1] <= 12 && +m[2] >= 1 && +m[2] <= 31 ? `${pad(+m[1])}-${pad(+m[2])}` : '';
+        display = value ? displayDate(value) : null;
+      }
+      if (!value) {
+        convo.queue.unshift(...[].concat(step.skip || [{ pool: 'input.skip' }]));
+        return advance();
+      }
+      if (step.key) remember(step.key, value, step.label, display);
+      convo.vars = { ...(convo.vars || {}), value: display || value };
+      convo.queue.unshift(...[].concat(step.then || []));
+      return advance();
+    }
+
+    function gameResult(game, outcome) {
+      const known = GAMES.some((g) => g.id === game);
+      if (!known || !['win', 'lose', 'draw'].includes(outcome)) return menuNode('main', line('talk.anything', 'Anything else?'));
+      state.counters.games++;
+      if (outcome === 'win') state.counters.wins++;
+      dirty = true;
+      changeAffection(1);
+      effects.push({ type: 'xp', amount: outcome === 'win' ? 5 : outcome === 'draw' ? 4 : 3, play: true });
+      if (!convo) convo = { topic: null, queue: [], pending: null };
+      convo.pending = null;
+      // "win" is from your side: you won, so the pet lost.
+      const text = line(`game.${game}.${outcome}`, null) || line(`game.${outcome}`, outcome === 'win' ? 'You win! 🏆' : outcome === 'lose' ? 'I win! 😆' : "It's a tie!");
+      convo.queue.unshift(
+        { say: text, mood: outcome === 'win' ? 'surprised' : outcome === 'lose' ? 'excited' : 'happy' },
+        { ask: line('game.again', 'Again?'), choices: [{ label: 'Again! 🔁', steps: [{ game }] }, { label: 'Something else', steps: [] }] },
+      );
+      return advance();
+    }
+
+    function recallSteps() {
+      const items = Object.values(state.memory).filter((v) => v && v.label && v.value);
+      if (!items.length) return [{ pool: 'recall.empty' }];
+      const steps = [{ pool: 'recall.intro' }];
+      for (let i = 0; i < items.length; i += 3) {
+        steps.push(items.slice(i, i + 3).map((v) => `${v.label.replace(/^./, (c) => c.toUpperCase())}: ${v.display || v.value}`).join('\n'));
+      }
+      steps.push({ pool: 'recall.outro' });
+      return steps;
+    }
+
+    // MARK: Menus
+
+    const catTitle = (id) => fill(persona.categories[id] || CATEGORY_TITLES[id] || id.replace(/^./, (c) => c.toUpperCase()));
+
+    function menuItems(id) {
+      const topics = persona.topics.filter((t) => t.menu !== false && !HIDDEN.includes(t.category));
+      const inCat = (cat) => topics.filter((t) => t.category === cat);
+      if (id === 'main') {
+        const items = [{ id: 'random', label: '💬 Talk to me', hint: 'You pick something' }];
+        if (askCategories().length) items.push({ id: 'cats', label: `❓ Ask ${names.pet} about…` });
+        if (inCat('you').some(available)) items.push({ id: 'cat:you', label: '🙋 Ask me about me', hint: `${names.pet} gets to know you` });
+        if (inCat('feeling').length) items.push({ id: 'cat:feeling', label: "💭 I'm feeling…" });
+        if (inCat('tell').length) items.push({ id: 'cat:tell', label: `💌 Tell ${names.pet}…` });
+        items.push({ id: 'games', label: '🎮 Play a game' });
+        items.push({ id: 'recall', label: '🧠 What do you know about me?' });
+        if (persona.topics.some((t) => t.category === 'milestone' && state.seen[t.id])) items.push({ id: 'memories', label: '📔 Our special moments' });
+        if (inCat('goodbye').length) items.push({ id: 'cat:goodbye', label: '👋 Goodbye…' });
+        return { items };
+      }
+      if (id === 'cats') {
+        return {
+          back: 'main',
+          items: askCategories().map((cat) => {
+            const list = inCat(cat).filter(available);
+            const fresh = list.filter((t) => !state.seen[t.id]).length;
+            return { id: `cat:${cat}`, label: catTitle(cat), badge: fresh ? `${fresh} new` : null };
+          }),
+        };
+      }
+      if (id === 'memories') {
+        return {
+          back: 'main', title: 'Our special moments',
+          items: persona.topics.filter((t) => t.category === 'milestone' && state.seen[t.id]).map((t) => ({ id: `replay:${t.id}`, label: fill(t.title || t.id), badge: state.milestones[t.tier] || null })),
+        };
+      }
+      if (id === 'games') return { back: 'main', items: GAMES.map((g) => ({ id: `game:${g.id}`, label: `${g.icon} ${g.title}` })) };
+      if (id.startsWith('cat:')) {
+        const cat = id.slice(4);
+        const all = inCat(cat);
+        const open = all.filter(available);
+        const locked = all.filter((t) => check(t.when) && (t.minAffection || 0) > state.affection).length;
+        const items = open.map((t) => ({ id: `topic:${t.id}`, label: fill(t.title || t.id), badge: !state.seen[t.id] && cat !== 'goodbye' && cat !== 'tell' && cat !== 'feeling' ? 'new' : null }));
+        return { back: OWN_ENTRY.includes(cat) ? 'main' : 'cats', items, locked: locked ? `🔒 ${locked} more as you two get closer` : null, title: catTitle(cat) };
+      }
+      return { items: [] };
+    }
+
+    function askCategories() {
+      const cats = [];
+      for (const t of persona.topics) {
+        if (t.menu === false || OWN_ENTRY.includes(t.category) || !t.category || cats.includes(t.category)) continue;
+        cats.push(t.category);
+      }
+      const order = ['pet', ...Object.keys(persona.categories), 'life', 'work', 'fun'];
+      return cats.sort((a, b) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99));
+    }
+
+    function menuNode(id, text) {
+      convo = null;
+      const m = menuItems(id);
+      const prompt = text || (id === 'games' ? line('game.pick', 'What should we play? 🎮') : id === 'main' ? line('talk.menu', "What's up, {owner}?")
+        : id === 'cats' ? line('talk.askAbout', 'Ask me anything! What do you want to know?') : m.title || catTitle(id.replace(/^cat:/, '')));
+      return node('menu', prompt, null, { menu: m });
+    }
+
+    function pickTopic() {
+      const eligible = persona.topics.filter((t) => t.random && !HIDDEN.includes(t.category) && available(t));
+      const fresh = eligible.filter((t) => !state.seen[t.id]);
+      // Questions you've already answered don't come back on their own.
+      const pool = fresh.length ? fresh : eligible.filter((t) => t.repeat !== false && t.category !== 'you');
+      if (!pool.length) return null;
+      const least = Math.min(...pool.map((t) => state.seen[t.id] || 0));
+      return pickOne(pool.filter((t) => (state.seen[t.id] || 0) === least));
+    }
+
+    function specialToday() {
+      const day = dayFlags();
+      return persona.topics.find((t) => t.category === 'special' && check(t.when) && !day[`special:${t.id}`]) || null;
+    }
+
+    function selectMenu(id) {
+      if (id === 'random') return startTopic(pickTopic());
+      if (id === 'recall') { convo = { topic: null, queue: recallSteps(), pending: null }; return advance(); }
+      if (id.startsWith('replay:')) return startTopic(persona.topics.find((t) => t.id === id.slice(7) && t.category === 'milestone' && state.seen[t.id]));
+      if (id.startsWith('topic:')) return startTopic(persona.topics.find((t) => t.id === id.slice(6) && available(t)));
+      if (id.startsWith('game:')) {
+        convo = { topic: null, queue: [{ game: id.slice(5) }], pending: null };
+        return advance();
+      }
+      return menuNode(id);
+    }
+
+    // MARK: Ambient remarks and reminders
+
+    function dayFlags() {
+      const d = dayKey();
+      if (!state.days[d]) {
+        state.days[d] = {};
+        const keys = Object.keys(state.days).sort();
+        for (const k of keys.slice(0, Math.max(0, keys.length - 7))) delete state.days[k];
+      }
+      return state.days[d];
+    }
+
+    function later(ms, effect) { scheduled.push({ at: now() + ms, effect }); }
+
+    function say(text, seconds) {
+      if (!text) return false;
+      effects.push({ type: 'say', text, seconds: seconds || Math.min(9, 3 + text.length / 18) });
+      lastAmbient = now();
+      return true;
+    }
+
+    /** Ambient lines wait for a moment when you're around and nothing more important is on screen. */
+    function canSpeak(t, gap) {
+      return !ctx.quiet && !ctx.talking && !ctx.speaking && !ctx.attention && ctx.focus !== 'focus' && ctx.idle < 60 && t - lastAmbient > gap;
+    }
+
+    function greeting() {
+      const t = now();
+      const away = state.lastSeen ? (t - state.lastSeen) / 1000 : null;
+      const f = state.farewell;
+      const saidBye = state.cleanExit;
+      state.farewell = null;
+      state.cleanExit = false;
+      dirty = true;
+      const tod = timeOfDay();
+      if (away == null) return line('greeting.first', 'Hi {owner}! 💕');
+      // Disappearing for a long time hurts a little; leaving without a goodbye stings a bit too.
+      if (away > 30 * 86400) changeAffection(-8);
+      else if (away > 7 * 86400) changeAffection(-3);
+      if (!saidBye && !f && away > 3600) changeAffection(-0.5);
+      if (tierIndex() < BASE_TIER) return line('greeting.upset', null) || line(`greeting.${tod}`, 'Oh. Hi, {owner}.');
+      if (away < 600) return line('greeting.again', 'hi {owner}! 👋');
+      if (f && t - f.at < 20 * 3600 * 1000 && poolLines(`greeting.after.${f.reason}`).length) return line(`greeting.after.${f.reason}`);
+      if (away > 14 * 86400) return line('greeting.longGone', null) || line(`greeting.${tod}`, 'Welcome back, {owner}!');
+      if (away > 2 * 86400) return line('greeting.missed', null) || line(`greeting.${tod}`, 'Welcome back, {owner}!');
+      if (away < 6 * 3600 && dayKey(new Date(state.lastSeen)) === dayKey()) return line('greeting.back', 'Welcome back, {owner}!');
+      return line(`greeting.${tod}`, 'Hi {owner}! 👋');
+    }
+
+    function greet() {
+      const text = greeting();
+      say(text, 6);
+      const day = dayFlags();
+      if (!day.greeted) { day.greeted = true; changeAffection(1); }
+      const special = specialToday();
+      if (special) {
+        offer = { topic: special, until: now() + 30 * MINUTE };
+        dayFlags()[`special:${special.id}`] = true;
+        later(7000, { type: 'say', text: line(special.prompt || 'wantsToTalk.special', null) || line('wantsToTalk', 'psst… click me! 💬'), seconds: 10 });
+        later(7000, { type: 'offer' });
+      }
+      state.lastSeen = now();
+      dirty = true;
+    }
+
+    function tick(c) {
+      ctx = { idle: 0, ...(c || {}) };
+      if (ctx.owner) names.owner = ctx.owner;
+      if (ctx.pet) names.pet = ctx.pet;
+      const t = now();
+      const dt = Math.max(0, Math.min(MINUTE, t - lastTick));
+      lastTick = t;
+      // A long gap between ticks means the computer slept.
+      if (dt >= MINUTE && t - state.lastSeen > 4 * 3600 * 1000) greet();
+      state.lastSeen = t;
+      if (t - lastSave > 60000) dirty = true;
+
+      for (const s of scheduled.filter((x) => x.at <= t)) {
+        if (s.effect.type === 'say' && (ctx.speaking || ctx.talking)) { s.at = t + 3000; continue; }
+        effects.push(s.effect);
+        if (s.effect.type === 'say') lastAmbient = t;
+        scheduled.splice(scheduled.indexOf(s), 1);
+      }
+
+      const active = ctx.idle < 120;
+      if (active) { activeMs += dt; waterMs += dt; chatterMs += dt; encourageMs += dt; }
+      if (ctx.idle > 300 || ctx.focus === 'focus') streakStart = t;
+      if (offer && t > offer.until) offer = null;
+      if (!chatterDue) chatterDue = CHATTER[state.settings.chatter] ? between(CHATTER[state.settings.chatter]) : 0;
+
+      const s = state.settings;
+      const h = new Date().getHours();
+      const day = dayFlags();
+      if (t - startedAt > 45000 && canSpeak(t, 3 * MINUTE)) {
+        const late = h >= 23 || h < 5;
+        if (s.lateNight && late && ctx.idle < 10 && t - lastNight > 75 * MINUTE) {
+          lastNight = t;
+          say(line(h >= 1 && h < 5 ? 'lateNight.late' : 'lateNight', "It's late, {owner}… bedtime soon? 🌙"), 6);
+        } else if (s.breaks && t - streakStart >= s.breaks * MINUTE) {
+          streakStart = t;
+          say(line('break', 'Stretch break? 🙆'), 7);
+        } else if (s.water && waterMs >= s.water * MINUTE) {
+          waterMs = 0;
+          say(line('water', 'Water break! 💧'), 6);
+        } else if (s.motivation && !day.motivation && activeMs > 2 * MINUTE && h >= 5) {
+          day.motivation = true;
+          dirty = true;
+          say(line('motivation', "You've got this, {owner}! ✨"), 8);
+        } else if (s.recap && !day.recap && h >= 18 && (ctx.activeMinutes || 0) >= 60) {
+          day.recap = true;
+          dirty = true;
+          const mins = ctx.activeMinutes;
+          const hours = mins >= 90 ? `${Math.round(mins / 6) / 10} hours` : `${mins} minutes`;
+          say(line(ctx.tasks > 0 ? 'recap.agents' : 'recap', 'We spent {hours} together today 💕', { hours, tasks: ctx.tasks || 0, focus: ctx.focusSessions || 0 }), 8);
+        } else if (chatterDue && !offer && chatterMs >= chatterDue) {
+          chatterMs = 0;
+          chatterDue = CHATTER[s.chatter] ? between(CHATTER[s.chatter]) : 0;
+          const topic = pickTopic();
+          if (topic) {
+            offer = { topic, until: t + 2 * MINUTE };
+            say(line('wantsToTalk', 'psst… click me! 💬'), 10);
+            effects.push({ type: 'offer' });
+          }
+        } else if (encourageMs >= encourageDue) {
+          encourageMs = 0;
+          encourageDue = between([80, 150]);
+          say(line('encourage', "You're doing great 💕"), 6);
+        }
+      }
+
+      if (dirty && t - lastSave > 5000) save();
+      return drain();
+    }
+
+    function appChanged(name, title) {
+      const cat = categorize(name, title);
+      const t = now();
+      if (cat === lastCategory) return drain();
+      lastCategory = cat;
+      if (!state.settings.appComments || cat === 'other' || t - startedAt < 20000) return drain();
+      if (!canSpeak(t, 90000) || (appCooldown[cat] && t - appCooldown[cat] < 40 * MINUTE) || Math.random() > 0.5) return drain();
+      const text = line(`app.${cat}`, null);
+      if (text) { appCooldown[cat] = t; say(text, 3.5); }
+      return drain();
+    }
+
+    function event(name, data) {
+      data = data || {};
+      switch (name) {
+        case 'launch': greet(); break;
+        case 'petted': changeAffection(0.25); say(line('petted', 'hehe 💕'), 2.2); break;
+        case 'wake': say(line('wake', 'oh! hi! 😳'), 3); break;
+        case 'thrown': {
+          const day = dayFlags();
+          day.throws = (day.throws || 0) + 1;
+          if (day.throws > THROW_LIMIT) {
+            changeAffection(-0.3);
+            if (day.throws === THROW_LIMIT + 1) say(line('thrownTooMuch', 'ow… can you stop throwing me? 😣'), 3.5);
+          }
+          dirty = true;
+          break;
+        }
+        case 'quit':
+          // Quitting from the menu is a goodbye too, just a quick one. Crashes and shutdowns aren't.
+          state.cleanExit = true;
+          state.lastSeen = now();
+          save();
+          break;
+        case 'resume': {
+          const away = state.lastSeen ? (now() - state.lastSeen) / 1000 : 0;
+          if (away > 4 * 3600) greet();
+          else say(line('resume', 'welcome back! ☀️'), 4);
+          break;
+        }
+        case 'app': return appChanged(data.name, data.title);
+        default: break;
+      }
+      return drain();
+    }
+
+    function drain() {
+      const out = effects;
+      effects = [];
+      return out;
+    }
+
+    function save() {
+      dirty = false;
+      lastSave = now();
+      if (typeof host.save === 'function') {
+        try { host.save(JSON.stringify(state)); } catch (_) { /* host storage failed; try again next change */ }
+      }
+    }
+
+    // MARK: UI calls (the talk window and the control center)
+
+    function ui(action, payload) {
+      payload = payload || {};
+      let result = null;
+      switch (action) {
+        case 'open': {
+          const topicId = payload.topic;
+          if (topicId === 'offer' && offer) { const t = offer.topic; offer = null; dayFlags()[`special:${t.id}`] = true; result = startTopic(t); }
+          else if (topicId && topicId !== 'offer') result = selectMenu(topicId);
+          else result = menuNode('main');
+          break;
+        }
+        case 'menu': result = selectMenu(String(payload.id || 'main')); break;
+        case 'next':
+          if (convo && convo.pending) result = convo.pending.type === 'ask' ? choose(-1) : convo.pending.type === 'input' ? input('') : advance();
+          else result = advance();
+          break;
+        case 'choose': result = choose(Number(payload.index)); break;
+        case 'input': result = input(payload.value); break;
+        case 'game': result = gameResult(String(payload.game), String(payload.outcome)); break;
+        case 'close':
+          if (convo && convo.topic && convo.queue.length + (convo.pending ? 1 : 0) > 0) say(line('talk.bye', 'talk later! 👋'), 3);
+          convo = null;
+          break;
+        case 'summary': result = summary(); break;
+        case 'setting': result = setSetting(payload.key, payload.value); break;
+        case 'forget': forget(String(payload.key || '')); result = summary(); break;
+        case 'remember': {
+          const key = clean(payload.key, 40);
+          if (key === 'birthday') remember('birthday', payload.value, 'birthday', displayDate(payload.value));
+          else if (key) remember(key, payload.value, payload.label);
+          result = summary();
+          break;
+        }
+        default: break;
+      }
+      if (dirty) save();
+      return { result, effects: drain() };
+    }
+
+    function setSetting(key, value) {
+      if (!(key in DEFAULT_SETTINGS)) return summary();
+      if (key === 'chatter' && !(value in CHATTER)) return summary();
+      if (key === 'water' && !WATER_CHOICES.includes(Number(value))) return summary();
+      if (key === 'breaks' && !BREAK_CHOICES.includes(Number(value))) return summary();
+      state.settings[key] = typeof DEFAULT_SETTINGS[key] === 'number' ? Number(value) : typeof DEFAULT_SETTINGS[key] === 'boolean' ? !!value : String(value);
+      if (key === 'chatter') chatterDue = CHATTER[state.settings.chatter] ? between(CHATTER[state.settings.chatter]) : 0;
+      if (key === 'water') waterMs = 0;
+      if (key === 'breaks') streakStart = now();
+      dirty = true;
+      return summary();
+    }
+
+    function summary() {
+      const topics = persona.topics.filter((t) => !HIDDEN.includes(t.category));
+      return {
+        personality: personaInfo,
+        affection: affectionInfo(),
+        tiers: TIERS.slice(BASE_TIER).map((t, i) => ({ id: t.id, name: tierName(i + BASE_TIER), at: t.at, reached: !!state.milestones[t.id] || state.affection >= t.at })),
+        memories: Object.entries(state.memory).map(([key, v]) => ({ key, label: v.label, value: v.display || v.value, at: v.at })).sort((a, b) => b.at - a.at),
+        settings: { ...state.settings },
+        choices: { chatter: Object.keys(CHATTER), water: WATER_CHOICES, breaks: BREAK_CHOICES },
+        counters: { ...state.counters },
+        topics: { total: topics.length, seen: topics.filter((t) => state.seen[t.id]).length },
+        firstMet: state.firstMet,
+        offer: !!offer,
+      };
+    }
+
+    // MARK: Sync and transfer
+
+    /** What travels in sync profiles and transfer keys (no timers or per-day flags). */
+    function exportData() {
+      return { affection: state.affection, memory: state.memory, seen: state.seen, milestones: state.milestones, settings: state.settings, counters: state.counters, firstMet: state.firstMet };
+    }
+
+    /** Sync: keeps the higher affection, the newer of each memory, and every topic either device has seen. */
+    function mergeData(data) {
+      if (!isObj(data)) return;
+      const incoming = normalize({ ...data, days: {}, gained: state.gained, lastSeen: state.lastSeen });
+      state.affection = Math.max(state.affection, incoming.affection);
+      for (const [k, v] of Object.entries(incoming.memory)) if (isObj(v) && (!state.memory[k] || num(v.at, 0) > num(state.memory[k].at, 0))) state.memory[k] = v;
+      for (const [k, v] of Object.entries(incoming.seen)) state.seen[k] = Math.max(state.seen[k] || 0, num(v, 0));
+      for (const [k, v] of Object.entries(incoming.milestones)) if (!state.milestones[k] || v < state.milestones[k]) state.milestones[k] = v;
+      if (isObj(data.settings)) state.settings = incoming.settings;
+      for (const k of Object.keys(incoming.counters)) state.counters[k] = Math.max(state.counters[k] || 0, num(incoming.counters[k], 0));
+      if (incoming.firstMet < state.firstMet) state.firstMet = incoming.firstMet;
+      save();
+    }
+
+    /** Transfer keys replace everything. */
+    function replaceData(data) {
+      if (!isObj(data)) return;
+      state = normalize({ ...data, days: state.days, gained: state.gained, lastSeen: state.lastSeen });
+      save();
+    }
+
+    return {
+      tick, event, ui, line: (key, fallback, extra) => line(key, fallback, extra), setPersonality, summary, exportData, mergeData, replaceData,
+      hasOffer: () => !!offer && now() <= offer.until,
+      setNames: (owner, pet) => { if (owner) names.owner = String(owner); if (pet) names.pet = String(pet); },
+      flush: () => { state.lastSeen = now(); save(); },
+      // For tests.
+      _state: () => state, _persona: () => persona, _run: (topicId) => startTopic(persona.topics.find((t) => t.id === topicId)),
+    };
+  }
+
+  const api = { create, categorize, TIERS, GAMES };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  else root.DeskPetCompanion = api;
+})(typeof globalThis !== 'undefined' ? globalThis : this);

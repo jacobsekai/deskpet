@@ -46,16 +46,6 @@ enum AppCategory {
         else { self = .other }
     }
 
-    var remarks: [String] {
-        switch self {
-        case .music: return ["🎵 ooh, tunes!", "dance break? 💃", "turn it up! 🎶"]
-        case .code: return ["let's build something! 💻", "coding time ⌨️", "go go go! 🚀"]
-        case .browser: return ["whatcha looking up? 🔎", "find anything cool?"]
-        case .chat: return ["say hi for me 👋", "ooh, gossip? 👀"]
-        case .meeting: return ["🤫 I'll be quiet", "good luck in your meeting!"]
-        case .other: return []
-        }
-    }
 }
 
 private final class PetPanel: NSPanel {
@@ -95,9 +85,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     private var lastBumpRemark = 0.0
 
     private var wasAsleep = false
-    private var lastRemark = 0.0
-    private var lastNightNag = -10_000.0
-    private var streakStart = CACurrentMediaTime()
     private var spriteFingerprint = Date.distantPast
     private var lastSpriteCheck = 0.0
 
@@ -117,6 +104,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     private var lastKiroCheck = 0.0
     private var updateAnnounced = false
     private let sync = Sync()
+    /// Conversations, affection, memories, and reminders (the engine shared with the Windows/Linux app).
+    private let companion = Companion()
+    private var talk: TalkWindow?
+    private var lastCompanionTick = 0.0
+    private var lastTap = 0.0
+    private var talkOpen: Bool { talk?.isVisible ?? false }
     private var lastSyncTick = 0.0
     private var lastBrowserCheck = 0.0
     private var lastBlockNag = 0.0
@@ -178,6 +171,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
 
     // MARK: - Lifecycle
 
+    func applicationWillTerminate(_ notification: Notification) {
+        companion.flush()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         if let id = Bundle.main.bundleIdentifier,
            NSRunningApplication.runningApplications(withBundleIdentifier: id).count > 1 {
@@ -192,6 +189,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         petView.thoughtBubble = thoughtBubble
         setupStatusItem()
         observeWorkspace()
+        companion.setNames(owner: config.ownerName, pet: config.petName)
+        setPersonality()
         accessory = Self.accessory(for: AppCategory(NSWorkspace.shared.frontmostApplication))
         if CommandLine.arguments.contains("panel-snapshot") {
             openControlCenter(page: nil)
@@ -199,8 +198,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         } else if CommandLine.arguments.contains("wizard-snapshot") {
             openWizard()
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.wizard?.snapshotSteps() }
+        } else if CommandLine.arguments.contains("talk-snapshot") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { self.snapshotTalk() }
         } else if defaults.bool(forKey: "setupComplete") {
-            say("hi \(config.ownerName)! 👋", for: 4)
+            apply(companion.event("launch"))
         } else {
             openWizard()
         }
@@ -264,7 +265,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             nc.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 guard let self else { return }
                 self.transient = (.startled, CACurrentMediaTime() + 1.2)
-                self.say("welcome back! ☀️", for: 4)
+                self.apply(self.companion.event("resume"))
             }
         }
     }
@@ -302,23 +303,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         if wasAsleep && idle < 1 {
             wasAsleep = false
             transient = (.startled, now + 1.2)
-            say("huh?! oh, hi! 😳", for: 3)
+            apply(companion.event("wake"))
             sounds.play(.wake)
         }
         if idle > 240 && topSession.map({ $0.activity == .idle }) ?? true { wasAsleep = true }
 
-        if idle > 300 {
-            streakStart = now
-        } else if now - streakStart > 50 * 60 {
-            streakStart = now
-            if !quiet && focus.phase == .off { say("50 minutes straight — stretch break? 🙆", for: 6) }
-        }
-
         let hour = Calendar.current.component(.hour, from: Date())
         night = hour >= 23 || hour < 6
-        if night && idle < 5 && now - lastNightNag > 3600 && !quiet {
-            lastNightNag = now
-            say("it's late, \(config.ownerName)… bedtime soon? 🌙", for: 5)
+        // Greetings, reminders (water, breaks, bedtime), remarks about your day, and conversations it starts.
+        if now - lastCompanionTick >= 5 {
+            lastCompanionTick = now
+            tickCompanion(now, idle: idle)
         }
 
         if now - lastCallCheck > 2 {
@@ -329,12 +324,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         if let finished = focus.tick() {
             if finished == .focus {
                 transient = (.done, now + 3)
-                say("focus session done! take a break ☕", for: 5)
+                say(companion.line("focus.done", "focus session done! take a break ☕"), for: 5)
                 sounds.play(.focusDone)
                 post("Focus session done", "Take a \(max(5, focus.minutes / 5)) minute break ☕", pid: 0)
                 gainXP(15) { $0.focusSessions += 1 }
             } else {
-                say("break's over! ready for another round? 💪", for: 5)
+                say(companion.line("focus.over", "break's over! ready for another round? 💪"), for: 5)
                 post("Break's over", "Ready for another focus session?", pid: 0)
             }
         }
@@ -359,7 +354,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         }
         if !stats.today.greeted {
             gainXP(10) { $0.greeted = true }
-            say("daily hello! +10 XP ☀️", for: 3)
         }
         if now - lastStatsSave > 30 {
             lastStatsSave = now
@@ -371,7 +365,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         }
 
         mood = resolveMood(now: now, idle: idle, sinceKey: sinceKey)
-        if mood == .idle && wander && !panel.isMiniaturized && now > nextWalkAt && velocity == nil && !petView.resizing { startWalk(now) }
+        if mood == .idle && wander && !panel.isMiniaturized && now > nextWalkAt && velocity == nil && !petView.resizing && !talkOpen { startWalk(now) }
         if perch != nil && !walkOnWindows { dropFromPerch() }
     }
 
@@ -522,6 +516,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         petView.scale = CGFloat(defaults.object(forKey: scaleKey) as? Double ?? 1)
         sounds.packDirectory = name.isEmpty ? nil : SpritePack.root.appendingPathComponent(name)
         layoutWindow()
+        setPersonality()
     }
 
     /// Each sprite pack (and the cat) remembers its own size.
@@ -677,7 +672,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         if bounces >= 3 {
             gainXP(5, play: true)
             transient = (.dizzy, now + 2.5)
-            say(["@_@ the room is spinning…", "again! again!", "I saw stars 💫"].randomElement()!, for: 2.5)
+            say(companion.line("dizzy", "@_@ the room is spinning…"), for: 2.5)
         } else {
             transient = (.startled, now + 0.6)
         }
@@ -705,11 +700,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         guard app?.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
         let category = AppCategory(app)
         accessory = Self.accessory(for: category)
-        let now = CACurrentMediaTime()
-        guard !quiet, focus.phase == .off, let remark = category.remarks.randomElement(), now - lastRemark > 45, Double.random(in: 0...1) < 0.4,
-              topSession.map({ $0.activity == .idle }) ?? true else { return }
-        lastRemark = now
-        say(remark, for: 3)
+        apply(companion.event("app", ["name": app?.localizedName ?? ""]))
     }
 
     private static func accessory(for category: AppCategory) -> Accessory {
@@ -729,6 +720,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             say(jump(to: top.pid) ? "taking you to \(top.name) 👉" : "go check on \(top.name)! 👉", for: 2.5)
             return
         }
+        // The pet wants to talk (it said so in a bubble), or a quick double-click: open the talk window.
+        if companion.hasOffer { return openTalk(topic: "offer") }
+        if now - lastTap < 0.45 {
+            lastTap = 0
+            return openTalk(topic: nil)
+        }
+        lastTap = now
         sounds.play(.pet)
         gainXP(2, play: true) { $0.pets += 1 }
         if let top = topSession, top.activity != .idle, top.activity != .done {
@@ -736,14 +734,122 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             say(top.activity == .needsYou ? "go check on \(top.name)! 👉" : "shh, \(top.name) is working 🤫", for: 2.5)
         } else {
             transient = (.petted, now + 2.2)
-            say(["purr~ 💕", "hehe", "more pets pls", "♥︎", "you're the best, \(config.ownerName)!"].randomElement()!, for: 2.2)
+            apply(companion.event("petted"))
         }
+    }
+
+    // MARK: - Companion (conversations, affection, reminders: electron/src/companion)
+
+    private func setPersonality() {
+        let args = CommandLine.arguments
+        let forced = args.firstIndex(of: "personality").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
+        companion.setPersonality(forPack: spritePackName, override: forced)
+    }
+
+    private func tickCompanion(_ now: Double, idle: Double) {
+        let top = topSession
+        let today = stats.today
+        let ctx: [String: Any] = [
+            "idle": idle, "owner": config.ownerName, "pet": config.petName, "focus": focus.phase == .off ? "off" : focus.phase == .focus ? "focus" : "rest",
+            "quiet": quiet, "speaking": (speech?.until ?? 0) > now, "talking": talkOpen,
+            "attention": top.map { [.needsYou, .error].contains($0.activity) } ?? false || !panel.isVisible,
+            "activeMinutes": today.activeMinutes, "tasks": today.tasks, "focusSessions": today.focusSessions,
+        ]
+        apply(companion.tick(ctx))
+    }
+
+    /// Carries out what the companion engine asks for.
+    private func apply(_ effects: [[String: Any]]) {
+        for f in effects {
+            switch f["type"] as? String ?? "" {
+            case "say":
+                if let text = f["text"] as? String { say(text, for: f["seconds"] as? Double ?? 4) }
+            case "mood":
+                if let mood = (f["mood"] as? String).flatMap(Companion.mood) { transient = (mood, CACurrentMediaTime() + (f["seconds"] as? Double ?? 6)) }
+            case "xp":
+                gainXP(f["amount"] as? Int ?? 0, play: f["play"] as? Bool ?? false)
+            case "offer":
+                transient = (.startled, CACurrentMediaTime() + 0.8)
+                sounds.play(.needsYou)
+            case "tier":
+                if f["down"] as? Bool != true { sounds.play(.levelUp) }
+            case "quit":
+                DispatchQueue.main.asyncAfter(deadline: .now() + (f["delay"] as? Double ?? 500) / 1000) { [weak self] in
+                    self?.talk?.close()
+                    self?.quit()
+                }
+            default: break
+            }
+        }
+    }
+
+    @objc private func openTalkAction() { openTalk(topic: nil) }
+
+    private var talkStart: String?
+
+    private func openTalk(topic: String?) {
+        walkTarget = nil
+        if let talk, talk.isVisible {
+            talk.show()
+            if let topic { talk.run("window.__talkOpen(\(topic == "offer" ? "'offer'" : "'\(topic)'"))") }
+            return
+        }
+        talkStart = topic
+        let t = TalkWindow(frame: talkFrame(height: 230)) { [weak self] action, payload in self?.talkCall(action, payload) }
+        t.onClose = { [weak self] in self?.talk = nil }
+        talk = t
+        t.show()
+    }
+
+    /// Beside the pet, bottom-aligned with its feet, on whichever side has room.
+    private func talkFrame(height: CGFloat) -> NSRect {
+        let vf = petScreen().visibleFrame
+        let pet = petView.hitRect.offsetBy(dx: panel.frame.minX, dy: panel.frame.minY)
+        let w = TalkWindow.width
+        let roomRight = vf.maxX - pet.maxX, roomLeft = pet.minX - vf.minX
+        var x = (roomRight >= w || roomRight > roomLeft) && pet.midX < vf.minX + vf.width * 0.6 ? pet.maxX - 4 : pet.minX - w + 4
+        x = max(vf.minX, min(vf.maxX - w, x))
+        let y = max(vf.minY, min(vf.maxY - height, panel.frame.minY + PetView.ground - 10))
+        return NSRect(x: x, y: y, width: w, height: height)
+    }
+
+    private func talkCall(_ action: String, _ payload: [String: Any]) -> Any? {
+        switch action {
+        case "init":
+            defer { talkStart = nil }
+            return ["theme": themeHex.isEmpty ? NSNull() : themeHex, "start": talkStart ?? NSNull(), "platform": "mac"] as [String: Any]
+        case "resize":
+            let h = min(600, max(150, payload["height"] as? Double ?? 230))
+            talk?.setHeight(CGFloat(h))
+            return ["ok": true]
+        case "close":
+            apply(companion.ui("close", [:]).effects)
+            talk?.close()
+            return ["ok": true]
+        case "log":
+            NSLog("DeskPet talk: \(payload["message"] as? String ?? "")")
+            return ["ok": true]
+        default:
+            let r = companion.ui(action, payload)
+            apply(r.effects)
+            return r.result
+        }
+    }
+
+    /// `open DeskPet.app --args talk-snapshot [personality minori]`.
+    private func snapshotTalk() {
+        openTalk(topic: nil)
+        let demo = { (action: String, payload: String) in "window.__talkDemo('\(action)', \(payload))" }
+        talk?.snapshot(steps: [
+            ("menu", ""), ("ask-about", demo("menu", "{id: 'cats'}")), ("question", demo("menu", "{id: 'topic:q_chronotype'}")),
+            ("game-ttt", demo("menu", "{id: 'game:ttt'}")), ("game-words", demo("menu", "{id: 'game:words'}")),
+        ])
     }
 
     func petDragBegan() {
         if velocity != nil {
             gainXP(3, play: true)
-            say("nice catch! 🙌", for: 1.5)
+            say(companion.line("caught", "nice catch! 🙌"), for: 1.5)
         }
         walkTarget = nil
         perch = nil
@@ -769,7 +875,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         let scale = speed > limit ? limit / speed : 1
         velocity = CGVector(dx: v.dx * scale, dy: v.dy * scale)
         if speed > 1200 { say("yeeeet! 🚀", for: 1.2) }
-        if speed > 400 { gainXP(3, play: true) { $0.throwsCount += 1 } }
+        if speed > 400 {
+            gainXP(3, play: true) { $0.throwsCount += 1 }
+            apply(companion.event("thrown"))
+        }
     }
 
     // MARK: - Attention, stats, and the hover card
@@ -1087,7 +1196,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         var settings: [String: Any] = [:]
         for key in TransferKey.settingKeys { if let v = defaults.object(forKey: key) { settings[key] = v } }
         return ["names": ["petName": config.petName, "ownerName": config.ownerName], "settings": settings,
-                "prestige": stats.prestige, "prestigeBase": stats.prestigeBase]
+                "prestige": stats.prestige, "prestigeBase": stats.prestigeBase, "companion": companion.exportData()]
     }
 
     private func syncTick() {
@@ -1115,6 +1224,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             defaults.set(value, forKey: key)
         }
         if let rank = profile["prestige"] as? Int, let base = profile["prestigeBase"] as? Int { stats.syncedPrestige = (rank, base) }
+        if let data = profile["companion"] as? [String: Any] { companion.mergeData(data) }
         if spritePackName != packBefore { loadSprites(announce: false) }
         petView.theme = Theme(hex: themeHex) ?? .default
         petView.thoughtBubble = thoughtBubble
@@ -1243,7 +1353,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         let iso = ISO8601DateFormatter().string(from: Date())
         return ["app": "deskpet", "v": 1, "exported": iso, "from": "macOS",
                 "config": ["ownerName": config.ownerName, "petName": config.petName],
-                "settings": settings, "stats": stats.exported]
+                "settings": settings, "stats": stats.exported, "companion": companion.exportData()]
     }
 
     /// Applies an imported key. Returns a note about anything that didn't come along.
@@ -1259,6 +1369,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         for key in TransferKey.settingKeys { if let v = settings[key], !(v is NSNull) { defaults.set(v, forKey: key) } }
         for (name, value) in settings["scales"] as? [String: Any] ?? [:] { defaults.set(value, forKey: "scale." + name) }
         if let s = payload["stats"] as? [String: Any] { try stats.replace(with: s) }
+        if let c = payload["companion"] as? [String: Any] { companion.replaceData(c) }
         defaults.set(true, forKey: "setupComplete")
 
         var note = ""
@@ -1413,6 +1524,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             }
         }
         menu.addItem(.separator())
+        menu.addItem(item("💬 Talk to \(config.petName)…", #selector(openTalkAction)))
         menu.addItem(item("Open DeskPet…", #selector(openControlCenterAction), key: ","))
         if focus.phase == .off {
             let f = item("🍅 Focus for 25 minutes", #selector(startFocus(_:)))
@@ -1499,6 +1611,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
                       "kiroInstalled": kiroHooksOn && KiroHooks.installed(), "kiroSupported": true],
             "update": ["available": updater.available?.version as Any],
             "sync": syncState(),
+            "companion": companion.summary(),
             "preview": ["hat": pose.hat as Any, "trail": pose.trail as Any, "aura": pose.aura as Any,
                         "companion": pose.companion as Any, "golden": pose.golden, "prestige": pose.prestige],
         ]
@@ -1621,12 +1734,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         case "importPack": importPack(); return ["ok": true]
         case "exportPack": exportPack(); return ["ok": true]
         case "previewPoses": previewPoses(); return ["ok": true]
+        case "talk": openTalk(topic: payload["topic"] as? String); return ["ok": true]
+        case "companion":
+            let r = companion.ui(payload["op"] as? String ?? "summary", payload)
+            apply(r.effects)
+            return r.result
         case "bringHere": bringHere(); return ["ok": true]
         case "resize": toggleResizing(); return ["ok": true]
         case "checkUpdates": checkForUpdates(manual: true); return ["ok": true]
         case "installUpdate": installUpdate(); return ["ok": true]
         case "openWizard": openWizard(); return ["ok": true]
-        case "quit": NSApp.terminate(nil); return ["ok": true]
+        case "quit": quit(); return ["ok": true]
         case "close": controlCenter?.close(); return ["ok": true]
         case "log":
             let line = "\(Date()) \(payload["message"] as? String ?? "")\n"
@@ -1911,7 +2029,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         spritePackName = sender.representedObject as? String ?? ""
         loadSprites(announce: true)
     }
-    @objc private func quit() { NSApp.terminate(nil) }
+    /// Quit from a menu: the pet counts it as a goodbye.
+    @objc private func quit() {
+        _ = companion.event("quit")
+        NSApp.terminate(nil)
+    }
 
     @objc private func toggleVisible() {
         if panel.isVisible { panel.orderOut(nil) } else { panel.orderFrontRegardless() }

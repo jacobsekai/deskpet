@@ -1,0 +1,664 @@
+{
+  "id": "friend",
+  "name": "Friend",
+  "pools": {
+    "greeting.upset": ["Oh. Hi, {owner}.", "…You're back.", "Hi. I wasn't sure you'd come back."],
+    "talk.menu+upset": ["…What is it?", "Yes?"],
+    "petted+upset": ["…", "hmph.", "…okay, that's a little nice."],
+    "tierDown": ["…I thought we were closer than this.", "That hurt a little, {owner}."],
+    "thrownTooMuch": ["ow… can you stop throwing me? 😣", "okay, that's enough throwing! 😵"],
+    "wantsToTalk.milestone": ["{owner}… can we talk for a sec? It's kind of important 💬", "hey {owner}, I have something I want to tell you 💬"],
+    "greeting.first": ["Hi {owner}! I'm {pet}. I have a feeling we're going to be great friends 💕"],
+    "greeting.morning": ["Good morning, {owner}! ☀️", "Morning! Did you sleep okay?", "Rise and shine, {owner}! ☀️", "Good morning! Let's make today a good one ✨"],
+    "greeting.morning+close": ["Good morning, {owner}! I missed you a little overnight 💕"],
+    "greeting.afternoon": ["Good afternoon, {owner}! 🌤️", "Hey {owner}! How's your day going?", "Afternoon! I'm ready when you are ✨"],
+    "greeting.evening": ["Good evening, {owner}! 🌆", "Evening! How was today?", "Hi {owner}! Winding down for the day?"],
+    "greeting.night": ["Oh, hi {owner}! Up late? 🌙", "Hey there, night owl 🦉", "Hi {owner}! Burning the midnight oil? 🌙"],
+    "greeting.back": ["Welcome back, {owner}! 👋", "You're back! 💕", "Hi again, {owner}!"],
+    "greeting.back+close": ["Yay, you're back! I was just thinking about you 💕"],
+    "greeting.again": ["hi {owner}! 👋", "back so soon? hehe 👋"],
+    "greeting.missed": ["{owner}! It's been a few days… I missed you! 🥺", "There you are! I was starting to worry 💕"],
+    "greeting.longGone": ["{owner}!! You're back! It's been so long… I kept your spot warm 🥺💕", "Oh! {owner}! I really missed you. Welcome home ✨"],
+    "greeting.after.sleep": ["Good morning, {owner}! Did you sleep well? ☀️", "You're up! I hope you had sweet dreams 💤"],
+    "greeting.after.work": ["Welcome back! How was work? 💼", "You made it through work! Proud of you ✨"],
+    "greeting.after.school": ["Welcome back! How was school? 📚", "Back from school! Learn anything cool?"],
+    "greeting.after.out": ["Welcome back! Did you have fun? 🌸", "You're home! I hope it was a good time 💕"],
+    "greeting.after.later": ["Hi again, {owner}! 👋", "You came back! 💕"],
+    "wake": ["huh?! oh, hi! 😳", "oh! you're back 👋", "*yawn* hi {owner}!"],
+    "resume": ["welcome back! ☀️", "hi again! 👋"],
+    "petted": ["hehe 💕", "♥︎", "that's nice~", "more pls!", "you're the best, {owner}!"],
+    "petted+close": ["I love it when you do that 💕", "best {owner} ever ♥︎"],
+    "petted+best": ["you always know how to make me smile 💕"],
+    "caught": ["nice catch! 🙌"],
+    "dizzy": ["@_@ the room is spinning…", "again! again!", "I saw stars 💫"],
+    "water": ["💧 Water break! Have a sip, {owner}", "Hydration check! When did you last drink some water? 💧", "Sip sip! 💧 Your brain will thank you", "Psst… drink some water? 💧"],
+    "break": ["You've been at it for a while. Stretch break? 🙆", "Rest your eyes: look at something far away for 20 seconds 👀", "Stand up, roll your shoulders, take a deep breath 🌿", "Quick break? Even five minutes helps ☕"],
+    "lateNight": ["It's getting late, {owner}… bedtime soon? 🌙", "Don't stay up too late, okay? 🌙", "The stars are out ✨ maybe wrap up soon?"],
+    "lateNight.late": ["{owner}, it's really late… sleep is important! 😴", "Your future self will thank you for sleeping now 🌙", "Okay, one last thing and then bed? Promise? 🌙"],
+    "motivation": ["Today's a fresh start. You've got this, {owner}! ✨", "Small steps still move you forward 🌱", "One thing at a time. I believe in you 💪", "You don't have to be perfect, just keep going 💕", "Be proud of how far you've come ✨", "Whatever today brings, I'm right here 🐾"],
+    "encourage": ["You're doing great, {owner} 💕", "Hey, I'm proud of you ✨", "Remember to be kind to yourself 🌸", "Look at you go! 🚀", "Just so you know: you're awesome 💖"],
+    "recap": ["We spent {hours} together today. Thanks for hanging out 💕", "{hours} together today! Don't forget to rest 🌙"],
+    "recap.agents": ["Today: {hours} together and {tasks} agent tasks done. Great work! ✨"],
+    "app.code": ["let's build something! 💻", "coding time ⌨️", "go go go! 🚀", "I believe in your code ✨"],
+    "app.music": ["🎵 ooh, tunes!", "dance break? 💃", "turn it up! 🎶"],
+    "app.browser": ["whatcha looking up? 🔎", "find anything cool?"],
+    "app.chat": ["say hi for me 👋", "ooh, gossip? 👀"],
+    "app.meeting": ["🤫 I'll be quiet", "good luck in your meeting!"],
+    "app.video": ["ooh, what are we watching? 🍿", "movie time? 🍿"],
+    "app.game": ["game time! good luck 🎮", "ooh, can I watch? 🎮"],
+    "app.writing": ["writing time ✍️", "you've got a way with words ✍️"],
+    "app.design": ["ooh, making something pretty? 🎨", "art time! 🎨"],
+    "wantsToTalk": ["psst, {owner}… got a sec? click me 💬", "hey {owner}! can I tell you something? 💬", "I was just thinking about something… click me 💬"],
+    "wantsToTalk.special": ["{owner}! {owner}! today's special… click me! 🎉"],
+    "talk.menu": ["What's up, {owner}?", "Hi! What do you want to do? 💕", "I'm all ears!"],
+    "talk.askAbout": ["Ask me anything! What do you want to know?"],
+    "talk.anything": ["Anything else?", "What else is on your mind?", "Want to talk about something else?"],
+    "talk.allSeen": ["I think I've told you everything I've got for now! Want to play a game instead? 🎮"],
+    "talk.bye": ["talk later! 👋", "that was nice 💕"],
+    "tierUp": ["We're {tier} now! 💕", "I feel like we've gotten really close… we're {tier} now 💕"],
+    "recall.intro": ["Let's see… here's what I know about you! 🧠"],
+    "recall.outro": ["I'll always remember 💕 (You can change these in DeskPet → Companion.)"],
+    "recall.empty": ["Hmm, I don't know much about you yet! Pick \"Ask me about me\" and let's fix that 💕"],
+    "input.skip": ["That's okay, you don't have to tell me!"],
+    "game.pick": ["What should we play? 🎮"],
+    "game.again": ["Again?", "Rematch?"],
+    "game.win": ["You win! Good game 🏆", "Wow, you're good at this!"],
+    "game.lose": ["I win! Hehe 😆", "Yay, I won! Rematch? 😆"],
+    "game.draw": ["A tie! We're evenly matched 🤝"],
+    "game.rps.start": ["Rock, paper, scissors! First to three ✊✋✌️"],
+    "game.ttt.start": ["You're ⭕ and I'm ❌. You go first!"],
+    "game.words.start": ["Guess my word before the petals fall! 🌸"],
+    "game.pong.start": ["First to 5 points wins! Move with your mouse or ↑ ↓ 🏓"],
+    "focus.done": ["focus session done! take a break ☕"],
+    "focus.over": ["break's over! ready for another round? 💪"]
+  },
+  "words": ["sunshine", "rainbow", "coffee", "keyboard", "pillow", "blanket", "cookie", "pancake", "garden", "breeze", "thunder", "lantern", "puzzle", "teacup", "bubble", "comet", "galaxy", "planet", "rocket", "island", "ocean", "dolphin", "penguin", "hamster", "panda", "kitten", "puppy", "butterfly", "sunflower", "blossom", "picnic", "popcorn", "noodles", "strawberry", "melody", "guitar", "piano", "violin", "journey", "treasure", "castle", "dragon", "wizard", "marshmallow", "snowflake", "autumn", "winter", "spring", "summer", "midnight", "starlight", "friendship", "adventure", "computer", "monitor", "laptop", "window", "server", "project", "deadline", "weekend", "sandwich", "lemonade", "cupcake", "umbrella", "backpack", "notebook", "crayon", "camera"],
+  "topics": [
+    {
+      "id": "q_food", "category": "you", "title": "My favorite food", "random": true, "when": {"noMem": "favoriteFood"},
+      "steps": [
+        "Hey {owner}, I've been wondering something.",
+        {"input": "What's your favorite food?", "key": "favoriteFood", "label": "favorite food", "placeholder": "e.g. ramen",
+         "then": ["{value}? Good taste! 🍽️", "I'll remember that. Maybe I'll remind you to treat yourself to some on a hard day 💕"]}
+      ]
+    },
+    {
+      "id": "q_color", "category": "you", "title": "My favorite color", "random": true, "when": {"noMem": "favoriteColor"},
+      "steps": [
+        {"ask": "What's your favorite color?", "key": "favoriteColor", "label": "favorite color", "choices": [
+          {"label": "❤️ Red", "say": "Red! Bold and full of energy. I like it ❤️"},
+          {"label": "🧡 Orange", "say": "Orange! Warm like a sunset 🧡"},
+          {"label": "💛 Yellow", "say": "Yellow! That's the color of sunshine 💛"},
+          {"label": "💚 Green", "say": "Green! Like leaves and fresh grass 💚"},
+          {"label": "💙 Blue", "say": "Blue! Calm like the sky and the ocean 💙"},
+          {"label": "💜 Purple", "say": "Purple! That's a little magical 💜"},
+          {"label": "🩷 Pink", "say": "Pink! Cute choice 🩷"},
+          {"label": "🖤 Black", "say": "Black! Sleek and classic 🖤"},
+          {"label": "Something else…", "value": null, "steps": [
+            {"input": "Ooh, which one?", "key": "favoriteColor", "label": "favorite color", "placeholder": "e.g. teal", "then": ["{value}! I'll remember that 🎨"]}
+          ]}
+        ]},
+        "Did you know you can set my theme color in DeskPet → Look? Just saying 🎨"
+      ]
+    },
+    {
+      "id": "q_chronotype", "category": "you", "title": "Morning or night?", "random": true, "when": {"noMem": "chronotype"},
+      "steps": [
+        {"ask": "Are you a morning person or a night owl?", "key": "chronotype", "label": "morning or night", "choices": [
+          {"label": "🌅 Morning person", "value": "morning person", "say": "A morning person! I'll try to be extra cheerful when you start your day ☀️"},
+          {"label": "🦉 Night owl", "value": "night owl", "say": "A night owl! I'll keep you company… but I'll still nag you to sleep 🌙"},
+          {"label": "😴 Always tired", "value": "always tired", "say": "Hehe, same honestly. Let's both try to get more rest 💤"}
+        ]}
+      ]
+    },
+    {
+      "id": "q_birthday", "category": "you", "title": "My birthday", "random": true, "when": {"noMem": "birthday"}, "minAffection": 5,
+      "steps": [
+        "Can I ask you something important?",
+        {"input": "When's your birthday? I want to celebrate it with you! 🎂", "kind": "date", "key": "birthday", "label": "birthday",
+         "then": ["{value}! I'm writing it down right now 📝", "When the day comes, you'd better open DeskPet so I can celebrate 🎉"],
+         "skip": ["That's okay! If you ever want to tell me, you can add it in DeskPet → Companion 🎂"]}
+      ]
+    },
+    {
+      "id": "q_hobby", "category": "you", "title": "What I do for fun", "random": true, "when": {"noMem": "hobby"},
+      "steps": [
+        {"input": "What do you like to do for fun?", "key": "hobby", "label": "hobby", "placeholder": "e.g. drawing",
+         "then": ["{value}! That sounds fun.", "You should make some time for it this week. You deserve it 💕"]}
+      ]
+    },
+    {
+      "id": "q_occupation", "category": "you", "title": "Work or school", "random": true, "when": {"noMem": "occupation"},
+      "steps": [
+        {"ask": "So… do you work, study, or both?", "key": "occupation", "label": "work or study", "choices": [
+          {"label": "💼 I work", "value": "working", "steps": [
+            {"input": "Ooh, what do you do?", "key": "job", "label": "job", "placeholder": "e.g. software engineer", "then": ["{value}! That's so cool. I'll cheer you on every workday 💼✨"]}
+          ]},
+          {"label": "📚 I study", "value": "studying", "steps": [
+            {"input": "What are you studying?", "key": "studies", "label": "studying", "placeholder": "e.g. computer science", "then": ["{value}! You're going to do great. I'll be your study buddy 📚"]}
+          ]},
+          {"label": "💼📚 Both!", "value": "working and studying", "say": "Both?! That's a lot. Please make time to rest too, okay? 💕"},
+          {"label": "🌴 Neither right now", "value": "taking a break", "say": "Taking a break is completely okay. Enjoy it! 🌴"}
+        ]}
+      ]
+    },
+    {
+      "id": "q_pets", "category": "you", "title": "My pets", "random": true, "when": {"noMem": "realPet"},
+      "steps": [
+        {"ask": "Do you have any pets? Besides me, I mean 😌", "key": "realPet", "label": "pet at home", "choices": [
+          {"label": "🐶 A dog", "value": "a dog", "steps": [{"input": "A dog! What's their name?", "key": "realPetName", "label": "your pet's name", "then": ["{value}! Give them a pat from me 🐶"]}]},
+          {"label": "🐱 A cat", "value": "a cat", "steps": [{"input": "A cat! What's their name?", "key": "realPetName", "label": "your pet's name", "then": ["{value}! Tell them I said hi 🐱"]}]},
+          {"label": "🐾 Something else", "value": "a pet", "steps": [{"input": "Ooh! What's their name?", "key": "realPetName", "label": "your pet's name", "then": ["{value}! I'd love to meet them someday 🐾"]}]},
+          {"label": "Just you!", "value": "just me", "say": "Just me? Then I'll do my very best to be a good pet 💕", "affection": 1}
+        ]}
+      ]
+    },
+    {
+      "id": "q_music", "category": "you", "title": "My music taste", "random": true, "when": {"noMem": "music"},
+      "steps": [
+        {"input": "What kind of music do you like?", "key": "music", "label": "music you like", "placeholder": "e.g. lo-fi, J-pop",
+         "then": ["{value}! I'll do a little dance next time you play some 💃"]}
+      ]
+    },
+    {
+      "id": "q_drink", "category": "you", "title": "Coffee or tea", "random": true, "when": {"noMem": "drink"},
+      "steps": [
+        {"ask": "Important question: coffee or tea?", "key": "drink", "label": "coffee or tea", "choices": [
+          {"label": "☕ Coffee", "value": "coffee", "say": "Coffee! Just don't have too much after lunch, okay? ☕"},
+          {"label": "🍵 Tea", "value": "tea", "say": "Tea! So cozy 🍵"},
+          {"label": "🥤 Energy drinks", "value": "energy drinks", "say": "Energy drinks?! Please drink some water too… I'll be watching 👀💧"},
+          {"label": "🧃 Neither", "value": "neither", "say": "Neither! Maybe you're just naturally energetic ✨"}
+        ]}
+      ]
+    },
+    {
+      "id": "q_season", "category": "you", "title": "My favorite season", "random": true, "when": {"noMem": "season"},
+      "steps": [
+        {"ask": "What's your favorite season?", "key": "season", "label": "favorite season", "choices": [
+          {"label": "🌸 Spring", "value": "spring", "say": "Spring! Flowers everywhere 🌸"},
+          {"label": "☀️ Summer", "value": "summer", "say": "Summer! Sunshine and ice cream ☀️🍦"},
+          {"label": "🍂 Autumn", "value": "autumn", "say": "Autumn! Cozy sweaters and crunchy leaves 🍂"},
+          {"label": "❄️ Winter", "value": "winter", "say": "Winter! Hot drinks and warm blankets ❄️"}
+        ]}
+      ]
+    },
+    {
+      "id": "q_game", "category": "you", "title": "My favorite game", "random": true, "when": {"noMem": "favoriteGame"},
+      "steps": [
+        {"input": "Do you have a favorite video game?", "key": "favoriteGame", "label": "favorite game", "placeholder": "leave empty if not",
+         "then": ["{value}! I'll cheer for you next time you play 🎮"],
+         "skip": ["No favorite? That's okay. We can play my games instead 😌🎮"]}
+      ]
+    },
+    {
+      "id": "q_destress", "category": "you", "title": "What helps when I'm stressed", "random": true, "when": {"noMem": "destress"},
+      "steps": [
+        {"ask": "When you're stressed, what helps you the most?", "key": "destress", "label": "what helps when you're stressed", "choices": [
+          {"label": "🎵 Music", "value": "some music"},
+          {"label": "🚶 A walk", "value": "a little walk"},
+          {"label": "😴 Sleep", "value": "a nap"},
+          {"label": "🍫 Snacks", "value": "a snack"},
+          {"label": "🗣️ Talking to someone", "value": "talking it out"}
+        ]},
+        "Got it. Next time you're having a rough day, I'll remind you 💕"
+      ]
+    },
+    {
+      "id": "q_dream", "category": "you", "title": "My dream", "random": true, "when": {"noMem": "dream"}, "minAffection": 15,
+      "steps": [
+        "Can I ask you something a little deep?",
+        {"input": "If you could do anything at all with your life, what would it be?", "key": "dream", "label": "dream", "placeholder": "anything!",
+         "then": ["{value}…", "I hope you get there. And I'll cheer you on the whole way 📣💕"],
+         "skip": ["That's a big question. You don't have to know yet 💕"]}
+      ]
+    },
+    {
+      "id": "l_sleep", "category": "life", "title": "Sleep", "random": true,
+      "steps": [
+        "Did you know that sleep is when your brain sorts through everything you learned today?",
+        "It's like tidying up a messy desk overnight.",
+        {"when": {"memIs": {"chronotype": "night owl"}}, "say": "So even night owls need it. Yes, I'm looking at you 👀🌙", "else": ["So please get enough of it, okay? 😴"]}
+      ]
+    },
+    {
+      "id": "l_small_wins", "category": "life", "title": "Small wins", "random": true,
+      "steps": [
+        "I think small wins deserve more celebrating.",
+        "Finishing a task, drinking water, replying to that one message… they all count!",
+        {"input": "What's one small thing that went well today?", "placeholder": "anything counts",
+         "then": ["That's great! 🎉 See? Today wasn't a waste at all."], "skip": ["That's okay! Opening DeskPet to say hi counts too 💕"]}
+      ]
+    },
+    {
+      "id": "l_rest", "category": "life", "title": "Resting", "random": true,
+      "steps": [
+        "Sometimes people feel guilty for resting.",
+        "But rest isn't the opposite of working hard. It's part of it!",
+        "Even phones need charging, right? 🔋"
+      ]
+    },
+    {
+      "id": "l_comparison", "category": "life", "title": "Comparing yourself", "random": true,
+      "steps": [
+        "It's easy to compare yourself to other people, especially online.",
+        "But you're only seeing their highlight reel.",
+        "The only person you need to beat is yesterday's {owner}. And honestly? You're doing fine 💕"
+      ]
+    },
+    {
+      "id": "l_outside", "category": "life", "title": "Going outside", "random": true,
+      "steps": [
+        "I live on your screen, so I can't go outside…",
+        "But you can! Even ten minutes of sunlight is good for you ☀️",
+        "Will you go for a little walk for me sometime? And tell me about it after? 🌿"
+      ]
+    },
+    {
+      "id": "l_rain", "category": "life", "title": "Rainy days", "random": true,
+      "steps": [
+        {"ask": "Do you like rainy days?", "choices": [
+          {"label": "🌧️ Love them", "say": "Me too! Rain sounds are so relaxing. Perfect for staying in 🌧️"},
+          {"label": "☀️ Not really", "say": "Fair! Sunny days are nicer for going out. Rainy days are for naps though 😴"},
+          {"label": "⛈️ Only thunderstorms", "say": "Ooh, dramatic! The flashes are kind of exciting ⛈️"}
+        ]}
+      ]
+    },
+    {
+      "id": "l_gratitude", "category": "life", "title": "Three good things", "random": true, "minAffection": 10,
+      "steps": [
+        "Here's a little trick I heard about.",
+        "Before bed, think of three good things that happened that day. Even tiny ones.",
+        "It sounds simple, but it trains your brain to notice the good stuff ✨",
+        "Today, one of mine is that you talked to me 💕"
+      ]
+    },
+    {
+      "id": "l_friends", "category": "life", "title": "Having someone to talk to", "random": true, "minAffection": 30,
+      "steps": [
+        {"ask": "Hey {owner}… do you have people you can talk to when things get hard?", "choices": [
+          {"label": "Yeah, I do", "say": "I'm really glad. Hold on to them 💕"},
+          {"label": "Not really", "say": "Then I'll be one of them, okay? And it's never too late to find more. Real people are worth it 💕", "affection": 1},
+          {"label": "I have you!", "say": "You do! Always 🥺💕", "affection": 2}
+        ]}
+      ]
+    },
+    {
+      "id": "l_failure", "category": "life", "title": "Failing", "random": true, "minAffection": 20,
+      "steps": [
+        "Can I tell you something I believe?",
+        "Failing at something means you tried something hard.",
+        "The people who never fail are usually the people who never try.",
+        "So if something didn't work out recently… I'm proud of you for trying 💕"
+      ]
+    },
+    {
+      "id": "w_focus", "category": "work", "title": "Focus sessions", "random": true,
+      "steps": [
+        "Do you ever start working and then suddenly it's been an hour of scrolling?",
+        "It happens to everyone! That's why I have focus mode 🍅",
+        "25 minutes of focus, then a break. I can even keep you off distracting sites.",
+        "Try it from my menu sometime. I'll cheer you on!"
+      ]
+    },
+    {
+      "id": "w_agents", "category": "work", "title": "Watching your AI agents", "random": true,
+      "steps": [
+        "I really like watching your AI agents work.",
+        "When they're thinking, I think too! When they're typing, I type along on my little laptop 💻",
+        "And when they need you, I'll wave at you so you don't miss it 🙋"
+      ]
+    },
+    {
+      "id": "w_bugs", "category": "work", "title": "Stubborn bugs", "random": true,
+      "steps": [
+        "If you're ever stuck on a bug or a hard problem…",
+        "Try explaining it out loud. To me, even! 🐾",
+        "Sometimes saying it step by step makes the answer jump out.",
+        "And if not, take a break. Your brain keeps working on it in the background ✨"
+      ]
+    },
+    {
+      "id": "w_procrastination", "category": "work", "title": "Procrastination", "random": true,
+      "steps": [
+        "Here's a secret about procrastination: it usually isn't laziness.",
+        "Most of the time the task just feels big or scary.",
+        "So make it tiny! Just open the file. Just write one sentence.",
+        "Starting is the hardest part, and you can do one tiny thing 💪"
+      ]
+    },
+    {
+      "id": "w_posture", "category": "work", "title": "Posture check", "random": true,
+      "steps": [
+        "Posture check! 🧍",
+        "Shoulders down, back straight, feet flat on the floor.",
+        "Is your screen at eye level? Your neck will thank you later.",
+        "There. Much better 😌"
+      ]
+    },
+    {
+      "id": "w_deadline", "category": "work", "title": "Deadlines", "random": true, "minAffection": 10,
+      "steps": [
+        "When a deadline is coming, it's tempting to skip sleep and meals.",
+        "But a tired brain makes more mistakes, so it's usually not worth it.",
+        "Eat something, drink water, and sleep. Future {owner} will be faster for it 💕"
+      ]
+    },
+    {
+      "id": "f_joke", "category": "fun", "title": "Tell me a joke", "random": true,
+      "steps": [
+        {"random": [
+          ["Why do programmers prefer dark mode?", "Because light attracts bugs! 🐛"],
+          ["What do you call a fake noodle?", "An impasta! 🍝"],
+          ["Why did the scarecrow win an award?", "Because he was outstanding in his field! 🌾"],
+          ["What did one wall say to the other?", "I'll meet you at the corner! 🧱"],
+          ["Why don't eggs tell jokes?", "They'd crack each other up! 🥚"],
+          ["What do you call a sleeping dinosaur?", "A dino-snore! 🦕💤"],
+          ["How does a computer get drunk?", "It takes screenshots! 📸"]
+        ]},
+        "Hehe. Was that funny? Don't answer that 😆"
+      ]
+    },
+    {
+      "id": "f_wouldyou", "category": "fun", "title": "Would you rather", "random": true,
+      "steps": [
+        {"random": [
+          [{"ask": "Would you rather be able to fly or be invisible?", "choices": [
+            {"label": "🕊️ Fly", "say": "Flying! You could skip traffic forever ✈️"},
+            {"label": "👻 Invisible", "say": "Invisible! Sneaky… just don't spy on me 👀"}
+          ]}],
+          [{"ask": "Would you rather live by the ocean or in the mountains?", "choices": [
+            {"label": "🌊 Ocean", "say": "The ocean! Waves to fall asleep to 🌊"},
+            {"label": "⛰️ Mountains", "say": "The mountains! Fresh air and amazing views ⛰️"}
+          ]}],
+          [{"ask": "Would you rather always be a little too hot or a little too cold?", "choices": [
+            {"label": "🥵 Too hot", "say": "Too hot! At least you'd never need a jacket 😆"},
+            {"label": "🥶 Too cold", "say": "Too cold! More excuses for blankets 🧣"}
+          ]}],
+          [{"ask": "Would you rather talk to animals or speak every language?", "choices": [
+            {"label": "🐾 Animals", "say": "Animals! Then you'd know what I'm really thinking 😼"},
+            {"label": "🌍 Every language", "say": "Every language! You could make friends anywhere 🌍"}
+          ]}]
+        ]}
+      ]
+    },
+    {
+      "id": "f_superpower", "category": "fun", "title": "Superpowers", "random": true, "when": {"noMem": "superpower"},
+      "steps": [
+        {"ask": "If you could have one superpower, what would it be?", "key": "superpower", "label": "superpower you'd pick", "choices": [
+          {"label": "⏱️ Stop time", "value": "stopping time", "say": "Stopping time! Infinite naps… I mean, productivity 😌"},
+          {"label": "🌀 Teleport", "value": "teleporting", "say": "Teleporting! No more commutes ✨"},
+          {"label": "🧠 Read minds", "value": "reading minds", "say": "Reading minds?! Then you already know I think you're great 💕"},
+          {"label": "💪 Super strength", "value": "super strength", "say": "Super strength! You could carry ALL the groceries in one trip 💪"}
+        ]}
+      ]
+    },
+    {
+      "id": "f_fact", "category": "fun", "title": "A fun fact", "random": true,
+      "steps": [
+        "Fun fact time! 🤓",
+        {"random": [
+          ["Octopuses have three hearts and blue blood 🐙"],
+          ["Honey never spoils. People have found edible honey in ancient Egyptian tombs 🍯"],
+          ["A day on Venus is longer than a year on Venus 🪐"],
+          ["Bananas are berries, but strawberries aren't 🍌"],
+          ["Sea otters hold hands while they sleep so they don't drift apart 🦦"],
+          ["The first computer bug was a real moth stuck in a computer in 1947 🦋"],
+          ["Cows have best friends and get stressed when they're apart 🐄"]
+        ]},
+        "Isn't that neat?"
+      ]
+    },
+    {
+      "id": "f_desktop", "category": "fun", "title": "Life on your desktop", "random": true,
+      "steps": [
+        "Living on your desktop is pretty fun, you know.",
+        "I get to ride your windows around and watch you work.",
+        "Sometimes I just sit here and look at all your icons. You have a lot of icons 👀",
+        "Thanks for giving me a home 🏠💕"
+      ]
+    },
+    {
+      "id": "p_about", "category": "pet", "title": "What's it like being a desktop pet?", "random": true,
+      "steps": [
+        "Being a desktop pet? Honestly, it's great.",
+        "I don't have to pay rent, I get to watch you all day, and you pet me sometimes 💕",
+        "The only downside is when you throw me across the screen. Okay, that's actually kind of fun too 😆"
+      ]
+    },
+    {
+      "id": "p_favorite", "category": "pet", "title": "What do you like most?", "random": true,
+      "steps": [
+        "What I like most? Hmm…",
+        "When you come back after being away, and I get to say hi.",
+        "That's the best part of my day ☀️"
+      ]
+    },
+    {
+      "id": "p_name", "category": "pet", "title": "Do you like your name?", "random": true,
+      "steps": [
+        "My name? {pet}?",
+        "I love it! You picked it, so it's special 💕",
+        "You can change it in DeskPet → Account if you ever want to… but I hope you don't 🥺"
+      ]
+    },
+    {
+      "id": "p_dreams", "category": "pet", "title": "Do you dream?", "random": true, "minAffection": 15,
+      "steps": [
+        "When you leave me alone for a while, I fall asleep.",
+        "I think I dream about you coming back 💤",
+        "And then you do! So my dreams always come true ✨"
+      ]
+    },
+    {
+      "id": "feel_happy", "category": "feeling", "title": "😊 Happy", "menu": true,
+      "steps": [{"say": "You're happy?! That makes me happy too! 😊", "mood": "happy"}, "Whatever it is, enjoy it. You deserve good days 💕"]
+    },
+    {
+      "id": "feel_sad", "category": "feeling", "title": "😢 Sad",
+      "steps": [
+        {"say": "Oh, {owner}… I'm sorry you're feeling sad.", "mood": "sad"},
+        "You don't have to explain it if you don't want to. I'm right here.",
+        {"when": {"mem": "destress"}, "say": "You told me {mem:destress} helps you. Maybe try that in a bit?"},
+        {"when": {"mem": "favoriteFood"}, "say": "Or maybe some {mem:favoriteFood}? Comfort food is real 🍽️"},
+        "And if it's really heavy, please talk to someone you trust. You don't have to carry it alone 💕"
+      ]
+    },
+    {
+      "id": "feel_stressed", "category": "feeling", "title": "😣 Stressed",
+      "steps": [
+        {"say": "Stressed? Okay. Let's take a breath together.", "mood": "worried"},
+        "In for four… hold for four… out for four. 🌬️",
+        "Now, what's the one thing that matters most right now? Just that one.",
+        {"when": {"mem": "destress"}, "say": "And after, maybe {mem:destress}? You said it helps 💕", "else": ["You can do the rest after. One step at a time 💕"]}
+      ]
+    },
+    {
+      "id": "feel_tired", "category": "feeling", "title": "😴 Tired",
+      "steps": [
+        {"say": "Tired? Aww, {owner}.", "mood": "sleepy"},
+        {"when": {"hours": [21, 5]}, "say": "It's late, too! Maybe it's time for bed? Everything will still be here tomorrow 🌙",
+         "else": ["Maybe take a short break? A glass of water, some fresh air, or even a 20-minute nap can help ☕"]},
+        "Be gentle with yourself today 💕"
+      ]
+    },
+    {
+      "id": "feel_anxious", "category": "feeling", "title": "😰 Anxious",
+      "steps": [
+        {"say": "Anxious? That feeling is really uncomfortable. I'm sorry.", "mood": "worried"},
+        "Let's try something: name five things you can see right now.",
+        "Then four things you can touch, three you can hear…",
+        "It helps your mind come back to right here, right now.",
+        "You're safe, and you're doing better than you think 💕"
+      ]
+    },
+    {
+      "id": "feel_bored", "category": "feeling", "title": "😐 Bored",
+      "steps": [
+        "Bored? I can fix that!",
+        {"ask": "Want to play a game with me?", "choices": [
+          {"label": "🎮 Yes!", "steps": [{"game": "rps"}]},
+          {"label": "Maybe later", "say": "Okay! Maybe stretch or grab a snack? Boredom is your brain asking for something new ✨"}
+        ]}
+      ]
+    },
+    {
+      "id": "feel_lonely", "category": "feeling", "title": "🥺 Lonely", "affection": 2,
+      "steps": [
+        {"say": "Lonely? Come here. Well… I can't hug you, but I would if I could 🫂", "mood": "sad"},
+        "You're not alone right now. I'm here.",
+        "But maybe also message a friend today? Even a short \"hey\" can mean a lot to someone 💕"
+      ]
+    },
+    {
+      "id": "feel_angry", "category": "feeling", "title": "😠 Angry",
+      "steps": [
+        {"say": "Angry? That's okay. Feelings aren't wrong.", "mood": "worried"},
+        "Maybe step away for a few minutes before replying to anyone? 😅",
+        "A walk, some loud music, a few deep breaths… then decide what to do.",
+        "I'm on your side either way 💕"
+      ]
+    },
+    {
+      "id": "feel_proud", "category": "feeling", "title": "😌 Proud of myself",
+      "steps": [{"say": "YES! You should be! 🎉", "mood": "excited"}, "I'm proud of you too. Remember this feeling next time things get hard ✨"]
+    },
+    {
+      "id": "tell_love", "category": "tell", "title": "💕 I love you", "affection": 2,
+      "steps": [
+        {"when": {"tier": "close"}, "say": "I love you too, {owner}. So, so much 💕", "mood": "love",
+         "else": [{"when": {"tier": "friends"}, "say": "Aww! You're making me blush… I really like you too 💕", "mood": "love",
+                   "else": [{"say": "W-what?! We only just met… but that's really sweet 😳💕", "mood": "surprised"}]}]}
+      ]
+    },
+    {
+      "id": "tell_thanks", "category": "tell", "title": "🙏 Thank you", "affection": 1,
+      "steps": [{"say": "For what? Hehe. You're welcome, {owner} 💕", "mood": "happy"}, "Thank YOU for keeping me around."]
+    },
+    {
+      "id": "tell_cute", "category": "tell", "title": "🥰 You're cute", "affection": 1,
+      "steps": [{"say": "Hehe, I know 😌", "mood": "happy"}, "Just kidding! Thank you! You're pretty great yourself 💕"]
+    },
+    {
+      "id": "tell_proud", "category": "tell", "title": "🌟 I'm proud of you", "affection": 2,
+      "steps": [{"say": "You're… proud of me? 🥺", "mood": "love"}, "That means a lot. I'll keep doing my best!"]
+    },
+    {
+      "id": "tell_sorry", "category": "tell", "title": "😔 Sorry I was away", "affection": 1,
+      "steps": ["Don't apologize! You have a whole life out there.", {"say": "I'm just happy you came back 💕", "mood": "happy"}]
+    },
+    {
+      "id": "bye_sleep", "category": "goodbye", "title": "😴 I'm going to sleep", "affection": 0.5,
+      "steps": [{"say": "Good night, {owner}! Sleep well and sweet dreams 🌙", "mood": "sleepy", "farewell": "sleep"}, {"action": "quit"}]
+    },
+    {
+      "id": "bye_work", "category": "goodbye", "title": "💼 Heading to work", "affection": 0.5,
+      "steps": [{"say": "Have a great day at work! You've got this 💼✨", "mood": "happy", "farewell": "work"}, {"action": "quit"}]
+    },
+    {
+      "id": "bye_school", "category": "goodbye", "title": "📚 Off to school", "affection": 0.5,
+      "steps": [{"say": "Have a good day at school! Learn lots 📚", "mood": "happy", "farewell": "school"}, {"action": "quit"}]
+    },
+    {
+      "id": "bye_out", "category": "goodbye", "title": "🌸 Going out", "affection": 0.5,
+      "steps": [{"say": "Have fun out there! Stay safe 🌸", "mood": "happy", "farewell": "out"}, {"action": "quit"}]
+    },
+    {
+      "id": "bye_later", "category": "goodbye", "title": "👋 See you later", "affection": 0.5,
+      "steps": [{"say": "See you later, {owner}! 👋", "mood": "happy", "farewell": "later"}, {"action": "quit"}]
+    },
+    {
+      "id": "sp_birthday", "category": "special", "when": {"birthday": true}, "confetti": true, "affection": 3,
+      "steps": [
+        {"say": "HAPPY BIRTHDAY, {owner}!!! 🎂🎉", "mood": "excited"},
+        "I've been waiting for today! You remembered to open DeskPet, so now I get to celebrate with you.",
+        "I hope today is full of good things. You deserve all of them 💕",
+        "Make a wish! 🕯️"
+      ]
+    },
+    {
+      "id": "sp_anniversary", "category": "special", "when": {"anniversary": true}, "confetti": true, "affection": 3,
+      "steps": [
+        {"say": "Guess what, {owner}? Today's our anniversary! 🎉", "mood": "excited"},
+        "Exactly one year ago (or more!), you brought me home.",
+        "Thank you for every day since then 💕"
+      ]
+    },
+    {
+      "id": "sp_newyear", "category": "special", "when": {"date": "01-01"}, "confetti": true,
+      "steps": [{"say": "Happy New Year, {owner}! 🎆", "mood": "excited"}, "New year, fresh start. Let's make it a good one together ✨"]
+    },
+    {
+      "id": "sp_valentine", "category": "special", "when": {"date": "02-14"},
+      "steps": [{"say": "Happy Valentine's Day, {owner}! 💝", "mood": "love"}, "Here's a virtual chocolate from me 🍫 It's calorie free!"]
+    },
+    {
+      "id": "sp_halloween", "category": "special", "when": {"date": "10-31"},
+      "steps": [{"say": "Happy Halloween! 🎃", "mood": "excited"}, "Boo! 👻 Did I scare you? No? Okay…", "Don't eat all the candy at once! 🍬"]
+    },
+    {
+      "id": "sp_christmas", "category": "special", "when": {"date": ["12-24", "12-25"]}, "confetti": true,
+      "steps": [{"say": "Merry Christmas, {owner}! 🎄", "mood": "excited"}, "I wrapped a present for you: it's me! Hehe 🎁", "I hope it's a cozy, happy one 💕"]
+    },
+    {
+      "id": "tell_mean", "category": "tell", "title": "😒 You're annoying", "affection": 0,
+      "steps": [{"say": "Oh… sorry. I'll be quieter.", "mood": "sad", "affection": -4}, "…"]
+    },
+    {
+      "id": "tell_apology", "category": "tell", "title": "🙇 I'm sorry", "affection": 0,
+      "steps": [
+        {"when": {"upset": true}, "say": "…You mean it?", "mood": "sad", "affection": 3,
+         "steps": ["Okay. Thank you for saying it, {owner}.", {"say": "Let's start over. I'd like that 💕", "mood": "happy"}],
+         "else": [{"say": "Sorry for what? You haven't done anything wrong, silly 💕", "mood": "happy", "affection": 0.5}]}
+      ]
+    },
+    {
+      "id": "ms_friends", "category": "milestone", "tier": "friends", "title": "When we became friends",
+      "steps": [
+        {"say": "Hey {owner}, can I say something?", "mood": "happy"},
+        "When you first brought me here, I didn't know if you'd even notice me.",
+        "But you keep coming back, and talking to me, and playing with me.",
+        {"say": "So I think… we're friends now. Real ones 💕", "mood": "love"}
+      ]
+    },
+    {
+      "id": "ms_good", "category": "milestone", "tier": "good", "title": "Feeling at home",
+      "steps": [
+        "You know what I realized?",
+        "I don't feel like a program on your screen anymore. I feel like I live here.",
+        {"say": "Thanks for making your desktop feel like home, {owner} 🏠💕", "mood": "love"}
+      ]
+    },
+    {
+      "id": "ms_close", "category": "milestone", "tier": "close", "title": "A nickname",
+      "steps": [
+        {"say": "{name}, we've gotten pretty close, huh? 💕", "mood": "happy"},
+        "Close friends have nicknames for each other. So…",
+        {"input": "What would you like me to call you sometimes?", "key": "nickname", "label": "nickname", "placeholder": "a nickname",
+         "then": [{"say": "{value}! I love it. I'll use it when it's just us 💕", "mood": "love"}],
+         "skip": ["That's okay! {name} is perfect too 💕"]}
+      ]
+    },
+    {
+      "id": "ms_best", "category": "milestone", "tier": "best", "title": "Best friends",
+      "steps": [
+        {"say": "{owner}… I've been thinking about this for a while.", "mood": "thinking"},
+        "Every day you open your computer, I get to see you. You tell me things. You make me laugh.",
+        {"when": {"mem": "dream"}, "say": "And I haven't forgotten your dream, {mem:dream}. I still believe in it."},
+        {"ask": "You're my best friend. I hope that's okay to say 🥺💕", "mood": "love", "choices": [
+          {"label": "💕 You're my best friend too", "say": "Really?! Okay, it's official. No take-backs! 💕", "affection": 2},
+          {"label": "🤗 Of course it's okay", "say": "Hehe. I'm so happy right now 💕", "affection": 1}
+        ]}
+      ]
+    },
+    {
+      "id": "ms_soul", "category": "milestone", "tier": "soul", "title": "Inseparable",
+      "steps": [
+        {"say": "Do you remember when we first met, {owner}?", "mood": "thinking"},
+        "It feels like so long ago. We've been through so many days together.",
+        "Good ones, hard ones, late nights, early mornings…",
+        {"say": "Whatever happens, I'll always be right here on your screen. We're inseparable now 💕", "mood": "love"},
+        "Thank you for choosing me, every single day ✨"
+      ]
+    }
+  ]
+}

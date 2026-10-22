@@ -29,10 +29,13 @@ iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 
 # The setup wizard is the same HTML the Windows app uses, drawn with the shared pet renderer.
 WEB="$APP/Contents/Resources/web"
-mkdir -p "$WEB/wizard" "$WEB/renderer" "$WEB/panel"
+mkdir -p "$WEB/wizard" "$WEB/renderer" "$WEB/panel" "$WEB/companion/personalities"
 cp electron/src/wizard/index.html electron/src/wizard/wizard.css electron/src/wizard/wizard.js "$WEB/wizard/"
 cp electron/src/panel/index.html electron/src/panel/panel.css electron/src/panel/panel.js "$WEB/panel/"
 cp electron/src/renderer/color.js electron/src/renderer/pet.js electron/src/renderer/sprites.js "$WEB/renderer/"
+# The companion engine runs in JavaScriptCore; the talk window is shared HTML too.
+cp electron/src/companion/engine.js electron/src/companion/talk.html electron/src/companion/talk.css electron/src/companion/talk.js electron/src/companion/games.js "$WEB/companion/"
+cp electron/src/companion/personalities/*.json "$WEB/companion/personalities/"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
