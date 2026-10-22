@@ -10,8 +10,11 @@ import sys
 import time
 
 SETTINGS = os.path.expanduser("~/.claude/settings.json")
-BINARY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "DeskPet.app/Contents/MacOS/DeskPet")
-COMMAND = f'"{BINARY}" hook --agent claude'
+APP_LOCATIONS = [
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "DeskPet.app"),
+    "/Applications/DeskPet.app",
+    os.path.expanduser("~/Applications/DeskPet.app"),
+]
 EVENTS = {
     "SessionStart": "",
     "UserPromptSubmit": "",
@@ -29,14 +32,25 @@ EVENTS = {
 }
 
 
+def find_binary():
+    """The first DeskPet.app found next to this script or in an Applications folder."""
+    for app in APP_LOCATIONS:
+        binary = os.path.join(app, "Contents/MacOS/DeskPet")
+        if os.path.exists(binary):
+            return binary
+    return None
+
+
 def is_deskpet(group):
     return any("DeskPet.app" in h.get("command", "") for h in group.get("hooks", []))
 
 
 def main():
     uninstall = "--uninstall" in sys.argv
-    if not uninstall and not os.path.exists(BINARY):
-        sys.exit(f"{BINARY} not found; run ./build.sh first")
+    binary = find_binary()
+    if not uninstall and not binary:
+        sys.exit("DeskPet.app not found next to this script or in /Applications; run ./build.sh or move the app there first")
+    command = f'"{binary}" hook --agent claude'
 
     settings = {}
     if os.path.exists(SETTINGS):
@@ -50,7 +64,7 @@ def main():
     for event, matcher in EVENTS.items():
         groups = [g for g in hooks.get(event, []) if not is_deskpet(g)]
         if not uninstall:
-            groups.append({"matcher": matcher, "hooks": [{"type": "command", "command": COMMAND, "timeout": 2}]})
+            groups.append({"matcher": matcher, "hooks": [{"type": "command", "command": command, "timeout": 2}]})
         if groups:
             hooks[event] = groups
         else:
