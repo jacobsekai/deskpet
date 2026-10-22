@@ -117,7 +117,29 @@ final class Stats {
         var pets = 0
         var throwsCount = 0
         var focusSessions = 0
+        var openMinutes = 0
+        /// XP earned from playing today (capped so it can't be farmed).
+        var playXP = 0
+        var greeted = false
+
+        init() {}
+
+        // Older stats.json files lack newer fields; missing ones start at zero.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            activeMinutes = try c.decodeIfPresent(Int.self, forKey: .activeMinutes) ?? 0
+            agentMinutes = try c.decodeIfPresent(Int.self, forKey: .agentMinutes) ?? 0
+            tasks = try c.decodeIfPresent(Int.self, forKey: .tasks) ?? 0
+            pets = try c.decodeIfPresent(Int.self, forKey: .pets) ?? 0
+            throwsCount = try c.decodeIfPresent(Int.self, forKey: .throwsCount) ?? 0
+            focusSessions = try c.decodeIfPresent(Int.self, forKey: .focusSessions) ?? 0
+            openMinutes = try c.decodeIfPresent(Int.self, forKey: .openMinutes) ?? 0
+            playXP = try c.decodeIfPresent(Int.self, forKey: .playXP) ?? 0
+            greeted = try c.decodeIfPresent(Bool.self, forKey: .greeted) ?? false
+        }
     }
+
+    static let dailyPlayCap = 100
 
     private struct File: Codable {
         var xp = 0

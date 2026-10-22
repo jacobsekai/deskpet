@@ -49,7 +49,7 @@ class Stats {
   }
   get xpToNext() { return Stats.xpNeeded(this.level + 1) - this.data.xp; }
   get today() {
-    return { activeMinutes: 0, agentMinutes: 0, tasks: 0, pets: 0, throwsCount: 0, focusSessions: 0, ...(this.data.days[Stats.dayKey()] || {}) };
+    return { activeMinutes: 0, agentMinutes: 0, tasks: 0, pets: 0, throwsCount: 0, focusSessions: 0, openMinutes: 0, playXP: 0, greeted: false, ...(this.data.days[Stats.dayKey()] || {}) };
   }
 
   /** Updates today's counters; returns the new level if this XP gain leveled up. */
@@ -148,7 +148,9 @@ class Updater {
           Start-Process ${psQuote(path.join(appDir, 'DeskPet.exe'))}
         }`;
       powershell(script, { detached: true }).unref();
+      // The swap waits for this process to exit, so make sure it does.
       app.quit();
+      setTimeout(() => app.exit(0), 1500).unref();
       return 'updating';
     } catch (e) {
       this.installing = false;

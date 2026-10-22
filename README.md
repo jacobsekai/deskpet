@@ -75,7 +75,12 @@ Right-click Mochi or use the 🐾 menu (system tray on Windows) for every option
 
 ### Fun
 - **Walk on windows:** with gravity on, the pet lands on window title bars, rides along when you move them, and falls when they close or minimize.
-- **Levels and stats:** XP for finished agent tasks, focus sessions, pets, and throws; today's time-with-you and agent time in the menu and hover card (`~/.deskpet/stats.json`).
+- **Levels and stats:** earn XP three ways, each shown as a floating "+N XP":
+  - *Hanging out:* +1 for every 5 minutes the pet is open, and +10 for the first hello each day.
+  - *Playing:* petting +2, a throw +3, a wild throw with 3+ bounces +5 more, catching it mid-air +3, landing on a window +2 (up to 100 play XP a day).
+  - *Agents:* +10 per finished task, +15 per focus session, +1 per minute agents are working.
+
+  Today's stats are in the menu and hover card (`~/.deskpet/stats.json`).
 - **Focus timer:** 15/25/50-minute sessions with a break afterwards (🐾 → Focus timer).
 - **Quiet during calls:** no sounds or chatty remarks while any app uses the microphone or camera.
 - **Sounds:** system sounds on macOS, synthesized ones on Windows; a sprite pack can bring its own as `sounds/<event>.(wav|mp3|m4a|aiff|caf|ogg)` with events `pet`, `done`, `needs-you`, `bounce`, `wake`, `level-up`, `focus-done`.

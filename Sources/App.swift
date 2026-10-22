@@ -115,6 +115,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     private var lastStatsSave = 0.0
     private var lastKiroCheck = 0.0
     private var updateAnnounced = false
+    /// Recent XP gain shown floating above the pet.
+    private var xpPopup: (amount: Int, at: Double)?
     /// The window the pet is standing on, and where it was last seen.
     private var perch: (id: Int, rect: NSRect)?
     private var platforms: [Platform] = []
@@ -306,7 +308,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
                 say("focus session done! take a break ☕", for: 5)
                 sounds.play(.focusDone)
                 post("Focus session done", "Take a \(max(5, focus.minutes / 5)) minute break ☕", pid: 0)
-                levelUp(stats.record(xp: 15) { $0.focusSessions += 1 })
+                gainXP(15) { $0.focusSessions += 1 }
             } else {
                 say("break's over! ready for another round? 💪", for: 5)
                 post("Break's over", "Ready for another focus session?", pid: 0)
@@ -315,10 +317,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         if now - lastMinute >= 60 {
             lastMinute = now
             let agentsBusy = sessions.contains { $0.activity != .idle && $0.activity != .done }
-            levelUp(stats.record(xp: agentsBusy ? 1 : 0) {
+            // Hanging out counts too: +1 XP for every 5 minutes the pet is open.
+            let openMinutes = stats.today.openMinutes + 1
+            gainXP((agentsBusy ? 1 : 0) + (openMinutes % 5 == 0 ? 1 : 0)) {
+                $0.openMinutes += 1
                 if idle < 60 { $0.activeMinutes += 1 }
                 if agentsBusy { $0.agentMinutes += 1 }
-            })
+            }
+        }
+        if !stats.today.greeted {
+            gainXP(10) { $0.greeted = true }
+            say("daily hello! +10 XP ☀️", for: 3)
         }
         if now - lastStatsSave > 30 {
             lastStatsSave = now
@@ -421,6 +430,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             p.captionColor = focus.phase == .focus ? .systemRed : .systemBrown
         }
         if let s = speech, s.until > now { p.bubble = s.text }
+        if let popup = xpPopup, now - popup.at < 1.4 { p.xpText = "+\(popup.amount) XP"; p.xpAge = now - popup.at }
         return p
     }
 
@@ -625,7 +635,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         spin = 0
         perch = (landing != nil && abs(o.y - floorY) < 1) ? (landing!.id, landing!.rect) : nil
         saveOrigin(o)
+        if perch != nil { gainXP(2, play: true) }
         if bounces >= 3 {
+            gainXP(5, play: true)
             transient = (.dizzy, now + 2.5)
             say(["@_@ the room is spinning…", "again! again!", "I saw stars 💫"].randomElement()!, for: 2.5)
         } else {
@@ -680,7 +692,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             return
         }
         sounds.play(.pet)
-        levelUp(stats.record(xp: stats.today.pets < 20 ? 1 : 0) { $0.pets += 1 })
+        gainXP(2, play: true) { $0.pets += 1 }
         if let top = topSession, top.activity != .idle, top.activity != .done {
             transient = (.petted, now + 1)
             say(top.activity == .needsYou ? "go check on \(top.name)! 👉" : "shh, \(top.name) is working 🤫", for: 2.5)
@@ -691,6 +703,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     }
 
     func petDragBegan() {
+        if velocity != nil {
+            gainXP(3, play: true)
+            say("nice catch! 🙌", for: 1.5)
+        }
         walkTarget = nil
         perch = nil
         hoverCard.hide()
@@ -715,7 +731,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         let scale = speed > limit ? limit / speed : 1
         velocity = CGVector(dx: v.dx * scale, dy: v.dy * scale)
         if speed > 1200 { say("yeeeet! 🚀", for: 1.2) }
-        if speed > 400 { levelUp(stats.record(xp: 2) { $0.throwsCount += 1 }) }
+        if speed > 400 { gainXP(3, play: true) { $0.throwsCount += 1 } }
     }
 
     // MARK: - Attention, stats, and the hover card
@@ -740,7 +756,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     private func taskFinished(_ s: AgentSession, project: String) {
         sounds.play(.done)
         postUnlessWatching(s, title: "\(s.name) is done ✨", body: project)
-        levelUp(stats.record(xp: 10) { $0.tasks += 1 })
+        gainXP(10) { $0.tasks += 1 }
+    }
+
+    /// Awards XP (play XP is capped per day), shows "+N XP", and celebrates level-ups.
+    private func gainXP(_ amount: Int, play: Bool = false, _ change: (inout Stats.Day) -> Void = { _ in }) {
+        var xp = amount
+        if play { xp = max(0, min(amount, Stats.dailyPlayCap - stats.today.playXP)) }
+        let newLevel = stats.record(xp: xp) {
+            change(&$0)
+            if play { $0.playXP += xp }
+        }
+        if xp > 0 {
+            let now = CACurrentMediaTime()
+            let pending = xpPopup.map { now - $0.at < 1.2 ? $0.amount : 0 } ?? 0
+            xpPopup = (pending + xp, now)
+        }
+        levelUp(newLevel)
     }
 
     private func levelUp(_ newLevel: Int?) {

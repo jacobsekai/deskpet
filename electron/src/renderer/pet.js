@@ -58,6 +58,7 @@
         this.drawSpeech(pose.bubble, a.x, a.y);
       }
       if (pose.caption) this.drawCaption(pose.caption, Color.hex(pose.captionColor) || SYS.gray);
+      if (pose.xpText) this.drawXP(pose.xpText, pose.xpAge || 0, this.toWindow(anchor));
       if (pose.resizing) this.drawResizeOverlay();
       ctx.restore();
 
@@ -577,6 +578,23 @@
       lines.forEach((line, i) => {
         this.text(line, r.x + r.width / 2, r.y + r.height - 5 - lineH * (i + 0.5), 12, theme.bubbleText, 600);
       });
+      ctx.restore();
+    }
+
+    /** "+3 XP" rising and fading beside the head over ~1.4s. */
+    drawXP(s, age, anchor) {
+      const ctx = this.ctx;
+      const t = Math.min(1, age / 1.4);
+      ctx.save();
+      ctx.font = `800 13px ${FONT}`;
+      const w = ctx.measureText(s).width;
+      ctx.restore();
+      const x = Math.min(this.W - w / 2 - 4, anchor.x + 34 + w / 2);
+      const y = Math.min(this.H - 10, anchor.y - 22 + t * 26);
+      ctx.save();
+      ctx.shadowColor = `rgba(0,0,0,${0.35 * (1 - t)})`;
+      ctx.shadowBlur = 2;
+      this.text(s, x, y, 13, new Color(1, 0.72, 0.1, 1 - t * t), 800);
       ctx.restore();
     }
 

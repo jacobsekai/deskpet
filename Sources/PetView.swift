@@ -18,6 +18,9 @@ struct PetPose {
     /// Rotation while thrown, in radians.
     var spin: CGFloat = 0
     var caption: String?
+    /// "+3 XP" floating up from the pet, and how long it's been showing.
+    var xpText: String?
+    var xpAge: Double = 0
     var captionColor: NSColor = .systemGray
     var bubble: String?
 }
@@ -246,6 +249,7 @@ final class PetView: NSView {
             drawSpeech(text, anchorX: a.x, y: a.y)
         }
         if let caption = pose.caption { drawCaption(caption, color: pose.captionColor) }
+        if let xp = pose.xpText { drawXP(xp, from: toWindow(bubbleAnchor)) }
         if resizing { drawResizeOverlay() }
     }
 
@@ -754,6 +758,22 @@ final class PetView: NSView {
         theme.bubbleFill.withAlphaComponent(0.97).setFill()
         bubble.fill(); tail.fill()
         str.draw(with: rect.insetBy(dx: 10, dy: 5), options: [.usesLineFragmentOrigin, .usesFontLeading])
+    }
+
+    /// Rises and fades over ~1.4s, beside the head.
+    private func drawXP(_ s: String, from anchor: NSPoint) {
+        let t = CGFloat(min(1, pose.xpAge / 1.4))
+        let gold = NSColor(calibratedRed: 1.0, green: 0.72, blue: 0.1, alpha: 1 - t * t)
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor(white: 0, alpha: 0.35 * (1 - t))
+        shadow.shadowBlurRadius = 2
+        shadow.shadowOffset = NSSize(width: 0, height: -1)
+        let str = NSAttributedString(string: s, attributes: [
+            .font: NSFont.systemFont(ofSize: 13, weight: .heavy), .foregroundColor: gold, .shadow: shadow,
+        ])
+        let size = str.size()
+        let x = min(bounds.width - size.width - 4, anchor.x + 34)
+        str.draw(at: NSPoint(x: x, y: min(bounds.height - size.height - 2, anchor.y - 30 + t * 26)))
     }
 
     private func drawCaption(_ s: String, color statusColor: NSColor) {

@@ -101,6 +101,7 @@ class Pet {
     this.lastStatsSave = 0;
     this.lastKiroCheck = 0;
     this.updateAnnounced = false;
+    this.xpPopup = null;
   }
 
   // MARK: Settings
@@ -253,7 +254,7 @@ class Pet {
       this.say('focus session done! take a break ☕', 5);
       this.playSound('focus-done');
       this.notify('Focus session done', `Take a ${Math.max(5, Math.round(this.focus.minutes / 5))} minute break ☕`, 0);
-      this.levelUp(this.stats.record(15, (d) => { d.focusSessions++; }));
+      this.gainXP(15, false, (d) => { d.focusSessions++; });
     } else if (finished === 'rest') {
       this.say("break's over! ready for another round? 💪", 5);
       this.notify("Break's over", 'Ready for another focus session?', 0);
@@ -261,10 +262,17 @@ class Pet {
     if (t - this.lastMinute >= 60) {
       this.lastMinute = t;
       const busy = this.sessions.some((s) => s.activity !== 'idle' && s.activity !== 'done');
-      this.levelUp(this.stats.record(busy ? 1 : 0, (d) => {
+      // Hanging out counts too: +1 XP for every 5 minutes the pet is open.
+      const openMinutes = (this.stats.today.openMinutes || 0) + 1;
+      this.gainXP((busy ? 1 : 0) + (openMinutes % 5 === 0 ? 1 : 0), false, (d) => {
+        d.openMinutes = openMinutes;
         if (idle < 60) d.activeMinutes++;
         if (busy) d.agentMinutes++;
-      }));
+      });
+    }
+    if (!this.stats.today.greeted) {
+      this.gainXP(10, false, (d) => { d.greeted = true; });
+      this.say('daily hello! +10 XP ☀️', 3);
     }
     if (t - this.lastStatsSave > 30) { this.lastStatsSave = t; this.stats.saveIfNeeded(); }
     if (this.kiroHooksOn && t - this.lastKiroCheck > 600) {
@@ -343,6 +351,7 @@ class Pet {
       p.captionColor = this.focus.phase === 'focus' ? '#FF3B30' : '#A2845E';
     }
     if (this.speech && this.speech.until > t) p.bubble = this.speech.text;
+    if (this.xpPopup && t - this.xpPopup.at < 1.4) { p.xpText = `+${this.xpPopup.amount} XP`; p.xpAge = t - this.xpPopup.at; }
     return p;
   }
 
@@ -552,7 +561,9 @@ class Pet {
     this.spin = 0;
     this.perch = landing && Math.abs(this.pos.bottom - floor) < 1 ? { id: landing.id, rect: landing.rect } : null;
     this.savePosition();
+    if (this.perch) this.gainXP(2, true);
     if (this.bounces >= 3) {
+      this.gainXP(5, true);
       this.transient = { mood: 'dizzy', until: t + 2.5 };
       this.say(pick(['@_@ the room is spinning…', 'again! again!', 'I saw stars 💫']), 2.5);
     } else {
@@ -602,7 +613,7 @@ class Pet {
       return;
     }
     this.playSound('pet');
-    this.levelUp(this.stats.record(this.stats.today.pets < 20 ? 1 : 0, (d) => { d.pets++; }));
+    this.gainXP(2, true, (d) => { d.pets++; });
     if (top && top.activity !== 'idle' && top.activity !== 'done') {
       this.transient = { mood: 'petted', until: t + 1 };
       this.say(top.activity === 'needsYou' ? `go check on ${top.name}! 👉` : `shh, ${top.name} is working 🤫`, 2.5);
@@ -613,6 +624,10 @@ class Pet {
   }
 
   dragBegan() {
+    if (this.velocity) {
+      this.gainXP(3, true);
+      this.say('nice catch! 🙌', 1.5);
+    }
     this.walkTarget = null;
     this.perch = null;
     this.hideCard();
@@ -633,7 +648,7 @@ class Pet {
     const k = speed > limit ? limit / speed : 1;
     this.velocity = { x: v.x * k, y: v.y * k };
     if (speed > 1200) this.say('yeeeet! 🚀', 1.2);
-    if (speed > 400) this.levelUp(this.stats.record(2, (d) => { d.throwsCount++; }));
+    if (speed > 400) this.gainXP(3, true, (d) => { d.throwsCount++; });
   }
 
   // MARK: Size & sprites
@@ -792,7 +807,7 @@ class Pet {
     if (isWindows) {
       template.push({ label: 'Start with Windows', type: 'checkbox', checked: app.getLoginItemSettings().openAtLogin, click: (item) => app.setLoginItemSettings({ openAtLogin: item.checked }) });
     }
-    template.push({ type: 'separator' }, { label: 'Quit DeskPet', click: () => app.quit() });
+    template.push({ type: 'separator' }, { label: 'Quit DeskPet', click: () => quitApp() });
     return Menu.buildFromTemplate(template);
   }
 
@@ -824,7 +839,22 @@ class Pet {
   taskFinished(s, project) {
     this.playSound('done');
     this.notifyUnlessWatching(s, `${s.name} is done ✨`, project);
-    this.levelUp(this.stats.record(10, (d) => { d.tasks++; }));
+    this.gainXP(10, false, (d) => { d.tasks++; });
+  }
+
+  /** Awards XP (play XP is capped per day), shows "+N XP", and celebrates level-ups. */
+  gainXP(amount, play = false, change = () => {}) {
+    const xp = play ? Math.max(0, Math.min(amount, 100 - (this.stats.today.playXP || 0))) : amount;
+    const level = this.stats.record(xp, (d) => {
+      change(d);
+      if (play) d.playXP = (d.playXP || 0) + xp;
+    });
+    if (xp > 0) {
+      const t = now();
+      const pending = this.xpPopup && t - this.xpPopup.at < 1.2 ? this.xpPopup.amount : 0;
+      this.xpPopup = { amount: pending + xp, at: t };
+    }
+    this.levelUp(level);
   }
 
   levelUp(level) {
@@ -1157,6 +1187,12 @@ class Pet {
       dialog.showErrorBox('DeskPet', `Couldn't update ${hooks.SETTINGS}:\n${e.message}`);
     }
   }
+}
+
+/** Quits, forcing the exit if a window or helper holds shutdown up (seen on Windows). */
+function quitApp() {
+  app.quit();
+  setTimeout(() => app.exit(0), 1500).unref();
 }
 
 function pointIn(r, x, y) { return x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height; }

@@ -92,6 +92,7 @@
     cases.push({ label: 'needsYou · #2B2D42', pose: { mood: 'needsYou', theme: '#2B2D42', bubble: 'Claude needs you! 🙋', caption: 'Claude: needs your OK', captionColor: '#FF9500' } });
     cases.push({ label: 'resizing 150%', pose: { mood: 'idle', resizing: true, scale: 1.5 } });
     cases.push({ label: 'resizing 60%', pose: { mood: 'idle', resizing: true, scale: 0.6 } });
+    cases.push({ label: '+5 XP popup', pose: { mood: 'petted', xpText: '+5 XP', xpAge: 0.3 } });
     for (const c of cases.slice(1, 8)) { c.pose.caption = `Claude: ${c.label}`; c.pose.captionColor = '#007AFF'; }
 
     const cellW = 300, cellH = 300, cols = 6;
