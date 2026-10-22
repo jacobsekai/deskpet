@@ -29,8 +29,9 @@ iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 
 # The setup wizard is the same HTML the Windows app uses, drawn with the shared pet renderer.
 WEB="$APP/Contents/Resources/web"
-mkdir -p "$WEB/wizard" "$WEB/renderer"
+mkdir -p "$WEB/wizard" "$WEB/renderer" "$WEB/panel"
 cp electron/src/wizard/index.html electron/src/wizard/wizard.css electron/src/wizard/wizard.js "$WEB/wizard/"
+cp electron/src/panel/index.html electron/src/panel/panel.css electron/src/panel/panel.js "$WEB/panel/"
 cp electron/src/renderer/color.js electron/src/renderer/pet.js electron/src/renderer/sprites.js "$WEB/renderer/"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

@@ -10,7 +10,7 @@
 }
 
 * { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; background: transparent; color: var(--ink); overflow: hidden; user-select: none; }
+html, body { margin: 0; height: 100%; background: transparent; color: var(--ink); overflow: hidden; user-select: none; -webkit-user-select: none; }
 
 .window {
   position: relative;

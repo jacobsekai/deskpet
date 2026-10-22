@@ -12,23 +12,25 @@ final class WizardController: NSObject, WKScriptMessageHandler, NSWindowDelegate
     private let handler: Handler
     var onClose: (() -> Void)?
 
-    init(handler: @escaping Handler) {
+    /// `page` is relative to the bundled web folder: the setup wizard or the control center.
+    init(page: String = "wizard/index.html", size: NSSize = NSSize(width: 780, height: 540),
+         title: String = "Welcome to DeskPet", handler: @escaping Handler) {
         self.handler = handler
         let config = WKWebViewConfiguration()
-        webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 780, height: 540), configuration: config)
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 780, height: 540),
-                          styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
+        webView = WKWebView(frame: NSRect(origin: .zero, size: size), configuration: config)
+        window = NSWindow(contentRect: NSRect(origin: .zero, size: size),
+                          styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView], backing: .buffered, defer: false)
         super.init()
         config.userContentController.add(self, name: "deskpet")
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
-        window.title = "Welcome to DeskPet"
+        window.title = title
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.contentView = webView
         window.center()
         if let web = Bundle.main.resourceURL?.appendingPathComponent("web") {
-            webView.loadFileURL(web.appendingPathComponent("wizard/index.html"), allowingReadAccessTo: web)
+            webView.loadFileURL(web.appendingPathComponent(page), allowingReadAccessTo: web)
         }
     }
 
@@ -38,6 +40,25 @@ final class WizardController: NSObject, WKScriptMessageHandler, NSWindowDelegate
     }
 
     func close() { window.close() }
+
+    func run(_ script: String) { webView.evaluateJavaScript(script) }
+
+    /// `open DeskPet.app --args panel-snapshot`: screenshots each control center page, then quits.
+    func snapshotPanel(pages: [String] = ["home", "rewards", "look", "focus", "agents", "behavior", "account", "about"]) {
+        let out = DeskPetPaths.root.appendingPathComponent("panel-snapshots")
+        try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+        guard let page = pages.first else { return NSApp.terminate(nil) }
+        webView.evaluateJavaScript("window.__panelShow('\(page)')")
+        DispatchQueue.main.asyncAfter(deadline: .now() + (page == "look" || page == "rewards" ? 2 : 1)) { [self] in
+            // Capture the real window (an app may capture its own windows without screen-recording permission);
+            // WebKit's takeSnapshot misses content inside scrolling containers.
+            if let cg = CGWindowListCreateImage(.null, .optionIncludingWindow, CGWindowID(window.windowNumber), [.boundsIgnoreFraming, .bestResolution]),
+               let png = NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:]) {
+                try? png.write(to: out.appendingPathComponent("panel-\(page).png"))
+            }
+            snapshotPanel(pages: Array(pages.dropFirst()))
+        }
+    }
 
     /// `open DeskPet.app --args wizard-snapshot`: screenshots each step to ~/.deskpet/wizard-snapshots, then quits.
     func snapshotSteps(step: Int = 0) {

@@ -735,113 +735,145 @@ class Pet {
 
   // MARK: Menu
 
+  /** The quick menu (tray and right-click). Everything else lives in the control center. */
   buildMenu() {
-    const pct = Math.round(this.scale * 100);
-    const today = this.todaySummary();
     const agentItems = this.sessions.length
       ? [...this.sessions].sort((a, b) => PRIORITY.indexOf(b.activity) - PRIORITY.indexOf(a.activity)).map((s) => ({
-        label: `${s.activity === 'idle' ? '○' : '●'} ${s.name}${s.project ? ` (${s.project})` : ''} — ${s.detail}${s.precise ? '' : ' · guessed from CPU'}`,
+        label: `${s.activity === 'idle' ? '○' : '●'} ${s.name}${s.project ? ` (${s.project})` : ''} — ${s.detail}`,
         enabled: !!s.pid && isWindows,
         click: () => this.jump(s.pid).then((ok) => { if (!ok) this.say("couldn't find that window 🤔", 2.5); }),
       }))
       : [{ label: 'No AI agents running', enabled: false }];
-    const packs = listPacks();
-    const check = (label, key, fallback, after) => ({
-      label, type: 'checkbox', checked: this.settings.get(key, fallback),
-      click: () => { this.toggle(key, fallback); if (after) after(); },
-    });
     const template = [
       { label: `${this.config.petName} · ${this.stats.rankTitle} — ${this.mood}`, enabled: false },
-      { label: `Today: ${today}`, enabled: false },
+      { label: `Today: ${this.todaySummary()}`, enabled: false },
       ...(this.quiet ? [{ label: '🤫 Quiet: a mic or camera is in use', enabled: false }] : []),
+      ...(this.updater.available ? [{ label: `⬆️ Update to v${this.updater.available.version}`, click: () => this.installUpdate() }] : []),
       { type: 'separator' },
       ...agentItems,
       { type: 'separator' },
-      {
-        label: this.focus.phase === 'off' ? 'Focus timer' : this.focus.label,
-        submenu: [
-          ...[15, 25, 50].map((m) => ({ label: `Focus for ${m} minutes`, click: () => this.startFocus(m) })),
-          ...(this.focus.phase !== 'off' ? [{ label: 'Stop timer', click: () => this.focus.stop() }] : []),
-          { type: 'separator' },
-          check('Block distracting sites', 'blockDuringFocus', true),
-          check('Strict: close blocked tabs', 'strictBlock', false),
-          { label: `Edit blocklist… (${this.blocklist.length})`, click: () => this.openDialog('blocklist.html', {}, { width: 420, height: 440 }) },
-        ],
-      },
+      { label: 'Open DeskPet…', accelerator: 'CmdOrCtrl+,', click: () => this.openPanel() },
+      this.focus.phase === 'off'
+        ? { label: '🍅 Focus for 25 minutes', click: () => this.startFocus(25) }
+        : { label: `⏹ Stop focus (${this.focus.label})`, click: () => this.focus.stop() },
+      { label: `Rewards (${this.stats.rankTitle})…`, click: () => this.openPanel('rewards') },
       { label: `Bring ${this.config.petName} here`, click: () => this.bringHere() },
-      { label: 'Rename…', click: () => this.openDialog('rename.html', {}, { width: 360, height: 270 }) },
-      { label: `Rewards (${this.stats.rankTitle})`, submenu: this.rewardsMenu() },
-      {
-        label: `Size (${pct}%)`,
-        submenu: [
-          { label: this.resizing ? 'Finish resizing' : 'Resize…', click: () => this.toggleResizing() },
-          { type: 'separator' },
-          ...[50, 75, 100, 125, 150, 200, 300].map((p) => ({
-            label: `${p}%`, type: 'checkbox', checked: pct === p,
-            click: () => { this.setScale(p / 100); this.settings.set(this.scaleKey, this.scale); },
-          })),
-        ],
-      },
-      {
-        label: 'Thought bubble',
-        submenu: [['Large', 'large'], ['Small', 'small'], ['Off', 'off']].map(([label, value]) => ({
-          label, type: 'checkbox', checked: this.thoughtBubble === value, click: () => { this.thoughtBubble = value; },
-        })),
-      },
-      { label: this.themeHex ? `Theme color (${this.themeHex})…` : 'Theme color…', click: () => this.chooseTheme() },
-      {
-        label: 'Sprites',
-        submenu: [
-          { label: 'Built-in cat', type: 'checkbox', checked: !this.spritePackName, click: () => this.chooseSprites('') },
-          ...packs.map((p) => ({ label: p, type: 'checkbox', checked: this.spritePackName === p, click: () => this.chooseSprites(p) })),
-          { type: 'separator' },
-          { label: 'Import pack…', click: () => this.importPackDialog() },
-          ...(this.spritePackName ? [{ label: `Export ${this.spritePackName}…`, click: () => this.exportPackDialog() }] : []),
-          { label: 'Preview poses', click: () => this.previewPoses() },
-          { label: 'Reload sprites', click: () => this.loadSprites(true) },
-          { label: 'Open sprites folder', click: () => shell.openPath(paths.sprites) },
-        ],
-      },
-      {
-        label: 'Behavior',
-        submenu: [
-          check('Wander around', 'wander', true, () => { this.walkTarget = null; }),
-          check('Gravity', 'gravity', true),
-          check('Walk on windows', 'walkOnWindows', true),
-          check('Quiet during calls', 'quietInCalls', true),
-          { type: 'separator' },
-          check('Notifications', 'notifications', true),
-          check('Sounds', 'sounds', true),
-        ],
-      },
-      {
-        label: 'Agents',
-        submenu: [
-          ...(isWindows ? [{ label: 'Claude Code hooks', type: 'checkbox', checked: hooks.installed(), click: () => this.toggleHooks(!hooks.installed()) }] : []),
-          ...(isWindows ? [{ label: 'Kiro CLI hooks', type: 'checkbox', checked: this.kiroHooksOn, click: () => this.setKiroHooks(!this.kiroHooksOn) }] : []),
-          { label: 'Codex: automatic (reads its session log)', enabled: false },
-        ],
-      },
-      { type: 'separator' },
       { label: this.win.isVisible() ? `Hide ${this.config.petName}` : `Show ${this.config.petName}`, click: () => this.toggleVisible() },
-      { label: 'Setup…', click: () => this.openWizard() },
-      {
-        label: 'Move to another device',
-        submenu: [
-          { label: 'Export transfer key…', click: () => this.openDialog('transfer.html', { tab: 'export' }) },
-          { label: 'Import transfer key…', click: () => this.openDialog('transfer.html', { tab: 'import' }) },
-        ],
-      },
-      this.updater.available
-        ? { label: `Update to v${this.updater.available.version}…`, click: () => this.installUpdate() }
-        : { label: 'Check for updates…', click: () => this.checkForUpdates(true) },
-      check('Automatic updates', 'autoUpdate', true),
+      { type: 'separator' },
+      { label: 'Quit DeskPet', click: () => quitApp() },
     ];
-    if (isWindows) {
-      template.push({ label: 'Start with Windows', type: 'checkbox', checked: app.getLoginItemSettings().openAtLogin, click: (item) => app.setLoginItemSettings({ openAtLogin: item.checked }) });
-    }
-    template.push({ type: 'separator' }, { label: 'Quit DeskPet', click: () => quitApp() });
     return Menu.buildFromTemplate(template);
+  }
+
+  // MARK: Control center (shared HTML in src/panel, also used by the macOS app)
+
+  openPanel(page) {
+    if (this.panel && !this.panel.isDestroyed()) {
+      this.panel.show();
+      this.panel.focus();
+      if (page) this.panel.webContents.executeJavaScript(`window.__panelShow(${JSON.stringify(page)})`);
+      return;
+    }
+    this.panelPage = page || null;
+    this.panel = new BrowserWindow({
+      width: 940, height: 640, resizable: false, maximizable: false, fullscreenable: false, frame: false, transparent: true,
+      backgroundColor: '#00000000', show: false, title: 'DeskPet', icon: path.join(__dirname, '..', 'assets', 'icon.png'),
+      webPreferences: { preload: path.join(__dirname, 'preload-panel.js') },
+    });
+    this.panel.loadFile(path.join(__dirname, 'panel', 'index.html'));
+    this.panel.once('ready-to-show', () => this.panel.show());
+    this.panel.on('closed', () => { this.panel = null; });
+  }
+
+  panelState() {
+    const t = now();
+    const st = this.stats;
+    const loginSupported = isWindows || process.platform === 'darwin';
+    const card = this.cardModel(t);
+    const next = REWARDS.find((r) => r.level > st.level);
+    return {
+      platform: isWindows ? 'windows' : process.platform === 'darwin' ? 'mac' : 'other', chrome: 'custom', version: app.getVersion(),
+      openPage: this.panelPage, names: { petName: this.config.petName, ownerName: this.config.ownerName },
+      rank: {
+        title: st.rankTitle, level: st.level, progress: st.progress, xpToNext: st.xpToNext, atMax: st.atMax, prestige: st.prestige,
+        canPrestige: st.canPrestige, prestigeTitle: PRESTIGE.title(st.prestige), nextPrestigeTitle: PRESTIGE.title(st.prestige + 1),
+        emblem: PRESTIGE.emblem(st.prestige), nextEmblem: PRESTIGE.emblem(st.prestige + 1) || '⭐',
+        xpToPrestige: Math.max(0, Stats.xpNeeded(100) - st.levelXP),
+      },
+      nextReward: st.canPrestige ? '⭐ Ready to prestige!' : st.prestige ? '' : next ? `Next reward: ${next.title} at Lv ${next.level}` : '',
+      slots: SLOTS.map((x) => ({ id: x.id, title: x.title })),
+      rewards: REWARDS.map((r) => ({ id: r.id, title: r.title, level: r.level, slot: r.slot, value: r.value, unlocked: this.isUnlocked(r), worn: this.isUnlocked(r) && this.wearing(r) })),
+      today: this.stats.today,
+      sessions: card.rows.map((r, i) => ({ ...r, name: r.title.split(' · ')[0], project: r.title.split(' · ')[1] || '', precise: !r.detail.endsWith('(guessed)'), detail: r.detail.replace(' (guessed)', ''), id: i })),
+      focus: { phase: this.focus.phase, label: this.focus.label, remaining: this.focus.remaining, total: (this.focus.phase === 'rest' ? Math.max(5, Math.round(this.focus.minutes / 5)) : this.focus.minutes) * 60, minutes: this.focus.minutes },
+      blocklist: this.blocklist, blockDuringFocus: this.blockDuringFocus, strictBlock: this.strictBlock,
+      look: { packs: listPacks(), spritePack: this.spritePackName, themeColor: this.themeHex, thoughtBubble: this.thoughtBubble, scale: this.scale },
+      toggles: {
+        wander: this.wander, gravity: this.gravity, walkOnWindows: this.walkOnWindows, quietInCalls: this.quietInCalls,
+        notifications: this.notificationsOn, sounds: this.soundsOn, autoUpdate: this.autoUpdate,
+        startAtLogin: loginSupported && app.getLoginItemSettings().openAtLogin, startAtLoginSupported: loginSupported,
+        showPrestigeBadge: this.settings.get('showPrestigeBadge', true),
+      },
+      hooks: { claudeInstalled: hooks.installed(), claudeLive: hooks.installed() && hooksLive(), kiroInstalled: this.kiroHooksOn && kiroHooks.installed(), kiroSupported: isWindows },
+      update: { available: this.updater.available ? this.updater.available.version : null },
+      preview: (() => { const p = this.pose(t); return { hat: p.hat, trail: p.trail, aura: p.aura, companion: p.companion, golden: p.golden, prestige: p.prestige }; })(),
+    };
+  }
+
+  async panelCall(action, payload) {
+    switch (action) {
+      case 'state': { const st = this.panelState(); this.panelPage = null; return st; }
+      case 'set':
+        switch (payload.key) {
+          case 'scale': this.setScale(Math.min(4, Math.max(0.25, Number(payload.value) || 1))); this.settings.set(this.scaleKey, this.scale); break;
+          case 'blocklist': this.settings.set('blocklist', payload.value ? parseBlocklist(payload.value.join('\n')) : BLOCK_DEFAULTS); break;
+          case 'spritePack': this.chooseSprites(payload.value || ''); break;
+          case 'startAtLogin': app.setLoginItemSettings({ openAtLogin: !!payload.value }); break;
+          default:
+            this.settings.set(payload.key, payload.value);
+            if (payload.key === 'sounds' && payload.value) this.playSound('pet');
+            if (payload.key === 'wander') this.walkTarget = null;
+        }
+        return { ok: true };
+      case 'wear': {
+        const r = REWARDS.find((x) => x.id === payload.id);
+        if (r && this.isUnlocked(r)) this.settings.set(r.key, r.slot === 'golden' ? !this.wearing(r) : (this.wearing(r) ? '' : r.value));
+        return { ok: true };
+      }
+      case 'prestige': this.performPrestige(); return { ok: true };
+      case 'focusStart': this.startFocus(payload.minutes || 25); return { ok: true };
+      case 'focusStop': this.focus.stop(); return { ok: true };
+      case 'jump': return { ok: await this.jump(payload.pid) };
+      case 'hooks': this.toggleHooks(!!payload.install); return { ok: true };
+      case 'kiro': this.setKiroHooks(!!payload.install); return { ok: true };
+      case 'rename': {
+        const pet = String(payload.petName || '').trim().slice(0, 20) || this.config.petName;
+        const owner = String(payload.ownerName || '').trim().slice(0, 24) || this.config.ownerName;
+        this.applyNames(pet, owner);
+        return { ok: true };
+      }
+      case 'transferExport': return this.dialogCall('transfer-export');
+      case 'copy': return this.dialogCall('copy', payload);
+      case 'saveKey': return this.dialogCall('save-key', payload);
+      case 'openKey': return this.dialogCall('open-key');
+      case 'transferPreview': return this.dialogCall('transfer-preview', payload);
+      case 'transferImport':
+        try { return { ok: true, note: this.applyTransfer(transferKey.decode(payload.key)) }; } catch (e) { return { ok: false, error: e.message }; }
+      case 'pack': return this.wizardCall('pack', payload);
+      case 'openSprites': shell.openPath(paths.sprites); return { ok: true };
+      case 'importPack': await this.importPackDialog(); return { ok: true };
+      case 'exportPack': await this.exportPackDialog(); return { ok: true };
+      case 'previewPoses': this.previewPoses(); return { ok: true };
+      case 'bringHere': this.bringHere(); return { ok: true };
+      case 'resize': this.toggleResizing(); return { ok: true };
+      case 'checkUpdates': await this.checkForUpdates(true); return { ok: true };
+      case 'installUpdate': this.installUpdate(); return { ok: true };
+      case 'openWizard': this.openWizard(); return { ok: true };
+      case 'quit': quitApp(); return { ok: true };
+      case 'close': if (this.panel && !this.panel.isDestroyed()) this.panel.close(); return { ok: true };
+      case 'log': console.error('panel:', payload.message); return { ok: true };
+      default: return null;
+    }
   }
 
   // MARK: Attention, sounds, stats
@@ -947,6 +979,12 @@ class Pet {
         : `${this.config.petName} goes back to level 1 and earns a ${PRESTIGE.emblem(next)} prestige badge. Every reward stays unlocked.`,
     });
     if (response !== 0) return;
+    this.performPrestige();
+  }
+
+  performPrestige() {
+    if (!this.stats.canPrestige) return;
+    const next = this.stats.prestige + 1;
     this.stats.doPrestige();
     this.transient = { mood: 'done', until: now() + 4 };
     this.playSound('level-up');
@@ -1539,6 +1577,7 @@ if (process.argv.includes('--snapshot')) {
     ipcMain.on('theme-result', (_e, result) => pet.onThemeResult(result));
     ipcMain.handle('wizard', (_e, action, payload) => pet.wizardCall(action, payload));
     ipcMain.handle('dialog', (_e, action, payload) => pet.dialogCall(action, payload));
+    ipcMain.handle('panel', (_e, action, payload) => pet.panelCall(action, payload));
     ipcMain.on('drop-files', (_e, files) => pet.onDropFiles(files));
     ipcMain.on('drag-hover', () => { pet.transient = { mood: 'startled', until: now() + 1 }; pet.say("ooh, what's that? 👀", 1.5); });
     ipcMain.on('card-size', (_e, size) => { pet.cardSize = size; if (pet.card.isVisible()) pet.positionCard(); });
@@ -1560,6 +1599,23 @@ if (process.argv.includes('--snapshot')) {
         }
         console.log('wizard screenshots written');
         app.quit();
+      });
+    }
+    // `--panel-snapshot`: screenshot every control center page to test-output/, then quit.
+    if (process.argv.includes('--panel-snapshot')) {
+      pet.openPanel();
+      pet.panel.webContents.once('did-finish-load', async () => {
+        const out = path.join(__dirname, '..', 'test-output');
+        fs.mkdirSync(out, { recursive: true });
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        await wait(1500);
+        for (const page of ['home', 'rewards', 'look', 'focus', 'agents', 'behavior', 'account', 'about']) {
+          await pet.panel.webContents.executeJavaScript(`window.__panelShow('${page}')`);
+          await wait(page === 'look' || page === 'rewards' ? 1800 : 900);
+          fs.writeFileSync(path.join(out, `panel-${page}.png`), (await pet.panel.webContents.capturePage()).toPNG());
+        }
+        console.log('panel screenshots written');
+        app.exit(0);
       });
     }
     // `--card-snapshot`: render the hover card to test-output/card.png, then quit.

@@ -60,7 +60,7 @@ npm run package:win                # build dist/DeskPet-win32-x64 (no Windows ma
 | Click / drag | purrs with hearts / dangles from the scruff |
 | Throw (flick and release) | flies, spins, and bounces off the screen edges; dizzy after a wild throw. With Gravity off it drifts and ricochets instead of falling |
 
-Right-click Mochi or use the 🐾 menu (system tray on Windows) for every option.
+**Control center:** 🐾 → **Open DeskPet…** (⌘, / Ctrl+,) has everything, in the same style as setup: Home (your pet, rank, today's stats, live agents), Rewards (live previews of each reward on your pet, prestige), Look (sprite packs, theme, thought bubble, size), Focus (timer and blocklist), Agents (connections and live sessions), Behavior, Account (rename, transfer keys), and About (updates). The 🐾 menu and right-clicking the pet give a quick menu: status, agents, quick focus, and Open DeskPet.
 
 ### Agents
 - **Claude Code:** exact states through hooks (🐾 → Agents → Claude Code hooks, or the setup wizard).

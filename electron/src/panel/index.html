@@ -1,0 +1,192 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'">
+  <title>DeskPet</title>
+  <link rel="stylesheet" href="../wizard/wizard.css">
+  <link rel="stylesheet" href="panel.css">
+</head>
+<body>
+  <div class="window panel-window">
+    <div class="glow g1"></div><div class="glow g2"></div><div class="glow g3"></div>
+    <header class="titlebar">
+      <div class="brand"><span class="paw">🐾</span> DeskPet <span class="version" id="version"></span></div>
+      <button class="close" id="close" title="Close">✕</button>
+    </header>
+
+    <div class="layout">
+      <nav class="sidebar" id="sidebar">
+        <button data-page="home" class="on"><span>🏠</span>Home</button>
+        <button data-page="rewards"><span>🏆</span>Rewards</button>
+        <button data-page="look"><span>🎨</span>Look</button>
+        <button data-page="focus"><span>🍅</span>Focus</button>
+        <button data-page="agents"><span>🤖</span>Agents</button>
+        <button data-page="behavior"><span>⚙️</span>Behavior</button>
+        <button data-page="account"><span>👤</span>Account</button>
+        <button data-page="about"><span>ℹ️</span>About</button>
+        <div class="sidebar-pet"><canvas id="mini-pet"></canvas><div id="mini-rank"></div></div>
+      </nav>
+
+      <main class="content" id="content">
+        <!-- Home -->
+        <section class="page on" data-page="home">
+          <div class="hero card">
+            <div class="hero-pet"><canvas id="hero-pet"></canvas></div>
+            <div class="hero-info">
+              <p class="eyebrow" id="hero-rank">Lv 1</p>
+              <h1 id="hero-name">Mochi</h1>
+              <div class="xp"><div class="xp-bar"><div id="hero-xp-fill"></div></div><span id="hero-xp-text"></span></div>
+              <div class="hero-next" id="hero-next"></div>
+              <div class="actions">
+                <button class="primary" id="home-focus">🍅 Focus 25 min</button>
+                <button class="ghost-btn" id="home-bring">📍 Bring here</button>
+                <button class="ghost-btn" id="home-poses">🎭 Preview poses</button>
+              </div>
+            </div>
+          </div>
+          <h3>Today</h3>
+          <div class="tiles" id="today"></div>
+          <h3>Agents right now</h3>
+          <div class="sessions" id="home-sessions"></div>
+        </section>
+
+        <!-- Rewards -->
+        <section class="page" data-page="rewards">
+          <div class="card rank-card">
+            <div>
+              <p class="eyebrow" id="rw-rank">Lv 1</p>
+              <h2 id="rw-title">Rewards</h2>
+              <div class="xp"><div class="xp-bar"><div id="rw-xp-fill"></div></div><span id="rw-xp-text"></span></div>
+              <p class="sub" id="rw-hint"></p>
+            </div>
+            <div class="prestige-box">
+              <div class="emblem" id="rw-emblem"></div>
+              <button class="primary" id="prestige-btn" disabled>⭐ Prestige</button>
+              <label class="mini-toggle"><input type="checkbox" id="badge-toggle"> Show badge</label>
+            </div>
+          </div>
+          <div id="reward-slots"></div>
+        </section>
+
+        <!-- Look -->
+        <section class="page" data-page="look">
+          <h2>Look</h2>
+          <h3>Character</h3>
+          <div class="packs" id="look-packs"></div>
+          <div class="actions">
+            <button class="ghost-btn" id="pack-import">📦 Import pack…</button>
+            <button class="ghost-btn" id="pack-export">⬆️ Export current pack…</button>
+            <button class="ghost-btn" id="pack-folder">📁 Open sprites folder</button>
+          </div>
+          <h3>Theme</h3>
+          <div class="swatches" id="look-swatches"></div>
+          <h3>Thought bubble</h3>
+          <div class="segmented" id="look-bubble">
+            <button data-value="large">Large</button><button data-value="small">Small</button><button data-value="off">Off</button>
+          </div>
+          <h3>Size <span class="muted" id="size-label">100%</span></h3>
+          <div class="row-inline">
+            <input type="range" id="size" min="25" max="400" step="5">
+            <button class="ghost-btn" id="size-resize">↔️ Resize on screen</button>
+            <button class="ghost-btn" id="size-reset">Reset</button>
+          </div>
+        </section>
+
+        <!-- Focus -->
+        <section class="page" data-page="focus">
+          <h2>Focus</h2>
+          <div class="card focus-card">
+            <div class="ring-wrap">
+              <svg viewBox="0 0 120 120" class="ring"><circle cx="60" cy="60" r="52" class="ring-bg"/><circle cx="60" cy="60" r="52" class="ring-fg" id="ring-fg"/></svg>
+              <div class="ring-text"><div id="focus-clock">25:00</div><div class="muted" id="focus-phase">Ready</div></div>
+            </div>
+            <div class="focus-controls">
+              <div class="segmented" id="focus-length"><button data-min="15">15 min</button><button data-min="25" class="on">25 min</button><button data-min="50">50 min</button></div>
+              <div class="actions"><button class="primary" id="focus-start">Start focus</button><button class="ghost-btn" id="focus-stop">Stop</button></div>
+              <p class="sub">A break follows each session. Focus sessions are worth 15 XP.</p>
+            </div>
+          </div>
+          <h3>Blocklist</h3>
+          <div class="card">
+            <div class="toggle-row"><span>Block distracting sites during focus</span><div class="switch-btn" data-key="blockDuringFocus"></div></div>
+            <div class="toggle-row"><span>Strict: close blocked tabs</span><div class="switch-btn" data-key="strictBlock"></div></div>
+            <div class="chips" id="block-chips"></div>
+            <div class="row-inline"><input type="text" id="block-add" placeholder="Add a site, e.g. news.ycombinator.com" spellcheck="false"><button class="ghost-btn" id="block-add-btn">Add</button><button class="ghost-btn" id="block-reset">Reset to defaults</button></div>
+            <p class="sub" id="block-note"></p>
+          </div>
+        </section>
+
+        <!-- Agents -->
+        <section class="page" data-page="agents">
+          <h2>Agents</h2>
+          <div class="providers" id="agent-providers"></div>
+          <h3>Live sessions</h3>
+          <div class="sessions" id="agent-sessions"></div>
+        </section>
+
+        <!-- Behavior -->
+        <section class="page" data-page="behavior">
+          <h2>Behavior</h2>
+          <div class="toggles" id="behavior-toggles"></div>
+        </section>
+
+        <!-- Account -->
+        <section class="page" data-page="account">
+          <h2>Account</h2>
+          <div class="card">
+            <h3 class="card-title">Names</h3>
+            <div class="row-inline">
+              <label class="field small"><span>Pet's name</span><input id="acc-pet" maxlength="20" spellcheck="false"></label>
+              <label class="field small"><span>Your name</span><input id="acc-owner" maxlength="24" spellcheck="false"></label>
+              <button class="primary" id="acc-save">Save</button>
+            </div>
+          </div>
+          <div class="card">
+            <h3 class="card-title">Move to another device</h3>
+            <p class="sub">One code with your names, level, prestige, stats, look, and settings. Works between Mac and Windows. Sprite pack images aren't included: export packs as zips.</p>
+            <textarea id="acc-key" rows="3" readonly></textarea>
+            <div class="actions"><button class="primary" id="acc-copy">Copy transfer key</button><button class="ghost-btn" id="acc-save-key">Save as file…</button></div>
+            <h3 class="card-title spaced">Import from another device</h3>
+            <textarea id="acc-import" rows="3" spellcheck="false" placeholder="Paste a DESKPET-1:… key"></textarea>
+            <div class="actions"><button class="primary" id="acc-import-btn">Import</button><button class="ghost-btn" id="acc-open-key">Open file…</button><span class="note" id="acc-note"></span></div>
+          </div>
+        </section>
+
+        <!-- About -->
+        <section class="page" data-page="about">
+          <h2>About</h2>
+          <div class="card about">
+            <canvas id="about-pet"></canvas>
+            <div>
+              <h3 class="card-title">DeskPet <span id="about-version"></span></h3>
+              <p class="sub" id="about-update">Checking for updates…</p>
+              <div class="actions">
+                <button class="primary" id="about-update-btn">Check for updates</button>
+                <button class="ghost-btn" id="about-wizard">Run setup again</button>
+                <button class="ghost-btn" id="about-quit">Quit DeskPet</button>
+              </div>
+              <p class="sub">Made with 🐾. Source and releases: github.com/jacobsekai/deskpet</p>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="modal" id="modal" hidden>
+      <div class="modal-card">
+        <div class="emblem big" id="modal-emblem">⭐</div>
+        <h2 id="modal-title">Prestige?</h2>
+        <p class="sub" id="modal-text"></p>
+        <div class="actions center"><button class="ghost-btn" id="modal-cancel">Not yet</button><button class="primary" id="modal-ok">Prestige</button></div>
+      </div>
+    </div>
+    <canvas id="confetti"></canvas>
+  </div>
+
+  <script src="../renderer/color.js"></script>
+  <script src="../renderer/pet.js"></script>
+  <script src="../renderer/sprites.js"></script>
+  <script src="panel.js"></script>
+</body>
+</html>

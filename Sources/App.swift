@@ -71,6 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     private let agents = AgentMonitor()
     private var config = Config.load()
     private var wizard: WizardController?
+    private var controlCenter: WizardController?
     private let defaults = UserDefaults.standard
 
     private var lastTick = CACurrentMediaTime()
@@ -190,7 +191,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         setupStatusItem()
         observeWorkspace()
         accessory = Self.accessory(for: AppCategory(NSWorkspace.shared.frontmostApplication))
-        if CommandLine.arguments.contains("wizard-snapshot") {
+        if CommandLine.arguments.contains("panel-snapshot") {
+            openControlCenter(page: nil)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { self.controlCenter?.snapshotPanel() }
+        } else if CommandLine.arguments.contains("wizard-snapshot") {
             openWizard()
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.wizard?.snapshotSteps() }
         } else if defaults.bool(forKey: "setupComplete") {
@@ -876,6 +880,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         alert.addButton(withTitle: "Not yet")
         NSApp.activate(ignoringOtherApps: true)
         guard alert.runModal() == .alertFirstButtonReturn else { return }
+        performPrestige()
+    }
+
+    private func performPrestige() {
+        guard stats.canPrestige else { return }
+        let next = stats.prestige + 1
         stats.doPrestige()
         transient = (.done, CACurrentMediaTime() + 4)
         sounds.play(.levelUp)
@@ -1281,111 +1291,224 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
 
     func menuNeedsUpdate(_ menu: NSMenu) { fill(menu) }
 
+    /// The quick menu (menu bar and right-click). Everything else lives in the control center.
     private func fill(_ menu: NSMenu) {
         menu.removeAllItems()
         menu.addItem(disabled("\(config.petName) · \(stats.rankTitle) — \(String(describing: mood))"))
         menu.addItem(disabled("Today: \(todaySummary())"))
         if quiet { menu.addItem(disabled("🤫 Quiet: a mic or camera is in use")) }
+        if let update = updater.available { menu.addItem(item("⬆️ Update to v\(update.version)", #selector(installUpdate))) }
         menu.addItem(.separator())
         if sessions.isEmpty {
             menu.addItem(disabled("No AI agents running"))
         } else {
             for s in sessions.sorted(by: { $0.activity.rawValue > $1.activity.rawValue }) {
                 let project = s.project.isEmpty ? "" : " (\(s.project))"
-                let source = s.precise ? "" : " · guessed from CPU"
-                let i = item("\(s.activity == .idle ? "○" : "●") \(s.name)\(project) — \(s.detail)\(source)", #selector(jumpToSession(_:)))
+                let i = item("\(s.activity == .idle ? "○" : "●") \(s.name)\(project) — \(s.detail)", #selector(jumpToSession(_:)))
                 i.tag = Int(s.pid)
                 i.isEnabled = s.pid > 0
-                i.toolTip = "Jump to this session"
                 menu.addItem(i)
             }
         }
         menu.addItem(.separator())
-
-        let focusMenu = NSMenu()
-        for minutes in [15, 25, 50] {
-            let i = item("Focus for \(minutes) minutes", #selector(startFocus(_:)))
-            i.tag = minutes
-            focusMenu.addItem(i)
-        }
-        if focus.phase != .off { focusMenu.addItem(item("Stop timer", #selector(stopFocus))) }
-        focusMenu.addItem(.separator())
-        focusMenu.addItem(item("Block distracting sites", #selector(toggleBlockDuringFocus), checked: blockDuringFocus))
-        focusMenu.addItem(item("Strict: close blocked tabs", #selector(toggleStrictBlock), checked: strictBlock))
-        focusMenu.addItem(item("Edit blocklist… (\(blocklist.count))", #selector(editBlocklist)))
-        menu.addItem(submenu(focus.phase == .off ? "Focus timer" : focus.label, focusMenu))
-        menu.addItem(item("Bring \(config.petName) here", #selector(bringHere)))
-        menu.addItem(item("Rename…", #selector(rename)))
-        menu.addItem(submenu("Rewards (\(stats.rankTitle))", rewardsMenu()))
-
-        let sizeMenu = NSMenu()
-        sizeMenu.addItem(item(petView.resizing ? "Finish resizing" : "Resize…", #selector(toggleResizing)))
-        sizeMenu.addItem(.separator())
-        for percent in [50, 75, 100, 125, 150, 200, 300] {
-            let i = item("\(percent)%", #selector(chooseSize(_:)), checked: Int((petView.scale * 100).rounded()) == percent)
-            i.tag = percent
-            sizeMenu.addItem(i)
-        }
-        menu.addItem(submenu("Size (\(Int((petView.scale * 100).rounded()))%)", sizeMenu))
-
-        let bubbleMenu = NSMenu()
-        for (title, size) in [("Large", ThoughtBubbleSize.large), ("Small", .small), ("Off", .off)] {
-            let i = item(title, #selector(chooseThoughtBubble(_:)), checked: thoughtBubble == size)
-            i.representedObject = size.rawValue
-            bubbleMenu.addItem(i)
-        }
-        menu.addItem(submenu("Thought bubble", bubbleMenu))
-        let themeTitle = petView.theme.accent.map { "Theme color (\($0.hexString))…" } ?? "Theme color…"
-        menu.addItem(item(themeTitle, #selector(chooseTheme)))
-
-        let spritesMenu = NSMenu()
-        let builtIn = item("Built-in cat", #selector(chooseSprites(_:)), checked: spritePackName.isEmpty)
-        builtIn.representedObject = ""
-        spritesMenu.addItem(builtIn)
-        for pack in SpritePack.available() {
-            let i = item(pack, #selector(chooseSprites(_:)), checked: spritePackName == pack)
-            i.representedObject = pack
-            spritesMenu.addItem(i)
-        }
-        spritesMenu.addItem(.separator())
-        spritesMenu.addItem(item("Import pack…", #selector(importPack)))
-        if !spritePackName.isEmpty { spritesMenu.addItem(item("Export \(spritePackName)…", #selector(exportPack))) }
-        spritesMenu.addItem(item("Preview poses", #selector(previewPoses)))
-        spritesMenu.addItem(item("Reload sprites", #selector(reloadSprites)))
-        spritesMenu.addItem(item("Open sprites folder", #selector(openSpritesFolder)))
-        menu.addItem(submenu("Sprites", spritesMenu))
-
-        let behaviorMenu = NSMenu()
-        behaviorMenu.addItem(item("Wander around", #selector(toggleWander), checked: wander))
-        behaviorMenu.addItem(item("Gravity", #selector(toggleGravity), checked: gravity))
-        behaviorMenu.addItem(item("Walk on windows", #selector(toggleWalkOnWindows), checked: walkOnWindows))
-        behaviorMenu.addItem(item("Quiet during calls", #selector(toggleQuietInCalls), checked: quietInCalls))
-        behaviorMenu.addItem(.separator())
-        behaviorMenu.addItem(item("Notifications", #selector(toggleNotifications), checked: notificationsOn))
-        behaviorMenu.addItem(item("Sounds", #selector(toggleSounds), checked: soundsOn))
-        menu.addItem(submenu("Behavior", behaviorMenu))
-
-        let agentsMenu = NSMenu()
-        agentsMenu.addItem(item("Claude Code hooks", #selector(toggleClaudeHooks), checked: HookInstaller.installed()))
-        agentsMenu.addItem(item("Kiro CLI hooks", #selector(toggleKiroHooks), checked: kiroHooksOn))
-        agentsMenu.addItem(disabled("Codex: automatic (reads its session log)"))
-        menu.addItem(submenu("Agents", agentsMenu))
-
-        menu.addItem(.separator())
-        menu.addItem(item(panel.isVisible ? "Hide \(config.petName)" : "Show \(config.petName)", #selector(toggleVisible)))
-        menu.addItem(item("Setup…", #selector(openWizard)))
-        let transferMenu = NSMenu()
-        transferMenu.addItem(item("Export transfer key…", #selector(exportTransferKey)))
-        transferMenu.addItem(item("Import transfer key…", #selector(importTransferKey)))
-        menu.addItem(submenu("Move to another device", transferMenu))
-        if let update = updater.available {
-            menu.addItem(item("Update to v\(update.version)…", #selector(installUpdate)))
+        menu.addItem(item("Open DeskPet…", #selector(openControlCenterAction), key: ","))
+        if focus.phase == .off {
+            let f = item("🍅 Focus for 25 minutes", #selector(startFocus(_:)))
+            f.tag = 25
+            menu.addItem(f)
         } else {
-            menu.addItem(item("Check for updates…", #selector(manualUpdateCheck)))
+            menu.addItem(item("⏹ Stop focus (\(focus.label))", #selector(stopFocus)))
         }
-        menu.addItem(item("Automatic updates", #selector(toggleAutoUpdate), checked: autoUpdate))
+        menu.addItem(item("Rewards (\(stats.rankTitle))…", #selector(openRewardsPage)))
+        menu.addItem(item("Bring \(config.petName) here", #selector(bringHere)))
+        menu.addItem(item(panel.isVisible ? "Hide \(config.petName)" : "Show \(config.petName)", #selector(toggleVisible)))
         menu.addItem(.separator())
         menu.addItem(item("Quit DeskPet", #selector(quit), key: "q"))
+    }
+
+    // MARK: - Control center (the shared HTML in electron/src/panel)
+
+    @objc private func openControlCenterAction() { openControlCenter(page: nil) }
+    @objc private func openRewardsPage() { openControlCenter(page: "rewards") }
+
+    private func openControlCenter(page: String?) {
+        if let controlCenter {
+            controlCenter.show()
+            if let page { controlCenter.run("window.__panelShow('\(page)')") }
+            return
+        }
+        controlCenterPage = page
+        let c = WizardController(page: "panel/index.html", size: NSSize(width: 940, height: 640), title: "DeskPet") { [weak self] action, payload in
+            self?.panelCall(action, payload)
+        }
+        c.onClose = { [weak self] in self?.controlCenter = nil }
+        controlCenter = c
+        c.show()
+    }
+
+    private var controlCenterPage: String?
+
+    private func panelState() -> [String: Any] {
+        let now = CACurrentMediaTime()
+        refreshHoverModel(now)
+        let rows: [[String: Any]] = sessions.sorted { $0.activity.rawValue > $1.activity.rawValue }.map { s in
+            let secs = Int(now - (busySince[s.id] ?? now))
+            let usage = s.isCodex ? CodexLog.state(path: s.logPath, procBusy: true)?.tokens : transcriptTokens.usage(s.logPath)
+            return [
+                "name": s.name, "project": s.project, "detail": s.detail, "precise": s.precise, "pid": Int(s.pid),
+                "color": Self.color(for: s.activity).hexString,
+                "elapsed": s.activity == .idle ? "idle" : secs >= 60 ? "\(secs / 60)m" : "\(secs)s",
+                "tokens": usage.map { "\(Self.compact($0.output)) out · \(Self.compact($0.context)) context" } ?? "",
+            ]
+        }
+        let d = stats.today
+        let pose = self.pose(now)
+        let state: [String: Any] = [
+            "platform": "mac", "chrome": "native", "version": Updater.currentVersion,
+            "openPage": controlCenterPage as Any,
+            "names": ["petName": config.petName, "ownerName": config.ownerName],
+            "rank": [
+                "title": stats.rankTitle, "level": stats.level, "progress": stats.progress, "xpToNext": stats.xpToNext,
+                "atMax": stats.atMax, "prestige": stats.prestige, "canPrestige": stats.canPrestige,
+                "prestigeTitle": Prestige.title(stats.prestige), "nextPrestigeTitle": Prestige.title(stats.prestige + 1),
+                "emblem": Prestige.emblem(stats.prestige), "nextEmblem": Prestige.emblem(stats.prestige + 1).isEmpty ? "⭐" : Prestige.emblem(stats.prestige + 1),
+                "xpToPrestige": max(0, Stats.xpNeeded(Prestige.levelCap) - stats.levelXP),
+            ],
+            "nextReward": hoverCard.model.nextReward,
+            "slots": Reward.Slot.allCases.map { ["id": $0.rawValue, "title": $0.title] },
+            "rewards": Reward.allCases.map { r in
+                ["id": r.rawValue, "title": r.title, "level": r.level, "slot": r.slot.rawValue, "value": r.value,
+                 "unlocked": isUnlocked(r), "worn": isUnlocked(r) && wearing(r)] as [String: Any]
+            },
+            "today": ["activeMinutes": d.activeMinutes, "agentMinutes": d.agentMinutes, "tasks": d.tasks, "pets": d.pets,
+                      "focusSessions": d.focusSessions, "blocked": d.blocked],
+            "sessions": rows,
+            "focus": ["phase": focus.phase == .off ? "off" : focus.phase == .focus ? "focus" : "rest", "label": focus.label,
+                      "remaining": focus.remaining, "minutes": focus.minutes,
+                      "total": (focus.phase == .rest ? max(5, focus.minutes / 5) : focus.minutes) * 60],
+            "blocklist": blocklist, "blockDuringFocus": blockDuringFocus, "strictBlock": strictBlock,
+            "look": ["packs": SpritePack.available(), "spritePack": spritePackName, "themeColor": themeHex,
+                     "thoughtBubble": thoughtBubble.rawValue, "scale": Double(petView.scale)],
+            "toggles": ["wander": wander, "gravity": gravity, "walkOnWindows": walkOnWindows, "quietInCalls": quietInCalls,
+                        "notifications": notificationsOn, "sounds": soundsOn, "autoUpdate": autoUpdate,
+                        "startAtLogin": SMAppService.mainApp.status == .enabled, "startAtLoginSupported": true,
+                        "showPrestigeBadge": showPrestigeBadge],
+            "hooks": ["claudeInstalled": HookInstaller.installed(), "claudeLive": HookInstaller.installed() && HookInstaller.live(),
+                      "kiroInstalled": kiroHooksOn && KiroHooks.installed(), "kiroSupported": true],
+            "update": ["available": updater.available?.version as Any],
+            "preview": ["hat": pose.hat as Any, "trail": pose.trail as Any, "aura": pose.aura as Any,
+                        "companion": pose.companion as Any, "golden": pose.golden, "prestige": pose.prestige],
+        ]
+        controlCenterPage = nil
+        return state
+    }
+
+    private func panelCall(_ action: String, _ payload: [String: Any]) -> Any? {
+        switch action {
+        case "state":
+            return panelState()
+        case "set":
+            let value = payload["value"]
+            switch payload["key"] as? String ?? "" {
+            case "scale":
+                petResize(to: min(4, max(0.25, CGFloat(value as? Double ?? 1))))
+                petResizeEnded()
+            case "blocklist":
+                blocklist = (value as? [String]).map { Blocklist.parse($0.joined(separator: "\n")) } ?? Blocklist.defaults
+            case "blockDuringFocus": blockDuringFocus = value as? Bool ?? true
+            case "strictBlock": strictBlock = value as? Bool ?? false
+            case "showPrestigeBadge": showPrestigeBadge = value as? Bool ?? true
+            case "wander":
+                wander = value as? Bool ?? true
+                walkTarget = nil
+            case "gravity": gravity = value as? Bool ?? true
+            default:
+                return wizardCall("set", payload)
+            }
+            return ["ok": true]
+        case "wear":
+            if let r = Reward(rawValue: payload["id"] as? String ?? ""), isUnlocked(r) {
+                if r.slot == .golden { defaults.set(!wearing(r), forKey: r.slot.key) } else { defaults.set(wearing(r) ? "" : r.value, forKey: r.slot.key) }
+            }
+            return ["ok": true]
+        case "prestige":
+            performPrestige()
+            return ["ok": true]
+        case "focusStart":
+            let minutes = payload["minutes"] as? Int ?? 25
+            focus.start(minutes: minutes)
+            let blocking = blockDuringFocus && !blocklist.isEmpty ? ", blocking \(blocklist.count) sites" : ""
+            say("focus mode: \(minutes) minutes\(blocking). you got this! 🍅", for: 3.5)
+            return ["ok": true]
+        case "focusStop":
+            focus.stop()
+            return ["ok": true]
+        case "jump":
+            return ["ok": jump(to: pid_t(payload["pid"] as? Int ?? 0))]
+        case "hooks":
+            do {
+                try HookInstaller.setInstalled(payload["install"] as? Bool ?? true)
+                return ["ok": true]
+            } catch {
+                return ["ok": false, "error": error.localizedDescription]
+            }
+        case "kiro":
+            return wizardCall("kiro", payload)
+        case "rename":
+            let pet = (payload["petName"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let owner = (payload["ownerName"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            applyNames(pet: pet.isEmpty ? config.petName : String(pet.prefix(20)), owner: owner.isEmpty ? config.ownerName : String(owner.prefix(24)))
+            return ["ok": true]
+        case "transferExport":
+            return ["key": (try? TransferKey.encode(transferPayload())) ?? ""]
+        case "copy":
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(payload["text"] as? String ?? "", forType: .string)
+            say("transfer key copied! 📋", for: 2.5)
+            return ["ok": true]
+        case "saveKey":
+            let save = NSSavePanel()
+            save.nameFieldStringValue = "DeskPet transfer key.txt"
+            save.allowedContentTypes = [.plainText]
+            guard save.runModal() == .OK, let url = save.url else { return ["ok": false] }
+            try? (payload["key"] as? String ?? "").write(to: url, atomically: true, encoding: .utf8)
+            return ["ok": true]
+        case "openKey":
+            let open = NSOpenPanel()
+            open.allowedContentTypes = [.plainText]
+            guard open.runModal() == .OK, let url = open.url, let key = try? String(contentsOf: url) else { return [:] as [String: Any] }
+            return ["key": key]
+        case "transferPreview":
+            do {
+                return ["ok": true, "summary": TransferKey.summary(try TransferKey.decode(payload["key"] as? String ?? ""))]
+            } catch {
+                return ["ok": false, "error": error.localizedDescription]
+            }
+        case "transferImport":
+            do {
+                let note = try applyTransfer(try TransferKey.decode(payload["key"] as? String ?? ""))
+                return ["ok": true, "note": note]
+            } catch {
+                return ["ok": false, "error": error.localizedDescription]
+            }
+        case "importPack": importPack(); return ["ok": true]
+        case "exportPack": exportPack(); return ["ok": true]
+        case "previewPoses": previewPoses(); return ["ok": true]
+        case "bringHere": bringHere(); return ["ok": true]
+        case "resize": toggleResizing(); return ["ok": true]
+        case "checkUpdates": checkForUpdates(manual: true); return ["ok": true]
+        case "installUpdate": installUpdate(); return ["ok": true]
+        case "openWizard": openWizard(); return ["ok": true]
+        case "quit": NSApp.terminate(nil); return ["ok": true]
+        case "close": controlCenter?.close(); return ["ok": true]
+        case "log":
+            let line = "\(Date()) \(payload["message"] as? String ?? "")\n"
+            let url = DeskPetPaths.root.appendingPathComponent("panel.log")
+            if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(Data(line.utf8)); h.closeFile() } else { try? line.write(to: url, atomically: true, encoding: .utf8) }
+            return ["ok": true]
+        default:
+            return wizardCall(action, payload) // pack, openSprites, …
+        }
     }
 
     private func rewardsMenu() -> NSMenu {
