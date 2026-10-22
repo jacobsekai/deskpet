@@ -155,6 +155,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     private var kiroHooksOn: Bool { get { flag("kiroHooks", false) } set { defaults.set(newValue, forKey: "kiroHooks") } }
     private var blockDuringFocus: Bool { get { flag("blockDuringFocus", true) } set { defaults.set(newValue, forKey: "blockDuringFocus") } }
     private var strictBlock: Bool { get { flag("strictBlock", false) } set { defaults.set(newValue, forKey: "strictBlock") } }
+    // Worn rewards (only ones you've unlocked take effect).
+    private var hat: String { get { defaults.string(forKey: "hat") ?? "" } set { defaults.set(newValue, forKey: "hat") } }
+    private var trail: String { get { defaults.string(forKey: "trail") ?? "" } set { defaults.set(newValue, forKey: "trail") } }
+    private func wearing(_ reward: Reward) -> Bool {
+        let s = reward.setting
+        if let v = s.value as? String { return defaults.string(forKey: s.key) == v }
+        return defaults.bool(forKey: s.key)
+    }
     private var blocklist: [String] {
         get { defaults.stringArray(forKey: "blocklist") ?? Blocklist.defaults }
         set { defaults.set(newValue, forKey: "blocklist") }
@@ -198,6 +206,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         if notificationsOn && defaults.bool(forKey: "setupComplete") { notifier.requestPermission() }
         hoverCard.model.onSelect = { [weak self] pid in self?.jump(to: pid) }
         if kiroHooksOn { KiroHooks.apply(true) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in self?.wearEarnedRewardsOnce() }
         // Last time it may have been standing on a window; drop onto whatever is there now.
         if gravity && panel.frame.minY > petScreen().visibleFrame.minY + 2 { velocity = .zero }
         if autoUpdate { DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in self?.checkForUpdates(manual: false) } }
@@ -443,6 +452,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         }
         if let s = speech, s.until > now { p.bubble = s.text }
         if let popup = xpPopup, now - popup.at < 1.4 { p.xpText = "+\(popup.amount) XP"; p.xpAge = now - popup.at }
+        let level = stats.level
+        for reward in Reward.unlocked(at: level) where wearing(reward) {
+            switch reward.setting.key {
+            case "hat": p.hat = hat
+            case "trail": p.trail = trail
+            case "scarf": p.scarf = true
+            case "aura": p.aura = true
+            case "goldenFur": p.goldenFur = true
+            default: break
+            }
+        }
         return p
     }
 
@@ -790,8 +810,82 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     private func levelUp(_ newLevel: Int?) {
         guard let newLevel else { return }
         transient = (.done, CACurrentMediaTime() + 3)
-        say("level up! I'm level \(newLevel) now ✨", for: 4)
         sounds.play(.levelUp)
+        // New rewards are worn right away, so you see them.
+        let fresh = Reward.allCases.filter { $0.level == newLevel }
+        for reward in fresh { wear(reward) }
+        if let reward = fresh.first {
+            say("level \(newLevel)! unlocked \(reward.title) ✨", for: 5)
+            post("Level \(newLevel)!", "\(config.petName) unlocked \(reward.title). Change rewards in the 🐾 menu.", pid: 0)
+        } else {
+            say("level up! I'm level \(newLevel) now ✨", for: 4)
+        }
+    }
+
+    private func wear(_ reward: Reward) {
+        let s = reward.setting
+        defaults.set(s.value, forKey: s.key)
+    }
+
+    /// Wears rewards already earned before rewards existed, once.
+    private func wearEarnedRewardsOnce() {
+        guard !defaults.bool(forKey: "rewardsIntroduced") else { return }
+        defaults.set(true, forKey: "rewardsIntroduced")
+        let earned = Reward.unlocked(at: stats.level)
+        guard !earned.isEmpty else { return }
+        if hat.isEmpty, let h = earned.last(where: { $0.setting.key == "hat" }) { wear(h) }
+        if trail.isEmpty, let t = earned.last(where: { $0.setting.key == "trail" }) { wear(t) }
+        say("you've unlocked \(earned.count) reward\(earned.count == 1 ? "" : "s")! see 🐾 → Rewards ✨", for: 5)
+    }
+
+    @objc private func chooseReward(_ sender: NSMenuItem) {
+        guard let reward = Reward(rawValue: sender.representedObject as? String ?? "") else { return }
+        let s = reward.setting
+        if s.value is Bool {
+            defaults.set(!defaults.bool(forKey: s.key), forKey: s.key)
+        } else {
+            defaults.set(wearing(reward) ? "" : s.value, forKey: s.key)
+        }
+    }
+
+    @objc private func removeHat() { hat = "" }
+    @objc private func removeTrail() { trail = "" }
+
+    // MARK: - Rename
+
+    @objc private func rename() {
+        let alert = NSAlert()
+        alert.messageText = "Rename"
+        alert.informativeText = "Change your pet's name, or what it calls you."
+        let petField = NSTextField(string: config.petName)
+        let ownerField = NSTextField(string: config.ownerName)
+        let stack = NSStackView(views: [NSTextField(labelWithString: "Pet's name"), petField,
+                                        NSTextField(labelWithString: "Your name"), ownerField])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 4
+        stack.setCustomSpacing(12, after: petField)
+        for f in [petField, ownerField] { f.widthAnchor.constraint(equalToConstant: 240).isActive = true }
+        stack.frame = NSRect(x: 0, y: 0, width: 240, height: 104)
+        alert.accessoryView = stack
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = petField
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let pet = petField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let owner = ownerField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        applyNames(pet: pet.isEmpty ? config.petName : String(pet.prefix(20)),
+                   owner: owner.isEmpty ? config.ownerName : String(owner.prefix(24)))
+    }
+
+    private func applyNames(pet: String, owner: String) {
+        let renamed = pet != config.petName
+        Config.save(["petName": pet, "ownerName": owner])
+        config.petName = pet
+        config.ownerName = owner
+        transient = (.petted, CACurrentMediaTime() + 2.5)
+        say(renamed ? "\(pet)? I love it! 💕" : "got it, \(owner)! 👋", for: 3)
     }
 
     private func todaySummary() -> String {
@@ -837,6 +931,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         model.today = todaySummary()
         model.focus = focus.phase == .off ? "" : focus.label
         model.quiet = quiet
+        model.nextReward = Reward.next(after: stats.level).map { "Next reward: \($0.title) at Lv \($0.level)" } ?? "🏆 Every reward unlocked"
         model.accent = Color(nsColor: petView.theme.accent ?? .systemOrange)
         model.rows = sessions.sorted { $0.activity.rawValue > $1.activity.rawValue }.map { s in
             let elapsed: String
@@ -1185,6 +1280,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         focusMenu.addItem(item("Edit blocklist… (\(blocklist.count))", #selector(editBlocklist)))
         menu.addItem(submenu(focus.phase == .off ? "Focus timer" : focus.label, focusMenu))
         menu.addItem(item("Bring \(config.petName) here", #selector(bringHere)))
+        menu.addItem(item("Rename…", #selector(rename)))
+        menu.addItem(submenu("Rewards (Lv \(stats.level))", rewardsMenu()))
 
         let sizeMenu = NSMenu()
         sizeMenu.addItem(item(petView.resizing ? "Finish resizing" : "Resize…", #selector(toggleResizing)))
@@ -1254,6 +1351,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         menu.addItem(item("Automatic updates", #selector(toggleAutoUpdate), checked: autoUpdate))
         menu.addItem(.separator())
         menu.addItem(item("Quit DeskPet", #selector(quit), key: "q"))
+    }
+
+    private func rewardsMenu() -> NSMenu {
+        let menu = NSMenu()
+        let level = stats.level
+        if let next = Reward.next(after: level) {
+            menu.addItem(disabled("Next: \(next.title) at Lv \(next.level) (\(Stats.xpNeeded(next.level) - stats.xp) XP to go)"))
+        } else {
+            menu.addItem(disabled("Every reward unlocked! 🏆"))
+        }
+        if petView.sprites != nil { menu.addItem(disabled("Hats, scarf, and fur show on the built-in cat")) }
+        menu.addItem(.separator())
+        for reward in Reward.allCases {
+            let unlocked = level >= reward.level
+            let i = item(unlocked ? reward.title : "🔒 \(reward.title) · Lv \(reward.level)", #selector(chooseReward(_:)),
+                         checked: unlocked && wearing(reward))
+            i.representedObject = reward.rawValue
+            i.isEnabled = unlocked
+            menu.addItem(i)
+        }
+        menu.addItem(.separator())
+        menu.addItem(item("No hat", #selector(removeHat), checked: hat.isEmpty))
+        menu.addItem(item("No trail", #selector(removeTrail), checked: trail.isEmpty))
+        return menu
     }
 
     private func submenu(_ title: String, _ menu: NSMenu) -> NSMenuItem {

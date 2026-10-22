@@ -81,6 +81,8 @@ Right-click Mochi or use the 🐾 menu (system tray on Windows) for every option
   - *Agents:* +10 per finished task, +15 per focus session, +1 per minute agents are working.
 
   Today's stats are in the menu and hover card (`~/.deskpet/stats.json`).
+- **Level rewards:** milestones unlock cosmetics, worn automatically when unlocked and mixed and matched in 🐾 → Rewards: 🎀 bow (Lv 2), ✨ sparkle trail (3), 🎉 party hat (5), 🧣 scarf (7), 👑 crown (10), 🌟 golden aura (12), 🌈 rainbow trail (15), 🏆 golden fur (20). Trails and the aura work with sprite packs too; hats, the scarf, and fur are drawn on the built-in cat.
+- **Rename:** 🐾 → Rename… changes the pet's name or yours any time.
 - **Focus timer:** 15/25/50-minute sessions with a break afterwards (🐾 → Focus timer).
   - **Blocklist:** during focus, the pet calls you out when you open a listed site, or closes the tab in strict mode (🐾 → Focus timer → Edit blocklist…). On macOS it reads the active tab in Safari, Chrome, Edge, Brave, Arc, Vivaldi, and Opera (macOS asks once per browser); on Windows it matches the browser window's title.
 - **Quiet during calls:** no sounds or chatty remarks while any app uses the microphone or camera.

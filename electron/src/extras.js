@@ -367,7 +367,8 @@ function closeBlockedTab(word) {
 
 const zlib = require('zlib');
 const TRANSFER_PREFIX = 'DESKPET-1:';
-const TRANSFER_SETTINGS = ['spritePack', 'themeColor', 'thoughtBubble', 'wander', 'gravity', 'walkOnWindows', 'quietInCalls', 'notifications', 'sounds', 'autoUpdate', 'blocklist', 'strictBlock'];
+const TRANSFER_SETTINGS = ['spritePack', 'themeColor', 'thoughtBubble', 'wander', 'gravity', 'walkOnWindows', 'quietInCalls', 'notifications', 'sounds', 'autoUpdate', 'blocklist', 'strictBlock',
+  'hat', 'trail', 'scarf', 'aura', 'goldenFur', 'blockDuringFocus'];
 
 const transferKey = {
   encode(payload) {
@@ -400,7 +401,21 @@ Stats.prototype.replace = function replace(data) {
   this.saveIfNeeded();
 };
 
+// MARK: - Level rewards (same table as Rewards.swift)
+
+const REWARDS = [
+  { id: 'bow', level: 2, title: '🎀 Bow', key: 'hat', value: 'bow', catOnly: true },
+  { id: 'sparkleTrail', level: 3, title: '✨ Sparkle trail', key: 'trail', value: 'sparkle' },
+  { id: 'partyHat', level: 5, title: '🎉 Party hat', key: 'hat', value: 'partyHat', catOnly: true },
+  { id: 'scarf', level: 7, title: '🧣 Scarf', key: 'scarf', value: true, catOnly: true },
+  { id: 'crown', level: 10, title: '👑 Crown', key: 'hat', value: 'crown', catOnly: true },
+  { id: 'aura', level: 12, title: '🌟 Golden aura', key: 'aura', value: true },
+  { id: 'rainbowTrail', level: 15, title: '🌈 Rainbow trail', key: 'trail', value: 'rainbow' },
+  { id: 'goldenFur', level: 20, title: '🏆 Golden fur', key: 'goldenFur', value: true, catOnly: true },
+];
+
 module.exports = {
+  REWARDS,
   Stats, FocusTimer, Updater, importPack, exportPack, kiroHooks, jumpTo, WindowPlatforms, isNewer,
   BLOCK_DEFAULTS, BROWSERS, TITLE_WORDS, parseBlocklist, matchTitle, closeBlockedTab, transferKey, TRANSFER_SETTINGS,
 };

@@ -6,8 +6,13 @@
   const { Color, SYS, INK, Theme } = window.DeskPetColor;
 
   const outline = INK;
-  const fur = new Color(0.99, 0.77, 0.54);
-  const furLight = new Color(1.0, 0.93, 0.82);
+  const BASE_FUR = new Color(0.99, 0.77, 0.54);
+  const BASE_FUR_LIGHT = new Color(1.0, 0.93, 0.82);
+  const GOLD_FUR = new Color(1.0, 0.79, 0.24);
+  const GOLD_FUR_LIGHT = new Color(1.0, 0.94, 0.62);
+  // Swapped to gold when the golden fur reward is on (set at the start of each frame).
+  let fur = BASE_FUR;
+  let furLight = BASE_FUR_LIGHT;
   const pink = new Color(1.0, 0.6, 0.66);
   const GROUND = 34;
   const FONT = '-apple-system, "Segoe UI", "Segoe UI Emoji", system-ui, sans-serif';
@@ -41,6 +46,8 @@
       this.scale = pose.scale || 1;
       this.theme = pose.theme ? Theme.fromHex(pose.theme) : new Theme();
       this.lastSpriteRect = pack ? this.lastSpriteRect : null;
+      fur = pose.goldenFur ? GOLD_FUR : BASE_FUR;
+      furLight = pose.goldenFur ? GOLD_FUR_LIGHT : BASE_FUR_LIGHT;
 
       ctx.save();
       ctx.clearRect(0, 0, width, height);
@@ -148,6 +155,7 @@
       const s = m === 'dragged' ? 0.55 : 1 - min(bob, 12) / 36;
       if (m !== 'flying') this.fill(this.oval(cx, g - 1, 78 * s, 11 * s), new Color(0, 0, 0, 0.16));
 
+      this.drawRewardsBehind(m, t, cx, base, 82);
       if (this.pose.subagents > 0 && m !== 'idle' && m !== 'sleeping') this.drawMinis(cx, g, t);
       if (m === 'typing') this.at(cx + 46, g, {}, () => this.drawLaptop(t));
 
@@ -179,6 +187,7 @@
 
       const s = m === 'dragged' ? 0.55 : 1 - min(bob, 12) / 36;
       if (m !== 'flying') this.fill(this.oval(cx, g - 1, w * 0.75 * s, 11 * s), new Color(0, 0, 0, 0.16));
+      this.drawRewardsBehind(m, t, cx, base, h);
 
       if (this.pose.subagents > 0 && m !== 'idle' && m !== 'sleeping') {
         const mini = pack.frame('typing', t + 0.4);
@@ -317,7 +326,8 @@
           this.fillStroke(cup, SYS.pink);
         }
       }
-      if (this.pose.nightcap) {
+      this.drawHat(t);
+      if (this.pose.nightcap && !this.pose.hat) {
         const cap = new Path2D();
         cap.moveTo(-26, 58);
         cap.bezierCurveTo(-10, 66, 10, 68, 26, 60);
@@ -328,6 +338,78 @@
         this.fillStroke(this.oval(46, 66, 11, 11), Color.white);
       }
       void ctx;
+    }
+
+    // MARK: Level rewards
+
+    /** Aura and trail, drawn behind the character (works for sprite packs too). */
+    drawRewardsBehind(m, t, cx, base, height) {
+      const ctx = this.ctx;
+      if (this.pose.aura) {
+        const r = Math.max(64, height * 0.75) * (1 + sin(t * 2.2) * 0.06);
+        const cy = base + height * 0.45;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.scale(1, 0.85);
+        const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+        glow.addColorStop(0, 'rgba(255,209,77,0.42)');
+        glow.addColorStop(1, 'rgba(255,209,77,0)');
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(0, 0, r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+      if (!this.pose.trail || !['walking', 'flying', 'dragged'].includes(m)) return;
+      // Trails stream out behind the direction of travel.
+      const dir = this.pose.facingLeft ? 1 : -1;
+      for (let i = 1; i <= 6; i++) {
+        const x = cx + dir * (28 + i * 13);
+        const y = base + height * 0.35 + sin(t * 7 + i) * 6;
+        const alpha = 1 - i / 7;
+        if (this.pose.trail === 'rainbow') {
+          const hue = ((t * 0.4 + i / 6) % 1) * 360;
+          ctx.fillStyle = `hsla(${hue}, 85%, 62%, ${alpha})`;
+          ctx.fill(this.oval(x, y, 11 - i, 11 - i));
+        } else {
+          this.fill(this.star(x, y, 7 - i * 0.7), new Color(1, 0.85, 0.25, alpha));
+        }
+      }
+    }
+
+    /** Hats and scarf on the built-in cat (local coordinates). */
+    drawHat(t) {
+      if (this.pose.scarf) {
+        const band = new Path2D();
+        band.roundRect(-39, 10, 78, 10, 5);
+        this.fillStroke(band, new Color(0.91, 0.31, 0.36), 2);
+        const tail = new Path2D();
+        tail.roundRect(16, -6, 10, 20, 4);
+        this.fillStroke(tail, new Color(0.85, 0.25, 0.3), 2);
+        for (let x = -28; x <= 28; x += 14) this.fillRect(rect(x, 12, 3, 6), new Color(1, 1, 1, 0.5));
+      }
+      const hat = this.pose.hat;
+      if (hat === 'bow') {
+        const pinkBow = new Color(1, 0.31, 0.55);
+        for (const side of [-1, 1]) this.fillStroke(this.poly([[24, 66], [24 + side * 12, 74], [24 + side * 12, 58]]), pinkBow, 2, 'round');
+        this.fillStroke(this.oval(24, 66, 8, 8), pinkBow, 2);
+      } else if (hat === 'partyHat') {
+        const cone = this.poly([[-14, 60], [14, 60], [2, 96]]);
+        this.fill(cone, new Color(0.6, 0.48, 1));
+        const ctx = this.ctx;
+        ctx.save();
+        ctx.clip(cone);
+        for (let y = 64; y <= 92; y += 10) this.fillRect(rect(-16, y, 32, 4), SYS.yellow);
+        ctx.restore();
+        this.strokePath(cone, outline, 2.5, 'butt', 'round');
+        this.fillStroke(this.oval(2, 97, 9, 9), SYS.pink, 2);
+      } else if (hat === 'crown') {
+        const gold = new Color(1, 0.78, 0.24);
+        this.fillStroke(this.poly([[-18, 60], [18, 60], [20, 80], [10, 70], [0, 84], [-10, 70], [-20, 80]]), gold, 2.5, 'round');
+        this.fillStroke(this.oval(0, 65, 6, 6), SYS.red, 1.5);
+        for (const x of [-20, 0, 20]) this.fillStroke(this.oval(x, x === 0 ? 85 : 81, 5, 5), gold, 1.5);
+        this.fill(this.star(12, 76, 3.5), new Color(1, 1, 1, 0.6 * (0.5 + 0.5 * sin(t * 3))));
+      }
     }
 
     drawEyes(style, t, dx, dy) {

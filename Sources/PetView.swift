@@ -21,6 +21,12 @@ struct PetPose {
     /// "+3 XP" floating up from the pet, and how long it's been showing.
     var xpText: String?
     var xpAge: Double = 0
+    /// Level rewards (see Rewards.swift). Hats, scarf, and golden fur draw on the built-in cat only.
+    var hat: String?
+    var scarf = false
+    var trail: String?
+    var aura = false
+    var goldenFur = false
     var captionColor: NSColor = .systemGray
     var bubble: String?
 }
@@ -44,8 +50,13 @@ private enum EyeStyle { case open, focused, wide, closed, happy, half, cross }
 private enum MouthStyle { case w, smile, open, yawn, flat }
 
 private let outline = NSColor(calibratedRed: 0.29, green: 0.19, blue: 0.15, alpha: 1)
-private let fur = NSColor(calibratedRed: 0.99, green: 0.77, blue: 0.54, alpha: 1)
-private let furLight = NSColor(calibratedRed: 1.0, green: 0.93, blue: 0.82, alpha: 1)
+private let baseFur = NSColor(calibratedRed: 0.99, green: 0.77, blue: 0.54, alpha: 1)
+private let baseFurLight = NSColor(calibratedRed: 1.0, green: 0.93, blue: 0.82, alpha: 1)
+private let goldFur = NSColor(calibratedRed: 1.0, green: 0.79, blue: 0.24, alpha: 1)
+private let goldFurLight = NSColor(calibratedRed: 1.0, green: 0.94, blue: 0.62, alpha: 1)
+/// Swapped to gold when the golden fur reward is on (set at the start of each frame).
+private var fur = baseFur
+private var furLight = baseFurLight
 private let pink = NSColor(calibratedRed: 1.0, green: 0.60, blue: 0.66, alpha: 1)
 
 final class PetView: NSView {
@@ -236,6 +247,8 @@ final class PetView: NSView {
         dirtyRect.fill(using: .copy)
 
         let t = CACurrentMediaTime() - start
+        fur = pose.goldenFur ? goldFur : baseFur
+        furLight = pose.goldenFur ? goldFurLight : baseFurLight
         NSGraphicsContext.saveGraphicsState()
         let tf = NSAffineTransform()
         tf.translateX(by: 0, yBy: Self.ground * (1 - scale))
@@ -269,6 +282,7 @@ final class PetView: NSView {
             oval(cx, g - 1, 78 * s, 11 * s).fill()
         }
 
+        drawRewardsBehind(m, t, cx: cx, base: base, height: 82)
         if pose.subagents > 0 && m != .idle && m != .sleeping { drawMinis(cx: cx, g: g, t: t) }
         if m == .typing { draw(at: cx + 46, g) { drawLaptop(t) } }
 
@@ -326,6 +340,7 @@ final class PetView: NSView {
             NSColor(white: 0, alpha: 0.16).setFill()
             oval(cx, g - 1, size.width * 0.75 * s, 11 * s).fill()
         }
+        drawRewardsBehind(m, t, cx: cx, base: base, height: size.height)
 
         if pose.subagents > 0 && m != .idle && m != .sleeping {
             let mini = pack.frame(for: .typing, at: t + 0.4)
@@ -493,7 +508,8 @@ final class PetView: NSView {
             }
         case .none: break
         }
-        if pose.nightcap {
+        drawHat(t)
+        if pose.nightcap && pose.hat == nil {
             let cap = NSBezierPath()
             cap.move(to: pt(-26, 58)); cap.curve(to: pt(26, 60), controlPoint1: pt(-10, 66), controlPoint2: pt(10, 68))
             cap.curve(to: pt(46, 66), controlPoint1: pt(34, 78), controlPoint2: pt(42, 78))
@@ -501,6 +517,85 @@ final class PetView: NSView {
             cap.close()
             fillStroke(cap, NSColor(calibratedRed: 0.30, green: 0.40, blue: 0.85, alpha: 1))
             fillStroke(oval(46, 66, 11, 11), .white)
+        }
+    }
+
+    // MARK: Level rewards
+
+    /// Aura and trail, drawn behind the character (works for sprite packs too).
+    private func drawRewardsBehind(_ m: Mood, _ t: Double, cx: CGFloat, base: CGFloat, height: CGFloat) {
+        if pose.aura {
+            let pulse = 1 + CGFloat(sin(t * 2.2)) * 0.06
+            let r = max(64, height * 0.75) * pulse
+            let glow = NSGradient(colors: [NSColor(calibratedRed: 1, green: 0.82, blue: 0.3, alpha: 0.42),
+                                           NSColor(calibratedRed: 1, green: 0.82, blue: 0.3, alpha: 0)])
+            glow?.draw(in: oval(cx, base + height * 0.45, r * 2, r * 1.7), relativeCenterPosition: .zero)
+        }
+        guard let trail = pose.trail, [.walking, .flying, .dragged].contains(m) else { return }
+        // Trails stream out behind the direction of travel.
+        let dir: CGFloat = pose.facingLeft ? 1 : -1
+        for i in 1...6 {
+            let k = CGFloat(i)
+            let x = cx + dir * (28 + k * 13)
+            let y = base + height * 0.35 + CGFloat(sin(t * 7 + Double(i))) * 6
+            let alpha = 1 - k / 7
+            if trail == "rainbow" {
+                NSColor(calibratedHue: CGFloat(fmod(t * 0.4 + Double(i) / 6, 1)), saturation: 0.75, brightness: 1, alpha: alpha).setFill()
+                oval(x, y, 11 - k, 11 - k).fill()
+            } else {
+                NSColor(calibratedRed: 1, green: 0.85, blue: 0.25, alpha: alpha).setFill()
+                star(pt(x, y), 7 - k * 0.7).fill()
+            }
+        }
+    }
+
+    /// Hats and scarf on the built-in cat (local coordinates).
+    private func drawHat(_ t: Double) {
+        if pose.scarf {
+            let band = NSBezierPath(roundedRect: NSRect(x: -39, y: 10, width: 78, height: 10), xRadius: 5, yRadius: 5)
+            fillStroke(band, NSColor(calibratedRed: 0.91, green: 0.31, blue: 0.36, alpha: 1), width: 2)
+            let tail = NSBezierPath(roundedRect: NSRect(x: 16, y: -6, width: 10, height: 20), xRadius: 4, yRadius: 4)
+            fillStroke(tail, NSColor(calibratedRed: 0.85, green: 0.25, blue: 0.3, alpha: 1), width: 2)
+            NSColor(white: 1, alpha: 0.5).setFill()
+            for x in stride(from: -28, through: 28, by: 14) { NSRect(x: CGFloat(x), y: 12, width: 3, height: 6).fill() }
+        }
+        switch pose.hat {
+        case "bow":
+            let pinkBow = NSColor(calibratedRed: 1, green: 0.31, blue: 0.55, alpha: 1)
+            for side in [-1.0, 1.0] as [CGFloat] {
+                let loop = NSBezierPath()
+                loop.move(to: pt(24, 66)); loop.line(to: pt(24 + side * 12, 74)); loop.line(to: pt(24 + side * 12, 58)); loop.close()
+                loop.lineJoinStyle = .round
+                fillStroke(loop, pinkBow, width: 2)
+            }
+            fillStroke(oval(24, 66, 8, 8), pinkBow, width: 2)
+        case "partyHat":
+            let cone = NSBezierPath()
+            cone.move(to: pt(-14, 60)); cone.line(to: pt(14, 60)); cone.line(to: pt(2, 96)); cone.close()
+            cone.lineJoinStyle = .round
+            fillStroke(cone, NSColor(calibratedRed: 0.6, green: 0.48, blue: 1, alpha: 1))
+            NSGraphicsContext.saveGraphicsState()
+            cone.addClip()
+            NSColor.systemYellow.setFill()
+            for y in stride(from: 64, through: 92, by: 10) { NSBezierPath(rect: NSRect(x: -16, y: CGFloat(y), width: 32, height: 4)).fill() }
+            NSGraphicsContext.restoreGraphicsState()
+            cone.lineWidth = 2.5; NSColor(calibratedRed: 0.29, green: 0.19, blue: 0.15, alpha: 1).setStroke(); cone.stroke()
+            fillStroke(oval(2, 97, 9, 9), .systemPink, width: 2)
+        case "crown":
+            let gold = NSColor(calibratedRed: 1, green: 0.78, blue: 0.24, alpha: 1)
+            let crown = NSBezierPath()
+            crown.move(to: pt(-18, 60)); crown.line(to: pt(18, 60)); crown.line(to: pt(20, 80)); crown.line(to: pt(10, 70))
+            crown.line(to: pt(0, 84)); crown.line(to: pt(-10, 70)); crown.line(to: pt(-20, 80)); crown.close()
+            crown.lineJoinStyle = .round
+            fillStroke(crown, gold)
+            fillStroke(oval(0, 65, 6, 6), .systemRed, width: 1.5)
+            for x in [-20.0, 0.0, 20.0] as [CGFloat] { fillStroke(oval(x, x == 0 ? 85 : 81, 5, 5), gold, width: 1.5) }
+            // A little glint
+            let shine = 0.5 + 0.5 * sin(t * 3)
+            NSColor(white: 1, alpha: 0.6 * shine).setFill()
+            star(pt(12, 76), 3.5).fill()
+        default:
+            break
         }
     }
 

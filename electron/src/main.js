@@ -7,7 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const { AgentMonitor, PRIORITY, TranscriptTokens, codexState } = require('./agents');
 const {
-  Stats, FocusTimer, Updater, importPack, exportPack, kiroHooks, jumpTo, WindowPlatforms,
+  REWARDS, Stats, FocusTimer, Updater, importPack, exportPack, kiroHooks, jumpTo, WindowPlatforms,
   BLOCK_DEFAULTS, BROWSERS, TITLE_WORDS, parseBlocklist, matchTitle, closeBlockedTab, transferKey, TRANSFER_SETTINGS,
 } = require('./extras');
 const { paths, Settings, loadConfig, saveConfig, hooksLive, readJSON } = require('./settings');
@@ -161,6 +161,7 @@ class Pet {
       try { fs.writeFileSync(paths.hookScript, fs.readFileSync(path.join(__dirname, 'hook.ps1'))); } catch (_) { /* best effort */ }
     }
     if (this.kiroHooksOn) kiroHooks.apply(true);
+    setTimeout(() => this.wearEarnedRewardsOnce(), 6000);
     if (this.autoUpdate) setTimeout(() => this.checkForUpdates(false), 20000);
     setInterval(() => { if (this.autoUpdate) this.checkForUpdates(false); }, 6 * 3600 * 1000);
   }
@@ -364,6 +365,12 @@ class Pet {
     }
     if (this.speech && this.speech.until > t) p.bubble = this.speech.text;
     if (this.xpPopup && t - this.xpPopup.at < 1.4) { p.xpText = `+${this.xpPopup.amount} XP`; p.xpAge = t - this.xpPopup.at; }
+    for (const r of REWARDS) {
+      if (this.stats.level < r.level || !this.wearing(r)) continue;
+      if (r.key === 'hat') p.hat = r.value;
+      else if (r.key === 'trail') p.trail = r.value;
+      else p[r.key] = true;
+    }
     return p;
   }
 
@@ -761,6 +768,8 @@ class Pet {
         ],
       },
       { label: `Bring ${this.config.petName} here`, click: () => this.bringHere() },
+      { label: 'Rename…', click: () => this.openDialog('rename.html', {}, { width: 360, height: 270 }) },
+      { label: `Rewards (Lv ${this.stats.level})`, submenu: this.rewardsMenu() },
       {
         label: `Size (${pct}%)`,
         submenu: [
@@ -883,8 +892,56 @@ class Pet {
   levelUp(level) {
     if (!level) return;
     this.transient = { mood: 'done', until: now() + 3 };
-    this.say(`level up! I'm level ${level} now ✨`, 4);
     this.playSound('level-up');
+    // New rewards are worn right away, so you see them.
+    const fresh = REWARDS.filter((r) => r.level === level);
+    for (const r of fresh) this.settings.set(r.key, r.value);
+    if (fresh.length) {
+      this.say(`level ${level}! unlocked ${fresh[0].title} ✨`, 5);
+      this.notify(`Level ${level}!`, `${this.config.petName} unlocked ${fresh[0].title}. Change rewards in the tray menu.`, 0);
+    } else {
+      this.say(`level up! I'm level ${level} now ✨`, 4);
+    }
+  }
+
+  wearing(r) { return this.settings.get(r.key, r.key === 'hat' || r.key === 'trail' ? '' : false) === r.value; }
+
+  /** Wears rewards already earned before rewards existed, once. */
+  wearEarnedRewardsOnce() {
+    if (this.settings.get('rewardsIntroduced', false)) return;
+    this.settings.set('rewardsIntroduced', true);
+    const earned = REWARDS.filter((r) => r.level <= this.stats.level);
+    if (!earned.length) return;
+    const last = (key) => [...earned].reverse().find((r) => r.key === key);
+    if (!this.settings.get('hat', '') && last('hat')) this.settings.set('hat', last('hat').value);
+    if (!this.settings.get('trail', '') && last('trail')) this.settings.set('trail', last('trail').value);
+    this.say(`you've unlocked ${earned.length} reward${earned.length === 1 ? '' : 's'}! see the tray menu → Rewards ✨`, 5);
+  }
+
+  rewardsMenu() {
+    const level = this.stats.level;
+    const next = REWARDS.find((r) => r.level > level);
+    return [
+      { label: next ? `Next: ${next.title} at Lv ${next.level} (${Stats.xpNeeded(next.level) - this.stats.xp} XP to go)` : 'Every reward unlocked! 🏆', enabled: false },
+      ...(this.pack ? [{ label: 'Hats, scarf, and fur show on the built-in cat', enabled: false }] : []),
+      { type: 'separator' },
+      ...REWARDS.map((r) => ({
+        label: level >= r.level ? r.title : `🔒 ${r.title} · Lv ${r.level}`, type: 'checkbox', enabled: level >= r.level,
+        checked: level >= r.level && this.wearing(r),
+        click: () => this.settings.set(r.key, typeof r.value === 'boolean' ? !this.wearing(r) : (this.wearing(r) ? '' : r.value)),
+      })),
+      { type: 'separator' },
+      { label: 'No hat', type: 'checkbox', checked: !this.settings.get('hat', ''), click: () => this.settings.set('hat', '') },
+      { label: 'No trail', type: 'checkbox', checked: !this.settings.get('trail', ''), click: () => this.settings.set('trail', '') },
+    ];
+  }
+
+  applyNames(petName, ownerName) {
+    const renamed = petName !== this.config.petName;
+    saveConfig({ petName, ownerName });
+    this.config = { ...this.config, petName, ownerName };
+    this.transient = { mood: 'petted', until: now() + 2.5 };
+    this.say(renamed ? `${petName}? I love it! 💕` : `got it, ${ownerName}! 👋`, 3);
   }
 
   todaySummary() {
@@ -915,6 +972,7 @@ class Pet {
     return {
       petName: this.config.petName, level: this.stats.level, progress: this.stats.progress, xpToNext: this.stats.xpToNext,
       today: this.todaySummary(), focus: this.focus.phase === 'off' ? '' : this.focus.label, quiet: this.quiet,
+      nextReward: (() => { const n = REWARDS.find((r) => r.level > this.stats.level); return n ? `Next reward: ${n.title} at Lv ${n.level}` : '🏆 Every reward unlocked'; })(),
       accent: this.themeHex || '#FF9500',
       rows: [...this.sessions].sort((a, b) => PRIORITY.indexOf(b.activity) - PRIORITY.indexOf(a.activity)).map((s) => {
         const secs = Math.round(t - (this.busySince.get(s.id) || t));
@@ -1095,6 +1153,15 @@ class Pet {
 
   async dialogCall(action, payload) {
     switch (action) {
+      case 'names-get':
+        return { petName: this.config.petName, ownerName: this.config.ownerName };
+      case 'names-save': {
+        const pet = String(payload.petName || '').trim().slice(0, 20) || this.config.petName;
+        const owner = String(payload.ownerName || '').trim().slice(0, 24) || this.config.ownerName;
+        this.applyNames(pet, owner);
+        this.closeDialog();
+        return { ok: true };
+      }
       case 'blocklist-get':
         return { list: this.blocklist, enabled: this.blockDuringFocus, strict: this.strictBlock, defaults: BLOCK_DEFAULTS };
       case 'blocklist-save': {

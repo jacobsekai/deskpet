@@ -1,0 +1,14 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'">
+<title>Rename</title><link rel="stylesheet" href="dialog.css">
+<style>label { display: block; margin: 10px 0 4px; font-weight: 600; } input { width: 100%; box-sizing: border-box; font: inherit; font-size: 14px; padding: 7px 9px; border: 1px solid #bbb; border-radius: 8px; }</style>
+</head>
+<body>
+  <h1>Rename</h1>
+  <p>Change your pet's name, or what it calls you.</p>
+  <label for="pet">Pet's name</label><input id="pet" maxlength="20" spellcheck="false">
+  <label for="owner">Your name</label><input id="owner" maxlength="24" spellcheck="false">
+  <div class="buttons"><span class="spacer"></span><button id="cancel">Cancel</button><button id="save" class="primary">Save</button></div>
+  <script src="rename.js"></script>
+</body></html>
