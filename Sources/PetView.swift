@@ -561,10 +561,22 @@ final class PetView: NSView {
             switch aura {
             case "purple": color = NSColor(calibratedRed: 0.66, green: 0.42, blue: 1, alpha: 1)
             case "snow": color = NSColor(calibratedRed: 0.6, green: 0.85, blue: 1, alpha: 1)
+            case "hearts": color = NSColor(calibratedRed: 1, green: 0.45, blue: 0.68, alpha: 1)
             default: color = NSColor(calibratedRed: 1, green: 0.82, blue: 0.3, alpha: 1)
             }
             NSGradient(colors: [color.withAlphaComponent(0.42), color.withAlphaComponent(0)])?
                 .draw(in: oval(cx, base + height * 0.45, r * 2, r * 1.7), relativeCenterPosition: .zero)
+            if aura == "hearts" {
+                // Hearts orbiting the character.
+                for i in 0..<6 {
+                    let a = t * 0.9 + Double(i) * .pi / 3
+                    let x = cx + CGFloat(cos(a)) * r * 1.05
+                    let y = base + height * 0.45 + CGFloat(sin(a)) * r * 0.6
+                    let s = 9 + CGFloat(sin(t * 3 + Double(i))) * 2
+                    NSColor(calibratedRed: 1, green: 0.36, blue: 0.6, alpha: sin(a) > 0 ? 0.55 : 0.95).setFill()
+                    heart(pt(x, y), s).fill()
+                }
+            }
             if aura == "snow" {
                 for i in 0..<10 {
                     let phase = CGFloat(fmod(t * 0.25 + Double(i) * 0.137, 1))
@@ -646,6 +658,38 @@ final class PetView: NSView {
             NSRect(x: -15, y: 6, width: 30, height: 6).fill()
             NSColor(white: 1, alpha: 0.18).setFill()
             NSRect(x: -12, y: 14, width: 4, height: 18).fill()
+        case "witchHat":
+            // Wide brim, tall cone with a purple band and a bent tip.
+            let black = NSColor(calibratedRed: 0.13, green: 0.1, blue: 0.16, alpha: 1)
+            let wobble = CGFloat(sin(t * 2.3)) * 1.5
+            let cone = NSBezierPath()
+            cone.move(to: pt(-15, 0)); cone.line(to: pt(15, 0))
+            cone.curve(to: pt(10 + wobble, 34), controlPoint1: pt(12, 14), controlPoint2: pt(8, 26))
+            cone.curve(to: pt(24 + wobble, 30), controlPoint1: pt(16 + wobble, 40), controlPoint2: pt(22 + wobble, 37))
+            cone.curve(to: pt(-15, 0), controlPoint1: pt(6, 26), controlPoint2: pt(-8, 12))
+            cone.close()
+            cone.lineJoinStyle = .round
+            fillStroke(cone, black, width: 2)
+            NSGraphicsContext.saveGraphicsState()
+            cone.addClip()
+            NSColor(calibratedRed: 0.55, green: 0.3, blue: 0.85, alpha: 1).setFill()
+            NSRect(x: -18, y: 3, width: 40, height: 6).fill()
+            NSGraphicsContext.restoreGraphicsState()
+            fillStroke(oval(0, 0, 60, 11), black, width: 2)
+            NSColor(calibratedRed: 1, green: 0.8, blue: 0.25, alpha: 1).setFill()
+            NSRect(x: -3, y: 3.5, width: 6, height: 5).fill()
+        case "santaHat":
+            let red = NSColor(calibratedRed: 0.86, green: 0.16, blue: 0.2, alpha: 1)
+            let droop = CGFloat(sin(t * 2)) * 2
+            let cone = NSBezierPath()
+            cone.move(to: pt(-20, 2)); cone.line(to: pt(20, 2))
+            cone.curve(to: pt(26 + droop, 16), controlPoint1: pt(16, 22), controlPoint2: pt(22, 24))
+            cone.curve(to: pt(-20, 2), controlPoint1: pt(10, 34), controlPoint2: pt(-14, 26))
+            cone.close()
+            cone.lineJoinStyle = .round
+            fillStroke(cone, red, width: 2)
+            fillStroke(NSBezierPath(roundedRect: NSRect(x: -23, y: -4, width: 46, height: 10), xRadius: 5, yRadius: 5), .white, width: 2)
+            fillStroke(oval(27 + droop, 14, 10, 10), .white, width: 2)
         case "halo":
             let bob = CGFloat(sin(t * 2)) * 2
             let ring = oval(0, 24 + bob, 42, 12)
@@ -697,6 +741,42 @@ final class PetView: NSView {
             let x = r.midX + CGFloat(cos(a)) * (r.width * 0.6 + 12), y = r.minY + r.height * 0.55 + CGFloat(sin(a)) * r.height * 0.35
             fillStroke(star(pt(x, y), 8), NSColor(calibratedRed: 1, green: 0.85, blue: 0.2, alpha: 1), width: 1.5)
             NSColor(white: 0.25, alpha: 1).setFill(); oval(x - 2, y + 1, 1.8, 2.2).fill(); oval(x + 2, y + 1, 1.8, 2.2).fill()
+        case "pumpkin":
+            let bob = CGFloat(abs(sin(t * 2.6))) * 6
+            let x = r.maxX + 26, y = r.minY + 12 + bob
+            let orange = NSColor(calibratedRed: 1, green: 0.55, blue: 0.12, alpha: 1)
+            fillStroke(oval(x - 6, y, 13, 19), orange, width: 1.8)
+            fillStroke(oval(x + 6, y, 13, 19), orange, width: 1.8)
+            fillStroke(oval(x, y, 15, 21), orange, width: 1.8)
+            NSColor(calibratedRed: 0.3, green: 0.55, blue: 0.2, alpha: 1).setFill()
+            NSBezierPath(roundedRect: NSRect(x: x - 1.5, y: y + 9, width: 3, height: 6), xRadius: 1, yRadius: 1).fill()
+            // A carved face.
+            NSColor(calibratedRed: 0.35, green: 0.18, blue: 0.05, alpha: 1).setFill()
+            for side in [-1.0, 1.0] as [CGFloat] {
+                let eye = NSBezierPath()
+                eye.move(to: pt(x + side * 5 - 2.5, y + 2)); eye.line(to: pt(x + side * 5 + 2.5, y + 2)); eye.line(to: pt(x + side * 5, y + 6)); eye.close()
+                eye.fill()
+            }
+            let mouth = NSBezierPath()
+            mouth.move(to: pt(x - 6, y - 3)); mouth.line(to: pt(x - 3, y - 5)); mouth.line(to: pt(x, y - 3)); mouth.line(to: pt(x + 3, y - 5)); mouth.line(to: pt(x + 6, y - 3))
+            mouth.line(to: pt(x, y - 7)); mouth.close()
+            mouth.fill()
+        case "snowman":
+            let sway = CGFloat(sin(t * 1.8)) * 0.08
+            let x = r.maxX + 28, y = r.minY + 2
+            NSGraphicsContext.saveGraphicsState()
+            let tf = NSAffineTransform(); tf.translateX(by: x, yBy: y); tf.rotate(byRadians: sway); tf.concat()
+            fillStroke(oval(0, 10, 22, 21), .white, width: 1.8)
+            fillStroke(oval(0, 27, 16, 15), .white, width: 1.8)
+            NSColor(white: 0.12, alpha: 1).setFill()
+            oval(-3, 29, 2.4, 2.4).fill(); oval(3, 29, 2.4, 2.4).fill()
+            for k in 0..<2 { oval(0, 7 + CGFloat(k) * 6, 2.4, 2.4).fill() }
+            let nose = NSBezierPath()
+            nose.move(to: pt(0, 27)); nose.line(to: pt(7, 26)); nose.line(to: pt(0, 25)); nose.close()
+            NSColor(calibratedRed: 1, green: 0.5, blue: 0.1, alpha: 1).setFill(); nose.fill()
+            NSColor(calibratedRed: 0.86, green: 0.16, blue: 0.2, alpha: 1).setFill()
+            NSRect(x: -8, y: 19, width: 16, height: 3.5).fill()
+            NSGraphicsContext.restoreGraphicsState()
         case "planets":
             for (i, p) in [(4.0, CGFloat(0.62), NSColor.systemBlue, CGFloat(10)), (6.5, CGFloat(0.8), NSColor.systemOrange, CGFloat(8))].enumerated() {
                 let a = t * (2 * .pi / p.0) + Double(i) * 2

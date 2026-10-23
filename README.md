@@ -165,6 +165,24 @@ Control center → **Trips** (or 🐾 → 🧳 Take … on a trip, or Talk → G
 ### Moving homes
 Account → **Moving homes** → **Pack up for moving…** saves one `<Pet>.chr` file with your names, level, prestige, stats, bond, memories, settings, and the sprite pack. On the new computer (macOS, Windows, or Linux), open the file (double-click on macOS), drop it onto the pet, use **Move in from a file…**, or pick it in setup. Text keys (`DESKPET-1:…`) still work under **Use a text key instead**, for everything except the sprite pack.
 
+### Insights
+Control center → **Insights**: this week vs last week (time together, agent time, focus sessions, sips), two weeks of daily charts (hover a bar for the day's value), and a six-week mood calendar from the evening journal.
+
+### Check-ins and the mood journal
+- **Check-ins** (Companion page): turn on built-ins (20-20-20 eye break, posture, stand up, stretch, medication at a set time) or add your own, either "done / not yet" or a fill-in sentence with a goal ("I took __ deep breaths"). When one comes up, click the pet; or log it any time from Talk → Tell → Check in.
+- **Journal:** in the evening the pet asks how the day was (and if you want to note anything). After a rough or tiring day it checks on you the next morning.
+- **Energy and fun** (off by default): breaks restore energy and playing restores fun. Treats cost coins (1 coin per 10 XP), so buying one never lowers your level. Nothing bad happens when they run low.
+
+### Agents, meetings, and quiet hours
+- When an agent finishes, the bubble and notification say what it did ("Claude: Fixed the login test ✓"), taken from the session's last reply.
+- **Calendar heads-up** (Behavior, opt-in): warnings 1–15 minutes before meetings from the macOS Calendar app, classic Outlook on Windows, or any ICS calendar link; click the pet at meeting time to open its Chime/Zoom/Meet/Teams link. Titles never leave your computer.
+- **Quiet hours** (Behavior): no remarks or sounds on a schedule, optionally still showing agent notifications.
+
+### Playdates, events, and the gallery
+- **Playdates:** when a pet visits from a trip drive, the two walk over and play together.
+- **Seasonal events:** Halloween (Oct 24–Nov 1), winter (Dec 15–Jan 1), and Valentine's week, each with an outfit you earn by spending an hour together during the event (shown on Home). On your birthday the pet wears a party hat.
+- **Gallery** (Look → Browse the gallery): install free original packs (Midnight, Snowball, Ginger) from `packs/` in this repo.
+
 ### Emergency hide
 Press **⌃⌥H** (Mac) or **Ctrl+Alt+H** (Windows/Linux) anywhere to hide the pet, its bubbles, the talk window, the hover card, and the control center at once. Sounds and notifications stay quiet until you press it again (or choose Show from the 🐾/tray menu). Pick a different shortcut, or turn it off, under Behavior → Emergency hide.
 

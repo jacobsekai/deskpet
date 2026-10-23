@@ -10,13 +10,13 @@ const personalities = {};
 for (const f of fs.readdirSync(dir)) personalities[path.basename(f, '.json')] = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
 
 const STEP_KEYS = new Set(['say', 'mood', 'ask', 'choices', 'key', 'label', 'input', 'placeholder', 'kind', 'then', 'skip', 'when', 'else', 'steps',
-  'affection', 'remember', 'forget', 'farewell', 'action', 'random', 'pick', 'pool', 'game', 'text', 'askPool', 'inputPool', 'max', 'ranges', 'prefix', 'suffix', 'log']);
-const CHOICE_KEYS = new Set(['label', 'value', 'say', 'steps', 'affection', 'remember', 'mood', 'when', 'farewell']);
+  'affection', 'remember', 'forget', 'farewell', 'action', 'random', 'pick', 'pool', 'game', 'text', 'askPool', 'inputPool', 'max', 'ranges', 'prefix', 'suffix', 'log', 'journal']);
+const CHOICE_KEYS = new Set(['label', 'value', 'say', 'steps', 'affection', 'remember', 'mood', 'when', 'farewell', 'checkin']);
 const MOODS = new Set(['happy', 'love', 'excited', 'proud', 'thinking', 'sleepy', 'surprised', 'nervous', 'sad', 'worried', 'reading', 'idle', 'dizzy', 'typing']);
 
 function lint(steps, where) {
   for (const s of [].concat(steps || [])) {
-    if (typeof s === 'string') { assert(!/\{(?!owner|pet|name|mem:|timeOfDay|weekday|tier|value|hours|tasks|focus|time|places|count|host|home|sips|sipsText|today|todayText|breaks)[^}]*\}/.test(s), `${where}: unknown placeholder in "${s}"`); continue; }
+    if (typeof s === 'string') { assert(!/\{(?!owner|pet|name|mem:|timeOfDay|weekday|tier|value|hours|tasks|focus|time|places|count|host|home|sips|sipsText|today|todayText|breaks|other|title|emoji|unit|valueText|minutes)[^}]*\}/.test(s), `${where}: unknown placeholder in "${s}"`); continue; }
     if (Array.isArray(s)) { lint(s, where); continue; }
     for (const k of Object.keys(s)) assert(STEP_KEYS.has(k), `${where}: unknown step key "${k}"`);
     if (s.mood) assert(MOODS.has(s.mood), `${where}: unknown mood ${s.mood}`);
@@ -332,6 +332,101 @@ for (const id of Object.keys(personalities)) {
     const w = e.summary().water;
     assert.strictEqual(w.today, 0 + 1 + 4 + 8 + 15 + 40, `${id}: sips today ${w.today}`);
     assert.strictEqual(w.breaks, 6);
+    checks++;
+  }
+}
+
+{
+  // Check-ins: built-ins off by default, custom ones added; due reminders offer a talk; logs add up.
+  for (const id of Object.keys(personalities)) {
+    let t0 = Date.now();
+    const real = Date.now;
+    Date.now = () => t0;
+    try {
+      const { e } = make(id, { settings: { water: 0, breaks: 0, motivation: false, recap: false, chatter: 'off', lateNight: false, journal: false } });
+      assert(e.summary().checkins.every((c) => !c.enabled), `${id}: built-ins off`);
+      e.ui('checkinSet', { id: 'eyes', patch: { enabled: true, every: 20 } });
+      e.ui('checkinAdd', { emoji: '🧘', title: 'Breathe', kind: 'count', sentence: 'I took __ deep breaths', unit: 'breaths', target: 5, every: 30 });
+      const custom = e.summary().checkins.find((c) => c.title === 'Breathe');
+      assert(custom && custom.enabled, `${id}: custom check-in`);
+      let offered = false;
+      for (let i = 0; i < 400 && !offered; i++) { t0 += 5000; offered = e.tick({ idle: 5 }).some((f) => f.type === 'offer'); }
+      assert(offered && e.hasOffer(), `${id}: eye break offered`);
+      let n = e.ui('open', { topic: 'offer' }).result;
+      assert(n.kind === 'ask' && n.choices[0] === 'Done ✅', `${id}: done check-in asks: ${n.text}`);
+      n = e.ui('choose', { index: 0 }).result;
+      assert(!/\{[a-z]+\}/i.test(n.text), `${id}: ${n.text}`);
+      // The count check-in through the Tell menu.
+      e.ui('open', {});
+      const tell = e.ui('menu', { id: 'cat:tell' }).result;
+      assert(tell.menu.items.some((i) => i.id === 'checkins'), `${id}: check-in entry in Tell`);
+      const list = e.ui('menu', { id: 'checkins' }).result;
+      const breathe = list.menu.items.find((i) => i.label.includes('Breathe'));
+      n = e.ui('menu', { id: breathe.id }).result;
+      assert(n.kind === 'input' && n.input.prefix === 'I took' && n.input.suffix === 'deep breaths', `${id}: fill-in sentence`);
+      n = e.ui('input', { value: '6' }).result;
+      assert(/6 breaths/.test(n.text), `${id}: met reply uses the unit: ${n.text}`);
+      const cs = e.summary().checkins;
+      assert.strictEqual(cs.find((c) => c.id === 'eyes').todayCount, 1);
+      assert.strictEqual(cs.find((c) => c.title === 'Breathe').today, 6);
+      e.ui('checkinRemove', { id: custom.id });
+      assert(!e.summary().checkins.some((c) => c.title === 'Breathe'), `${id}: removed`);
+    } finally { Date.now = real; }
+    checks++;
+  }
+}
+{
+  // Journal: evening offer, mood + note saved; next morning after a rough day, a check-up.
+  for (const id of Object.keys(personalities)) {
+    const RealDate = Date;
+    let t0 = new RealDate(2026, 9, 23, 19, 30).getTime();
+    global.Date = class extends RealDate { constructor(...a) { super(...(a.length ? a : [t0])); } static now() { return t0; } };
+    try {
+      const { e } = make(id, { settings: { water: 0, breaks: 0, motivation: false, recap: false, chatter: 'off', lateNight: false } });
+      let offered = false;
+      for (let i = 0; i < 400 && !offered; i++) { t0 += 5000; offered = e.tick({ idle: 5 }).some((f) => f.type === 'offer'); }
+      assert(offered, `${id}: journal offered in the evening`);
+      let n = e.ui('open', { topic: 'offer' }).result;
+      assert.strictEqual(n.choices.length, 5);
+      n = e.ui('choose', { index: 4 }).result;
+      while (n.kind !== 'input') n = e.ui('next').result;
+      e.ui('input', { value: 'missed the bus' });
+      const j = e.summary().journal['2026-10-23'];
+      assert(j && j.mood === 'rough' && j.note === 'missed the bus', `${id}: journal saved ${JSON.stringify(j)}`);
+      t0 = new RealDate(2026, 9, 24, 9, 0).getTime();
+      e.event('launch');
+      let said = [];
+      for (let i = 0; i < 4; i++) { t0 += 5000; said = said.concat(e.tick({ idle: 999 })); }
+      assert(e.hasOffer(), `${id}: morning check-up offered`);
+      n = e.ui('open', { topic: 'offer' }).result;
+      n = e.ui('choose', { index: 0 }).result;
+      assert.strictEqual(e.summary().journal['2026-10-23'].followUp, 'better');
+      assert(e.summary().days.some((d) => d.mood === 'rough'), `${id}: days carry the mood`);
+    } finally { global.Date = RealDate; }
+    checks++;
+  }
+}
+{
+  // Needs: off by default; coins from XP; treats; decay and breaks.
+  for (const id of Object.keys(personalities)) {
+    const { e } = make(id);
+    assert.strictEqual(e.summary().needs.enabled, false);
+    e.ui('setting', { key: 'needs', value: true });
+    e.event('xp', { amount: 57 });
+    assert.strictEqual(e.summary().needs.coins, 5);
+    e.event('xp', { amount: 3 });
+    assert.strictEqual(e.summary().needs.coins, 6);
+    const before = e.summary().needs.energy;
+    const r = e.ui('buyTreat', { id: 'cookie' });
+    assert.strictEqual(r.result.needs.coins, 1);
+    assert(r.result.needs.energy >= Math.min(100, before + 29), `${id}: cookie energy`);
+    assert(r.effects.some((f) => f.type === 'say'), `${id}: treat line`);
+    const poor = e.ui('buyTreat', { id: 'toy' });
+    assert(poor.result.needs.coins === 1 && poor.effects.some((f) => f.type === 'say'), `${id}: not enough coins`);
+    for (const ev of [['playdate', { other: 'Biscuit', first: true }], ['eventStart', { id: 'halloween', title: 'Halloween' }], ['eventEarned', { id: 'halloween', title: 'Witch hat' }], ['meetingSoon', { title: 'Standup', minutes: 5 }], ['meetingNow', { title: 'Standup' }]]) {
+      const out = e.event(ev[0], ev[1]).filter((f) => f.type === 'say');
+      assert(out.length && !/\{[a-z]+\}/i.test(out[0].text), `${id}: ${ev[0]}: ${out.map((f) => f.text)}`);
+    }
     checks++;
   }
 }

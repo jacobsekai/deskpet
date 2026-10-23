@@ -464,4 +464,4 @@ function detailFor(activity, tool) {
   }
 }
 
-module.exports = { AgentMonitor, PRIORITY, TranscriptTokens, codexState };
+module.exports = { AgentMonitor, PRIORITY, TranscriptTokens, codexState, tailRecords };

@@ -28,8 +28,20 @@ jobs:
       - name: Desktop tools the app uses when present
         run: sudo apt-get update && sudo apt-get install -y xvfb x11-utils wmctrl pulseaudio-utils zip unzip
 
-      - name: Companion engine and trips (conversations, reputation, sync, trips, moving files, hook repair, zips)
+      - name: Companion engine, trips, and 1.5 features (summaries, calendars, quiet hours, events, gallery, playdates)
         run: npm test
+
+      - name: Gallery packs match their index and stay small
+        run: |
+          node -e "
+            const fs = require('fs'), path = require('path');
+            const dir = path.join('..', 'packs');
+            for (const p of JSON.parse(fs.readFileSync(path.join(dir, 'index.json'), 'utf8'))) {
+              let bytes = 0;
+              for (const f of p.files) bytes += fs.statSync(path.join(dir, p.id, f)).size;
+              if (bytes > 1024 * 1024) throw new Error(p.id + ' is ' + bytes + ' bytes');
+              console.log(p.id, p.files.length, 'files', Math.round(bytes / 1024), 'KB');
+            }"
 
       - name: Hook writes session state
         run: |

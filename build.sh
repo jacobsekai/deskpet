@@ -49,6 +49,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleShortVersionString</key><string>$VERSION</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>LSUIElement</key><true/>
+    <key>NSCalendarsUsageDescription</key><string>DeskPet gives you a heads-up a few minutes before meetings. Meeting details stay on this Mac.</string>
+    <key>NSCalendarsFullAccessUsageDescription</key><string>DeskPet gives you a heads-up a few minutes before meetings. Meeting details stay on this Mac.</string>
     <key>NSAppleEventsUsageDescription</key><string>DeskPet checks which website is open during focus sessions, so it can keep you off your blocklist.</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>CFBundleDocumentTypes</key>

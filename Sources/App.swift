@@ -179,7 +179,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     // MARK: Rewards state
 
     /// Rewards stay unlocked forever once you've prestiged.
-    private func isUnlocked(_ reward: Reward) -> Bool { stats.prestige > 0 || stats.level >= reward.level }
+    private func isUnlocked(_ reward: Reward) -> Bool {
+        if reward.event != nil { return earnedEventRewards.contains(reward.rawValue) }
+        return stats.prestige > 0 || stats.level >= reward.level
+    }
     private func wearing(_ reward: Reward) -> Bool {
         reward.slot == .golden ? defaults.bool(forKey: reward.slot.key) : defaults.string(forKey: reward.slot.key) == reward.value
     }
@@ -190,7 +193,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         set { defaults.set(newValue, forKey: "blocklist") }
     }
     /// On a call: no sounds and no chatty remarks.
-    private var quiet: Bool { (quietInCalls && inCall) || panicHidden }
+    private var quiet: Bool { (quietInCalls && inCall) || panicHidden || quietHoursActive }
+
+    // 1.5: agent summaries, quiet hours, calendar, playdates, seasonal events, gallery.
+    /// What each session said it did when it last finished.
+    private var summaries: [String: String] = [:]
+    private var quietHours: QuietHours {
+        get { QuietHours(defaults.dictionary(forKey: "quietHours")) }
+        set { defaults.set(newValue.dict, forKey: "quietHours") }
+    }
+    private var quietHoursActive = false
+    private let calendarWatcher = CalendarWatcher()
+    private var calendarSettings: [String: Any] {
+        get { defaults.dictionary(forKey: "calendar") ?? [:] }
+        set { defaults.set(newValue, forKey: "calendar") }
+    }
+    private var calendarSource: String { Visitor.active ? "off" : calendarSettings["source"] as? String ?? "off" }
+    private var calendarLead: Int { (calendarSettings["lead"] as? NSNumber)?.intValue ?? 5 }
+    private var announcedMeetings = Set<String>()
+    private var lastCalendarCheck = 0.0
+    private var lastPresence = 0.0
+    private struct Playdate {
+        let pid: pid_t
+        let name: String
+        let started: Double
+        var until: Double?
+    }
+    private var playdate: Playdate?
+    private var metPets = Set<pid_t>()
+    private var lastPlaydate = 0.0
+    private var activeEvent: SeasonalEvent?
+    private var lastEventCheck = -100.0
+    private var birthdayToday = false
+    private var galleryPacks: [Gallery.Pack] = []
+    private var earnedEventRewards: Set<String> { Set(defaults.stringArray(forKey: "eventRewards") ?? []) }
 
     // Emergency hide: one shortcut hides the pet and everything it shows, and silences it, until pressed again.
     private var panicHidden = false
@@ -207,6 +243,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     // MARK: - Lifecycle
 
     func applicationWillTerminate(_ notification: Notification) {
+        Presence.withdraw()
         companion.flush()
         if Visitor.active {
             saveVisit()
@@ -395,7 +432,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         if now - lastCallCheck > 2 {
             lastCallCheck = now
             inCall = CallDetector.inCall()
+            quietHoursActive = quietHours.active()
             sounds.muted = quiet
+        }
+        if now - lastPresence >= 1 {
+            lastPresence = now
+            playdateTick(now)
+        }
+        if now - lastEventCheck >= 30 {
+            lastEventCheck = now
+            eventTick()
+        }
+        if now - lastCalendarCheck >= 15 && calendarSource != "off" {
+            lastCalendarCheck = now
+            calendarTick(now)
         }
         if let until = playUntil, until <= Date() { endPlaytime() }
         if let finished = focus.tick() {
@@ -428,6 +478,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
                 if idle < 60 { $0.activeMinutes += 1 }
                 if agentsBusy { $0.agentMinutes += 1 }
             }
+            if idle < 60 { eventMinute() }
         }
         if !stats.today.greeted {
             gainXP(10) { $0.greeted = true }
@@ -492,8 +543,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             let project = s.project.isEmpty ? s.name : s.project
             switch s.activity {
             case .done:
-                say("\(s.name) is done! ✨", for: 4)
-                taskFinished(s, project: project)
+                let summary = finishSummary(s)
+                say(summary.map { "\(s.name): \($0) ✓" } ?? "\(s.name) is done! ✨", for: summary == nil ? 4 : 6)
+                taskFinished(s, project: project, summary: summary)
             case .needsYou:
                 say("\(s.name) needs you! 🙋", for: 5)
                 sounds.play(.needsYou)
@@ -502,9 +554,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
                 say("uh oh, \(s.name) hit an error 😵", for: 4)
                 postUnlessWatching(s, title: "\(s.name) hit an error", body: project)
             case .idle where !s.precise && now - (busySince[s.id] ?? now) > 15:
-                say("\(s.name) looks done ✨", for: 4)
+                let summary = finishSummary(s)
+                say(summary.map { "\(s.name): \($0) ✓" } ?? "\(s.name) looks done ✨", for: summary == nil ? 4 : 6)
                 transient = (.done, now + 3)
-                taskFinished(s, project: project)
+                taskFinished(s, project: project, summary: summary)
             default: break
             }
         }
@@ -512,6 +565,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             for (id, old) in known where current[id] == nil { say("bye, \(old.name)! 👋", for: 3) }
         }
         busySince = busySince.filter { current[$0.key] != nil }
+        summaries = summaries.filter { current[$0.key] != nil }
         known = current
     }
 
@@ -545,6 +599,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         p.aura = worn(.aura)?.value
         p.companion = worn(.companion)?.value
         p.golden = worn(.golden) != nil
+        if p.hat == nil && birthdayToday { p.hat = Reward.partyHat.value }
+        // During an event its outfit shows in empty slots, even before it's earned.
+        for r in activeEvent?.rewards ?? [] {
+            switch r.slot {
+            case .hat where p.hat == nil: p.hat = r.value
+            case .companion where p.companion == nil: p.companion = r.value
+            case .aura where p.aura == nil: p.aura = r.value
+            default: break
+            }
+        }
         p.prestige = showPrestigeBadge ? stats.prestige : 0
         return p
     }
@@ -797,6 +861,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     func petTapped() {
         let now = CACurrentMediaTime()
         walkTarget = nil
+        // Around a meeting's start, a click opens its link (Chime, Zoom, Meet, Teams, Webex).
+        if let m = calendarWatcher.next, abs(m.start.timeIntervalSinceNow) <= 10 * 60, let link = m.link, let url = URL(string: link) {
+            NSWorkspace.shared.open(url)
+            transient = (.done, now + 1.5)
+            say("opening \(m.title) 📅", for: 2.5)
+            return
+        }
         // When an agent wants attention, a click takes you to it.
         if let top = topSession, [.needsYou, .done, .error, .oops].contains(top.activity), top.pid > 0 {
             transient = (.petted, now + 1)
@@ -994,7 +1065,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     }
 
     private func post(_ title: String, _ body: String, pid: pid_t) {
-        guard notificationsOn, !panicHidden else { return }
+        guard notificationsOn, !panicHidden, !(quietHoursActive && !quietHours.notifications) else { return }
         notifier.post(title: title, body: body, pid: pid)
     }
 
@@ -1004,9 +1075,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         post(title, body, pid: s.pid)
     }
 
-    private func taskFinished(_ s: AgentSession, project: String) {
+    /// The first sentence of what the agent said last, from its session log.
+    private func finishSummary(_ s: AgentSession) -> String? {
+        let summary = AgentSummary.lastText(path: s.logPath, codex: s.isCodex).flatMap(AgentSummary.summarize)
+        if let summary { summaries[s.id] = summary }
+        return summary
+    }
+
+    private func taskFinished(_ s: AgentSession, project: String, summary: String? = nil) {
         sounds.play(.done)
-        postUnlessWatching(s, title: "\(s.name) is done ✨", body: project)
+        postUnlessWatching(s, title: "\(s.name) is done ✨", body: summary.map { "\(project): \($0)" } ?? project)
         gainXP(10) { $0.tasks += 1 }
     }
 
@@ -1022,6 +1100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             let now = CACurrentMediaTime()
             let pending = xpPopup.map { now - $0.at < 1.2 ? $0.amount : 0 } ?? 0
             xpPopup = (pending + xp, now)
+            apply(companion.event("xp", ["amount": xp]))   // coins for treats
         }
         levelUp(newLevel)
     }
@@ -1196,6 +1275,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         model.together = "⏱ \(together >= 60 ? "\(together / 60)h \(together % 60)m" : "\(together)m") together"
         model.focus = focus.phase == .off ? "" : focus.label
         model.quiet = quiet
+        let needs = companion.summary()["needs"] as? [String: Any] ?? [:]
+        if needs["enabled"] as? Bool == true {
+            let n = { (k: String) in (needs[k] as? NSNumber)?.intValue ?? 0 }
+            model.needs = "⚡ \(n("energy")) energy · 🎈 \(n("fun")) fun · 🪙 \(n("coins"))"
+        } else {
+            model.needs = ""
+        }
         model.nextReward = stats.canPrestige ? "⭐ Ready to prestige! (🐾 → Rewards)"
             : stats.prestige > 0 ? "" : Reward.next(after: stats.level).map { "Next reward: \($0.title) at Lv \($0.level)" } ?? ""
         model.accent = Color(nsColor: petView.theme.accent ?? .systemOrange)
@@ -1209,7 +1295,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             let tokens = usage.map { "\(Self.compact($0.output)) out · \(Self.compact($0.context)) context" } ?? ""
             return HoverModel.Row(id: s.id, title: s.name + (s.project.isEmpty ? "" : " · \(s.project)"),
                                   detail: s.detail + (s.precise ? "" : " (guessed)"), color: Color(nsColor: Self.color(for: s.activity)),
-                                  elapsed: elapsed, tokens: tokens, pid: s.pid)
+                                  elapsed: elapsed, tokens: tokens, pid: s.pid, summary: summaries[s.id] ?? "")
         }
     }
 
@@ -1628,6 +1714,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         menu.addItem(disabled("Today: \(todaySummary())"))
         if panicHidden {
             menu.addItem(item("🙈 Hidden: show \(config.petName) again\(panicKeyLabel.map { " (\($0))" } ?? "")", #selector(togglePanic)))
+        } else if quietHoursActive {
+            menu.addItem(disabled("🌙 Quiet hours until \(quietHours.to)"))
         } else if quiet {
             menu.addItem(disabled("🤫 Quiet: a mic or camera is in use"))
         }
@@ -1675,6 +1763,150 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         menu.addItem(item(panel.isVisible ? "Hide \(config.petName)" : "Show \(config.petName)", #selector(toggleVisible)))
         menu.addItem(.separator())
         menu.addItem(Visitor.active ? item("🏠 Go home (quit)", #selector(quit), key: "q") : item("Quit DeskPet", #selector(quit), key: "q"))
+    }
+
+    // MARK: - Playdates
+
+    private var petScreenFrame: NSRect { petView.hitRect.offsetBy(dx: panel.frame.minX, dy: panel.frame.minY) }
+
+    /// Publishes where the pet is, and walks over to play with another pet on this computer.
+    private func playdateTick(_ now: Double) {
+        guard panel.isVisible, !panicHidden, !petAway else {
+            Presence.withdraw()
+            playdate = nil
+            return
+        }
+        let me = petScreenFrame
+        Presence.publish(name: config.petName, frame: me)
+        let others = Presence.others()
+        if var pd = playdate {
+            guard let other = others.first(where: { $0.pid == pd.pid }) else {
+                playdate = nil
+                walkTarget = nil
+                return
+            }
+            if let until = pd.until {
+                if now >= until { playdate = nil; lastPlaydate = now }
+                return
+            }
+            let (desired, side, arrived) = PlaydateMath.spot(me: me.midX, other: other.x, gap: max(me.width, other.width) * 0.9,
+                                                             myPID: getpid(), otherPID: other.pid)
+            if arrived {
+                // Close enough: face each other and play.
+                walkTarget = nil
+                walkDirection = side
+                transient = (.petted, now + 4)
+                pd.until = now + 4
+                playdate = pd
+                apply(companion.event("playdate", ["other": other.name, "first": !metPets.contains(other.pid)]))
+                metPets.insert(other.pid)
+                sounds.play(.pet)
+            } else if now - pd.started > 30 || petView.dragging || velocity != nil {
+                playdate = nil
+                lastPlaydate = now
+            } else {
+                let vf = petScreen().visibleFrame
+                let target = panel.frame.minX + (desired - me.midX)
+                walkTarget = min(max(vf.minX - 40, target), vf.maxX - size.width + 40)
+            }
+            return
+        }
+        guard let other = others.first, mood == .idle || mood == .walking, velocity == nil, !petView.dragging,
+              !petView.resizing, !talkOpen, (topSession?.activity ?? .idle) == .idle else { return }
+        guard !metPets.contains(other.pid) || now - lastPlaydate > 180 else { return }
+        playdate = Playdate(pid: other.pid, name: other.name, started: now, until: nil)
+    }
+
+    // MARK: - Seasonal events
+
+    private func eventTick() {
+        activeEvent = SeasonalEvent.active()
+        let today = Calendar.current.dateComponents([.month, .day], from: Date())
+        let md = String(format: "%02d-%02d", today.month ?? 0, today.day ?? 0)
+        let birthday = ((companion.exportData()["memory"] as? [String: Any])?["birthday"] as? [String: Any])?["value"] as? String
+        birthdayToday = birthday == md
+        guard let e = activeEvent, defaults.bool(forKey: "setupComplete") else { return }
+        let key = "eventStarted.\(e.id).\(e.year(of: Date()))"
+        if !defaults.bool(forKey: key) {
+            defaults.set(true, forKey: key)
+            apply(companion.event("eventStart", ["id": e.id, "title": e.title]))
+        }
+    }
+
+    /// A minute together during an event; 60 of them earn its rewards for good.
+    private func eventMinute() {
+        guard let e = activeEvent else { return }
+        let key = "event.\(e.id).\(e.year(of: Date()))"
+        let minutes = defaults.integer(forKey: key) + 1
+        defaults.set(minutes, forKey: key)
+        guard minutes >= SeasonalEvent.goal, !e.rewards.allSatisfy(isUnlocked) else { return }
+        var earned = earnedEventRewards
+        for r in e.rewards { earned.insert(r.rawValue) }
+        defaults.set(Array(earned).sorted(), forKey: "eventRewards")
+        for r in e.rewards where worn(r.slot) == nil || worn(r.slot)?.event == nil { wear(r) }
+        transient = (.done, CACurrentMediaTime() + 3)
+        sounds.play(.levelUp)
+        apply(companion.event("eventEarned", ["id": e.id, "title": e.title]))
+        post("\(e.emoji) \(e.title) rewards earned!", e.rewards.map(\.title).joined(separator: " and ") + " are yours to keep.", pid: 0)
+    }
+
+    private func eventsState() -> [String: Any] {
+        var active: Any = NSNull()
+        if let e = activeEvent ?? SeasonalEvent.active() {
+            active = ["id": e.id, "title": e.title, "emoji": e.emoji, "until": e.to,
+                      "minutes": min(SeasonalEvent.goal, defaults.integer(forKey: "event.\(e.id).\(e.year(of: Date()))")),
+                      "goal": SeasonalEvent.goal, "earned": e.rewards.allSatisfy(isUnlocked), "rewards": e.rewards.map(\.rawValue)]
+        }
+        var next: Any = NSNull()
+        if let n = SeasonalEvent.next() {
+            next = ["id": n.event.id, "title": n.event.title, "from": n.from.timeIntervalSince1970 * 1000]
+        }
+        return ["active": active, "next": next]
+    }
+
+    // MARK: - Calendar heads-up
+
+    private func setCalendar(_ value: [String: Any]) {
+        var c = calendarSettings
+        if let source = value["source"] as? String, ["off", "system", "ics"].contains(source) { c["source"] = source }
+        if let url = value["icsUrl"] as? String { c["icsUrl"] = url.trimmingCharacters(in: .whitespaces) }
+        if let lead = (value["lead"] as? NSNumber)?.intValue { c["lead"] = min(60, max(1, lead)) }
+        calendarSettings = c
+        announcedMeetings = []
+        calendarWatcher.reset()
+        let source = calendarSource
+        if source == "system" && !CalendarWatcher.systemAuthorized && !CalendarWatcher.systemDenied {
+            calendarWatcher.requestAccess { [weak self] _ in self?.calendarTick(CACurrentMediaTime(), force: true) }
+        } else if source != "off" {
+            calendarTick(CACurrentMediaTime(), force: true)
+        }
+    }
+
+    private func calendarState() -> [String: Any] {
+        let next = calendarSource == "off" ? nil : calendarWatcher.next
+        return ["system": true, "source": calendarSource, "icsUrl": calendarSettings["icsUrl"] as? String ?? "", "lead": calendarLead,
+                "status": calendarSource == "off" ? "off" : calendarSource == "system" && CalendarWatcher.systemDenied ? "denied" : calendarWatcher.status,
+                "next": next.map { ["title": $0.title, "start": $0.start.timeIntervalSince1970 * 1000, "link": $0.link as Any] } as Any]
+    }
+
+    /// "Standup in 5 minutes!" and "Standup is starting!", once each per meeting.
+    private func calendarTick(_ now: Double, force: Bool = false) {
+        calendarWatcher.refresh(source: calendarSource, icsURL: calendarSettings["icsUrl"] as? String ?? "", force: force)
+        let lead = Double(calendarLead * 60)
+        for m in calendarWatcher.meetings {
+            let secs = m.start.timeIntervalSinceNow
+            let key = "\(m.title)|\(Int(m.start.timeIntervalSince1970))"
+            if secs > 30 && secs <= lead && announcedMeetings.insert(key + "|soon").inserted {
+                let minutes = max(1, Int((secs / 60).rounded()))
+                transient = (.startled, now + 1.5)
+                sounds.play(.needsYou)
+                apply(companion.event("meetingSoon", ["title": m.title, "minutes": minutes]))
+                post("📅 \(m.title)", "Starts in \(minutes) minute\(minutes == 1 ? "" : "s")" + (m.link == nil ? "" : ". Click \(config.petName) to join."), pid: 0)
+            } else if secs <= 30 && secs > -120 && announcedMeetings.insert(key + "|now").inserted {
+                transient = (.startled, now + 1.5)
+                apply(companion.event("meetingNow", ["title": m.title]))
+            }
+        }
     }
 
     // MARK: - Trips (home side)
@@ -2057,6 +2289,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
                 "color": Self.color(for: s.activity).hexString,
                 "elapsed": s.activity == .idle ? "idle" : secs >= 60 ? "\(secs / 60)m" : "\(secs)s",
                 "tokens": usage.map { "\(Self.compact($0.output)) out · \(Self.compact($0.context)) context" } ?? "",
+                "summary": summaries[s.id] ?? "",
             ]
         }
         let d = stats.today
@@ -2076,8 +2309,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             "slots": Reward.Slot.allCases.map { ["id": $0.rawValue, "title": $0.title] },
             "rewards": Reward.allCases.map { r in
                 ["id": r.rawValue, "title": r.title, "level": r.level, "slot": r.slot.rawValue, "value": r.value,
-                 "unlocked": isUnlocked(r), "worn": isUnlocked(r) && wearing(r)] as [String: Any]
+                 "unlocked": isUnlocked(r), "worn": isUnlocked(r) && wearing(r), "event": r.event as Any,
+                 "eventTitle": r.event.flatMap { id in SeasonalEvent.all.first { $0.id == id } }.map { "\($0.emoji) \($0.title)" } as Any] as [String: Any]
             },
+            "history": stats.history(days: 14),
+            "quietHours": quietHours.dict.merging(["active": quietHoursActive]) { a, _ in a },
+            "calendar": calendarState(),
+            "events": eventsState(),
             "togetherMinutes": stats.togetherMinutes,
             "today": ["activeMinutes": d.activeMinutes, "agentMinutes": d.agentMinutes, "tasks": d.tasks, "pets": d.pets,
                       "focusSessions": d.focusSessions, "blocked": d.blocked],
@@ -2115,6 +2353,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         switch action {
         case "state":
             return panelState()
+        case "calendarTest":
+            let later = DeferredReply()
+            calendarWatcher.refresh(source: calendarSource, icsURL: calendarSettings["icsUrl"] as? String ?? "", force: true) { [weak self] in
+                guard let self else { return later.resolve(nil) }
+                let next = self.calendarWatcher.next
+                later.resolve(["ok": self.calendarWatcher.status == "ok", "events": self.calendarWatcher.meetings.count,
+                               "next": next.map { ["title": $0.title, "start": $0.start.timeIntervalSince1970 * 1000, "link": $0.link as Any] } as Any,
+                               "error": self.calendarWatcher.status == "ok" ? NSNull() : self.calendarWatcher.status as Any])
+            }
+            return later
+        case "galleryList":
+            let later = DeferredReply()
+            Gallery.list { [weak self] result in
+                switch result {
+                case .success(let packs):
+                    self?.galleryPacks = packs
+                    let have = Set(SpritePack.available())
+                    later.resolve(["ok": true, "packs": packs.map { ["id": $0.id, "name": $0.name, "author": $0.author, "description": $0.description,
+                                                                    "preview": $0.preview, "installed": have.contains($0.id)] }])
+                case .failure(let error):
+                    later.resolve(["ok": false, "packs": [], "error": error.localizedDescription])
+                }
+            }
+            return later
+        case "galleryInstall":
+            guard !Visitor.active else { return ["ok": false, "error": "not while \(config.petName) is visiting"] }
+            let id = payload["id"] as? String ?? ""
+            let later = DeferredReply()
+            let install = { [weak self] (pack: Gallery.Pack) in
+                Gallery.install(pack, into: SpritePack.root) { error in
+                    if error == nil { self?.say("new look downloaded: \(pack.name) ✨", for: 3) }
+                    later.resolve(error.map { ["ok": false, "error": $0.localizedDescription] } ?? ["ok": true])
+                }
+            }
+            if let pack = galleryPacks.first(where: { $0.id == id }) {
+                install(pack)
+            } else {
+                Gallery.list { [weak self] result in
+                    if case .success(let packs) = result { self?.galleryPacks = packs }
+                    guard let pack = (try? result.get())?.first(where: { $0.id == id }) else {
+                        return later.resolve(["ok": false, "error": "that pack isn't in the gallery"])
+                    }
+                    install(pack)
+                }
+            }
+            return later
         case "tripDrives":
             return ["drives": TripFiles.drives().map { ["path": $0.url.path, "name": $0.name] }]
         case "tripChooseFolder":
@@ -2290,7 +2574,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             menu.addItem(disabled(slot.title))
             for reward in Reward.allCases where reward.slot == slot {
                 let unlocked = isUnlocked(reward)
-                let i = item(unlocked ? reward.title : "🔒 \(reward.title) · Lv \(reward.level)", #selector(chooseReward(_:)),
+                let lock = reward.event.flatMap { id in SeasonalEvent.all.first { $0.id == id } }.map { "\($0.emoji) \($0.title) event" } ?? "Lv \(reward.level)"
+                let i = item(unlocked ? reward.title : "🔒 \(reward.title) · \(lock)", #selector(chooseReward(_:)),
                              checked: unlocked && wearing(reward))
                 i.representedObject = reward.rawValue
                 i.isEnabled = unlocked
@@ -2457,6 +2742,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             case "quietInCalls": quietInCalls = value as? Bool ?? true
             case "autoUpdate": autoUpdate = value as? Bool ?? true
             case "typeAlong": typeAlong = value as? Bool ?? true
+            case "quietHours":
+                quietHours = QuietHours(value as? [String: Any])
+                quietHoursActive = quietHours.active()
+                sounds.muted = quiet
+                return ["value": quietHours.dict, "active": quietHoursActive]
+            case "calendar":
+                setCalendar(value as? [String: Any] ?? [:])
+                return ["value": calendarState()]
             case "panicKey":
                 panicKeyID = value as? String ?? PanicKey.defaultID
                 panicKeyOK = panicKey.register(panicKeyID)

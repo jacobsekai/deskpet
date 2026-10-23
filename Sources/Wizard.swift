@@ -80,6 +80,15 @@ final class WizardController: NSObject, WKScriptMessageHandler, NSWindowDelegate
         guard let body = message.body as? [String: Any], let id = body["id"] as? Int,
               let action = body["action"] as? String else { return }
         let result = handler(action, body["payload"] as? [String: Any] ?? [:]) ?? NSNull()
+        // Network requests (the sprite gallery, calendar feeds) answer later.
+        if let later = result as? DeferredReply {
+            later.onReady { [weak self] value in self?.reply(id, value ?? NSNull()) }
+            return
+        }
+        reply(id, result)
+    }
+
+    private func reply(_ id: Int, _ result: Any) {
         guard let data = try? JSONSerialization.data(withJSONObject: ["r": result]),
               let json = String(data: data, encoding: .utf8) else { return }
         webView.evaluateJavaScript("window.__deskpetReply(\(id), \(json).r)")

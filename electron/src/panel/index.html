@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' blob: data: https://raw.githubusercontent.com; style-src 'self' 'unsafe-inline'">
   <title>DeskPet</title>
   <link rel="stylesheet" href="../wizard/wizard.css">
   <link rel="stylesheet" href="panel.css">
@@ -18,6 +18,7 @@
     <div class="layout">
       <nav class="sidebar" id="sidebar">
         <button data-page="home" class="on"><span>🏠</span>Home</button>
+        <button data-page="insights"><span>📊</span>Insights</button>
         <button data-page="companion"><span>💞</span>Companion</button>
         <button data-page="trips"><span>🧳</span>Trips</button>
         <button data-page="rewards"><span>🏆</span>Rewards</button>
@@ -41,6 +42,7 @@
               <div class="xp"><div class="xp-bar"><div id="hero-xp-fill"></div></div><span id="hero-xp-text"></span></div>
               <div class="hero-next" id="hero-next"></div>
               <div class="hero-together" id="hero-together"></div>
+              <div class="event-banner" id="home-event" hidden></div>
               <div class="actions">
                 <button class="primary" id="home-focus">🍅 Focus 25 min</button>
                 <button class="ghost-btn" id="home-bring">📍 Bring here</button>
@@ -56,6 +58,21 @@
         </section>
 
         <!-- Companion -->
+        <!-- Insights -->
+        <section class="page" data-page="insights">
+          <h2>Insights</h2>
+          <p class="sub">This week so far, compared with the same days last week.</p>
+          <div class="tiles" id="in-tiles"></div>
+          <h3>Last 14 days</h3>
+          <div class="charts" id="in-charts"></div>
+          <h3>Mood journal</h3>
+          <div class="card">
+            <div class="mood-cal" id="in-moods"></div>
+            <div class="mood-legend" id="in-mood-legend"></div>
+          </div>
+          <div class="chart-tip" id="chart-tip" hidden></div>
+        </section>
+
         <section class="page" data-page="companion">
           <div class="card bond-card">
             <div>
@@ -82,7 +99,28 @@
             <div class="toggle-row"><span>✨ Daily motivation</span><div class="switch-btn" data-companion="motivation"></div></div>
             <div class="toggle-row"><span>👀 Comments on the apps you use</span><div class="switch-btn" data-companion="appComments"></div></div>
             <div class="toggle-row"><span>🌆 Evening recap of your day</span><div class="switch-btn" data-companion="recap"></div></div>
+            <div class="toggle-row"><span>📔 Evening "how was today?" journal</span><div class="switch-btn" data-companion="journal"></div></div>
           </div>
+          <h3>Check-ins</h3>
+          <div class="card">
+            <p class="sub">Little reminders like the water break. Click the pet when one comes up, or log it from Talk → Tell → Check in.</p>
+            <div class="checkins" id="cp-checkins"></div>
+            <details class="add-checkin">
+              <summary>➕ Add your own</summary>
+              <div class="add-grid">
+                <label class="field small"><span>Emoji</span><input id="ci-emoji" maxlength="4" value="✅"></label>
+                <label class="field small"><span>Name</span><input id="ci-title" maxlength="30" placeholder="Breathe"></label>
+                <label class="field small"><span>Log it as</span><select id="ci-kind"><option value="done">Done / not yet</option><option value="count">A number</option></select></label>
+                <label class="field small ci-count"><span>Sentence (use __ for the blank)</span><input id="ci-sentence" maxlength="60" placeholder="I took __ deep breaths"></label>
+                <label class="field small ci-count"><span>Goal</span><input id="ci-target" type="number" min="1" max="999" value="5"></label>
+                <label class="field small"><span>Remind me every</span><select id="ci-every"></select></label>
+                <label class="field small"><span>…or every day at</span><input id="ci-at" type="time"></label>
+              </div>
+              <div class="actions"><button class="primary" id="ci-add">Add check-in</button><span class="note" id="ci-note"></span></div>
+            </details>
+          </div>
+          <h3>Needs</h3>
+          <div class="card" id="cp-needs"></div>
           <h3>Things <span id="cp-pet-name">your pet</span> remembers</h3>
           <div class="card">
             <div class="row-inline">
@@ -138,7 +176,9 @@
             <button class="ghost-btn" id="pack-import">📦 Import pack…</button>
             <button class="ghost-btn" id="pack-export">⬆️ Export current pack…</button>
             <button class="ghost-btn" id="pack-folder">📁 Open sprites folder</button>
+            <button class="ghost-btn" id="gallery-open">🛍️ Browse the gallery</button>
           </div>
+          <div class="gallery" id="look-gallery" hidden></div>
           <h3>Theme</h3>
           <div class="swatches" id="look-swatches"></div>
           <h3>Thought bubble</h3>
@@ -189,6 +229,10 @@
         <section class="page" data-page="behavior">
           <h2>Behavior</h2>
           <div class="toggles" id="behavior-toggles"></div>
+          <h3>🌙 Quiet hours</h3>
+          <div class="card" id="bh-quiet"></div>
+          <h3>📅 Calendar heads-up</h3>
+          <div class="card" id="bh-calendar"></div>
         </section>
 
         <!-- Account -->

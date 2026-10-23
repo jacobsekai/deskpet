@@ -1,0 +1,22 @@
+{
+  "height": 92,
+  "fps": 6,
+  "facing": "right",
+  "personality": "cat",
+  "bounce": true,
+  "moods": {
+    "idle": {
+      "durations": [
+        3.5,
+        0.15
+      ]
+    },
+    "typing": {
+      "fps": 8
+    },
+    "walking": {
+      "fps": 8
+    }
+  },
+  "name": "Snowball"
+}

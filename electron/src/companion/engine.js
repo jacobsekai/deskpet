@@ -28,7 +28,25 @@
   const DAILY_GAIN_CAP = 12;
   const MINUTE = 60000;
 
-  const DEFAULT_SETTINGS = { chatter: 'sometimes', water: 90, breaks: 50, lateNight: true, motivation: true, appComments: true, recap: true };
+  const DEFAULT_SETTINGS = { chatter: 'sometimes', water: 90, breaks: 50, lateNight: true, motivation: true, appComments: true, recap: true, journal: true, needs: false };
+
+  /** Check-ins you can turn on (custom ones are added next to them). `every` = minutes of activity; `at` = a daily time. */
+  const BUILTIN_CHECKINS = [
+    { id: 'eyes', emoji: '👀', title: '20-20-20 eye break', kind: 'done', every: 20 },
+    { id: 'posture', emoji: '🪑', title: 'Posture check', kind: 'done', every: 45 },
+    { id: 'stand', emoji: '🧍', title: 'Stand up', kind: 'done', every: 60 },
+    { id: 'stretch', emoji: '🙆', title: 'Stretch', kind: 'count', sentence: 'I stretched for __ minutes', unit: 'minutes', target: 3, every: 90 },
+    { id: 'meds', emoji: '💊', title: 'Medication', kind: 'done', every: 0, at: '09:00' },
+  ];
+  const CHECKIN_EVERY = [0, 15, 20, 30, 45, 60, 90, 120];
+  const MOOD_IDS = ['amazing', 'good', 'okay', 'tiring', 'rough'];
+  const TREATS = [
+    { id: 'cookie', emoji: '🍪', title: 'Cookie', cost: 5, energy: 30, fun: 0 },
+    { id: 'strawberry', emoji: '🍓', title: 'Strawberry', cost: 8, energy: 20, fun: 20 },
+    { id: 'toy', emoji: '🧸', title: 'Toy', cost: 10, energy: 0, fun: 40 },
+  ];
+  /** Days of per-day flags kept (Insights shows two weeks). */
+  const DAY_HISTORY = 35;
   /** Minutes of activity between conversations the pet starts. */
   const CHATTER = { off: null, sometimes: [45, 90], often: [18, 35] };
   const WATER_CHOICES = [0, 45, 60, 90, 120];
@@ -54,7 +72,7 @@
   /** Categories with their own main-menu entries (the rest are listed under "Ask {pet} about…"). */
   const OWN_ENTRY = ['you', 'feeling', 'tell', 'goodbye', 'special', 'milestone'];
   /** Topics that only come up on their own: holidays, birthdays, relationship milestones, and coming home from a trip. */
-  const HIDDEN = ['special', 'milestone', 'trip'];
+  const HIDDEN = ['special', 'milestone', 'trip', 'journal', 'checkin'];
   /** Hours of time together the pet celebrates. */
   const TOGETHER_HOURS = [1, 10, 24, 50, 100, 250, 500, 1000, 2500, 5000];
   /** Trips kept in the log (control center → Trips). */
@@ -137,7 +155,45 @@
       farewell: isObj(s.farewell) ? s.farewell : null,
       firstMet: typeof s.firstMet === 'string' ? s.firstMet : dayKey(),
       trips: Array.isArray(s.trips) ? s.trips.filter((t) => isObj(t) && t.id).slice(-TRIP_LOG) : [],
+      checkins: normalizeCheckins(s.checkins),
+      journal: normalizeJournal(s.journal),
+      needs: {
+        energy: clamp(num(isObj(s.needs) && s.needs.energy, 80)), fun: clamp(num(isObj(s.needs) && s.needs.fun, 80)),
+        coins: Math.max(0, Math.floor(num(isObj(s.needs) && s.needs.coins, 0))), bank: num(isObj(s.needs) && s.needs.bank, 0),
+      },
     };
+  }
+
+  const clamp = (v) => Math.max(0, Math.min(100, v));
+
+  /** Built-ins keep your choices (on/off, how often); custom check-ins are kept as they are. */
+  function normalizeCheckins(list) {
+    const saved = new Map((Array.isArray(list) ? list : []).filter((c) => isObj(c) && c.id).map((c) => [String(c.id), c]));
+    const out = BUILTIN_CHECKINS.map((b) => {
+      const c = saved.get(b.id) || {};
+      return { ...b, builtin: true, enabled: !!c.enabled, every: CHECKIN_EVERY.includes(c.every) ? c.every : b.every, at: typeof c.at === 'string' ? c.at : b.at || '' };
+    });
+    for (const c of saved.values()) {
+      if (BUILTIN_CHECKINS.some((b) => b.id === c.id)) continue;
+      out.push({
+        id: clean(c.id, 24), emoji: clean(c.emoji, 4) || '✅', title: clean(c.title, 30) || 'Check-in', kind: c.kind === 'count' ? 'count' : 'done',
+        sentence: clean(c.sentence, 60), unit: clean(c.unit, 16), target: Math.max(1, Math.floor(num(c.target, 1))),
+        every: CHECKIN_EVERY.includes(c.every) ? c.every : 60, at: typeof c.at === 'string' ? c.at : '', enabled: c.enabled !== false, builtin: false,
+      });
+    }
+    return out;
+  }
+
+  function normalizeJournal(j) {
+    const out = {};
+    const days = Object.keys(isObj(j) ? j : {}).sort().slice(-400);
+    for (const d of days) {
+      const e = j[d];
+      if (!isObj(e)) continue;
+      out[d] = { mood: MOOD_IDS.includes(e.mood) ? e.mood : null, note: e.note ? clean(e.note, 120) : null };
+      if (e.followUp) out[d].followUp = clean(e.followUp, 12);
+    }
+    return out;
   }
 
   const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve',
@@ -197,6 +253,10 @@
     let encourageMs = 0;
     let encourageDue = between([80, 150]);
     let streakStart = startedAt;
+    const checkinMs = {};
+    let prevIdle = 0;
+    let lastNeedHint = 0;
+    let lastPlaydate = 0;
     let lastNight = 0;
     let lastCategory = '';
     const appCooldown = {};
@@ -480,6 +540,7 @@
         state.seen[c.topic.id] = (state.seen[c.topic.id] || 0) + 1;
         state.counters.talks++;
         changeAffection(c.topic.affection != null ? c.topic.affection : 1);
+        needsBoost(0, 5);
         dirty = true;
       }
       if (c && c.quit) {
@@ -505,6 +566,9 @@
         if (value !== null && value !== '') remember(step.key, value, step.label);
       }
       if (c.remember) for (const [k, v] of Object.entries(c.remember)) remember(k, v, c.label);
+      if (step.journal === 'mood' && MOOD_IDS.includes(c.value)) setJournal({ mood: c.value });
+      if (step.journal === 'followUp' && c.value) setJournal({ followUp: c.value }, yesterday());
+      if (c.checkin) logCheckin(c.checkin, 1);
       if (c.farewell) { state.farewell = { reason: c.farewell, at: now() }; dirty = true; }
       convo.queue.unshift(...(c.steps || []));
       if (c.say) convo.queue.unshift({ say: c.say, mood: c.mood });
@@ -524,6 +588,8 @@
         }
         convo.vars = { ...(convo.vars || {}), value: n, sips: n, sipsText: plural(n, 'sip', 'sips') };
         if (step.log === 'sips') logSips(n);
+        if (String(step.log || '').startsWith('ci:')) logCheckin(step.log.slice(3), n);
+        if (convo.vars.unit) convo.vars.valueText = plural(n, convo.vars.unit.replace(/s$/, ''), convo.vars.unit);
         const range = (step.ranges || []).find((r) => r.max == null || n <= r.max);
         convo.queue.unshift(...[].concat(range ? range.steps || [] : [], step.then || []));
         return advance();
@@ -539,6 +605,7 @@
         convo.queue.unshift(...[].concat(step.skip || [{ pool: 'input.skip' }]));
         return advance();
       }
+      if (step.journal === 'note') setJournal({ note: value });
       if (step.key) remember(step.key, value, step.label, display);
       convo.vars = { ...(convo.vars || {}), value: display || value };
       convo.queue.unshift(...[].concat(step.then || []));
@@ -550,6 +617,7 @@
       if (!known || !['win', 'lose', 'draw'].includes(outcome)) return menuNode('main', line('talk.anything', 'Anything else?'));
       state.counters.games++;
       if (outcome === 'win') state.counters.wins++;
+      needsBoost(0, 10);
       dirty = true;
       changeAffection(1);
       effects.push({ type: 'xp', amount: outcome === 'win' ? 5 : outcome === 'draw' ? 4 : 3, play: true });
@@ -584,10 +652,131 @@
       dirty = true;
     }
 
+    // MARK: Check-ins
+
+    const checkinById = (id) => state.checkins.find((c) => c.id === id);
+
+    /** A check-in becomes a small conversation: a fill-in sentence (count) or "Done ✅ / Not yet". */
+    function checkinTopic(c) {
+      const vars = { title: c.title, emoji: c.emoji, unit: c.unit || '', target: c.target || 1 };
+      let steps;
+      if (c.kind === 'count') {
+        const [prefix, suffix] = (c.sentence && c.sentence.includes('__') ? c.sentence : `I did __ ${c.unit || 'times'}`).split('__').map((x) => x.trim());
+        const target = c.target || 1;
+        steps = [{
+          input: `${c.emoji} ${c.title}: how did it go?`, inputPool: 'checkin.ask', kind: 'number', max: 3, prefix, suffix, placeholder: '?', log: `ci:${c.id}`,
+          ranges: [{ max: 0, steps: [{ pool: 'checkin.zero', mood: 'worried' }] }, { max: target - 1, steps: [{ pool: 'checkin.some', mood: 'happy' }] },
+            { max: target * 3 - 1, steps: [{ pool: 'checkin.met', mood: 'proud' }] }, { steps: [{ pool: 'checkin.lots', mood: 'excited' }] }],
+          skip: [{ pool: 'checkin.skip' }],
+        }];
+      } else {
+        steps = [{ ask: `${c.emoji} ${c.title}?`, askPool: 'checkin.askDone', choices: [
+          { label: 'Done ✅', checkin: c.id, steps: [{ pool: 'checkin.done', mood: 'proud' }] },
+          { label: 'Not yet', steps: [{ pool: 'checkin.notYet' }] },
+        ] }];
+      }
+      return { topic: { id: `ci_${c.id}`, category: 'checkin', affection: 0, steps }, vars };
+    }
+
+    function logCheckin(id, value) {
+      const c = checkinById(id);
+      if (!c) return;
+      const day = dayFlags();
+      day[`ci:${id}`] = (day[`ci:${id}`] || 0) + value;
+      day[`ci:${id}:n`] = (day[`ci:${id}:n`] || 0) + 1;
+      state.counters[`ci:${id}`] = (state.counters[`ci:${id}`] || 0) + value;
+      checkinMs[id] = 0;
+      if (value > 0) {
+        changeAffection(0.3);
+        effects.push({ type: 'xp', amount: 2, play: true });
+        needsBoost(10, 0);
+      }
+      dirty = true;
+    }
+
+    /** The next check-in that's due: enough active minutes since the last one, or its daily time has come. */
+    function dueCheckin() {
+      const day = dayFlags();
+      const d = new Date();
+      const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      for (const c of state.checkins) {
+        if (!c.enabled) continue;
+        if (c.at && hm >= c.at && !day[`ci:${c.id}:n`] && !day[`ci:${c.id}:r`]) { day[`ci:${c.id}:r`] = true; return c; }
+        if (c.every && (checkinMs[c.id] || 0) >= c.every * MINUTE) { checkinMs[c.id] = 0; return c; }
+      }
+      return null;
+    }
+
+    function checkinSummary() {
+      const day = dayFlags();
+      return state.checkins.map((c) => ({ ...c, today: day[`ci:${c.id}`] || 0, todayCount: day[`ci:${c.id}:n`] || 0, total: state.counters[`ci:${c.id}`] || 0 }));
+    }
+
+    // MARK: Journal
+
+    const yesterday = () => { const d = new Date(); d.setDate(d.getDate() - 1); return dayKey(d); };
+
+    function setJournal(patch, day) {
+      const d = day || dayKey();
+      state.journal[d] = { mood: null, note: null, ...(state.journal[d] || {}), ...patch };
+      const keys = Object.keys(state.journal).sort();
+      for (const k of keys.slice(0, Math.max(0, keys.length - 400))) delete state.journal[k];
+      dirty = true;
+    }
+
+    // MARK: Needs (energy and fun; off unless turned on, and never punishing)
+
+    function needsBoost(energy, fun) {
+      if (!state.settings.needs) return;
+      state.needs.energy = clamp(state.needs.energy + energy);
+      state.needs.fun = clamp(state.needs.fun + fun);
+      dirty = true;
+    }
+
+    function needsTick(t, dt) {
+      if (!state.settings.needs) return;
+      // Coming back from a break (5+ minutes away) is restful.
+      if (prevIdle > 300 && ctx.idle < 10) needsBoost(25, 0);
+      if (ctx.idle < 120) {
+        state.needs.energy = clamp(state.needs.energy - (10 * dt) / (60 * MINUTE));
+        state.needs.fun = clamp(state.needs.fun - (8 * dt) / (60 * MINUTE));
+      }
+      if (t - lastNeedHint > 60 * MINUTE && canSpeak(t, 3 * MINUTE)) {
+        if (state.needs.energy < 25) {
+          lastNeedHint = t;
+          effects.push({ type: 'mood', mood: 'sleepy', seconds: 6 });
+          say(line('needs.tired', "I'm getting sleepy… could we take a little break? 😴"), 6);
+        } else if (state.needs.fun < 25) {
+          lastNeedHint = t;
+          say(line('needs.bored', "I'm a little bored… play with me? 🎾"), 6);
+        }
+      }
+    }
+
+    function buyTreat(id) {
+      const treat = TREATS.find((x) => x.id === id);
+      if (!treat) return;
+      if (state.needs.coins < treat.cost) { say(line('needs.poor', 'Not enough coins yet! Coins come from XP 🪙'), 4); return; }
+      state.needs.coins -= treat.cost;
+      state.needs.energy = clamp(state.needs.energy + treat.energy);
+      state.needs.fun = clamp(state.needs.fun + treat.fun);
+      effects.push({ type: 'mood', mood: 'petted', seconds: 3 });
+      say(line(`needs.treat.${id}`, `${treat.emoji} yum! thank you! 💕`), 4);
+      changeAffection(0.5);
+      dirty = true;
+    }
+
+    function needsSummary() {
+      return { enabled: !!state.settings.needs, energy: Math.round(state.needs.energy), fun: Math.round(state.needs.fun), coins: state.needs.coins, treats: TREATS };
+    }
+
     // MARK: Trips
 
     function logTrip() {
       const v = (convo && convo.vars) || {};
+      const tripMood = state.memory.tripDay && state.memory.tripDay.at >= (v.since || 0) ? state.memory.tripDay.value : null;
+      const asMood = { amazing: 'amazing', 'pretty good': 'good', okay: 'okay', tiring: 'tiring', rough: 'rough' }[tripMood];
+      if (asMood && !(state.journal[dayKey()] && state.journal[dayKey()].mood)) setJournal({ mood: asMood });
       const m = (k) => (state.memory[k] && state.memory[k].at >= (v.since || 0) ? state.memory[k].value : null);
       state.trips.push({
         id: v.tripId || `t${now()}`, day: dayKey(), minutes: v.minutesRaw || 0, places: v.placeList || [],
@@ -665,6 +854,9 @@
           items: persona.topics.filter((t) => t.category === 'milestone' && state.seen[t.id]).map((t) => ({ id: `replay:${t.id}`, label: fill(t.title || t.id), badge: state.milestones[t.tier] || null })),
         };
       }
+      if (id === 'checkins') {
+        return { back: 'cat:tell', title: 'Check in', items: state.checkins.filter((c) => c.enabled).map((c) => ({ id: `checkin:${c.id}`, label: `${c.emoji} ${c.title}` })) };
+      }
       if (id === 'games') {
         const items = GAMES.map((g) => ({ id: `game:${g.id}`, label: `${g.icon} ${g.title}` }));
         items.push({ id: 'playtime', label: '🎾 Throw me around! (playtime)', hint: "10 minutes of throws that don't hurt our bond" });
@@ -676,6 +868,7 @@
         const open = all.filter(available);
         const locked = all.filter((t) => check(t.when) && (t.minAffection || 0) > state.affection).length;
         const items = open.map((t) => ({ id: `topic:${t.id}`, label: fill(t.title || t.id), badge: !state.seen[t.id] && cat !== 'goodbye' && cat !== 'tell' && cat !== 'feeling' ? 'new' : null }));
+        if (cat === 'tell' && state.checkins.some((c) => c.enabled)) items.splice(1, 0, { id: 'checkins', label: '✅ Check in…' });
         return { back: OWN_ENTRY.includes(cat) ? 'main' : 'cats', items, locked: locked ? `🔒 ${locked} more as you two get closer` : null, title: catTitle(cat) };
       }
       return { items: [] };
@@ -716,6 +909,10 @@
 
     function selectMenu(id) {
       if (id === 'random') return startTopic(pickTopic());
+      if (id.startsWith('checkin:')) {
+        const c = checkinById(id.slice(8));
+        if (c) { const { topic, vars } = checkinTopic(c); return startTopic(topic, vars); }
+      }
       if (id === 'playtime') {
         convo = null;
         effects.push({ type: 'playtime', minutes: 10 });
@@ -738,7 +935,7 @@
       if (!state.days[d]) {
         state.days[d] = {};
         const keys = Object.keys(state.days).sort();
-        for (const k of keys.slice(0, Math.max(0, keys.length - 7))) delete state.days[k];
+        for (const k of keys.slice(0, Math.max(0, keys.length - DAY_HISTORY))) delete state.days[k];
       }
       return state.days[d];
     }
@@ -792,6 +989,17 @@
         later(7000, { type: 'say', text: line(special.prompt || 'wantsToTalk.special', null) || line('wantsToTalk', 'psst… click me! 💬'), seconds: 10 });
         later(7000, { type: 'offer' });
       }
+      // After a rough or tiring day, ask how today is going.
+      const y = state.journal[yesterday()];
+      if (!special && y && (y.mood === 'rough' || y.mood === 'tiring') && !y.followUp && !day.checkup) {
+        const topic = persona.topics.find((x) => x.id === 'journal.checkup');
+        if (topic) {
+          day.checkup = true;
+          offer = { topic, until: now() + 3 * 60 * MINUTE };
+          later(7000, { type: 'say', text: line('journal.checkupPrompt', 'Yesterday sounded hard… how are you today? 💕'), seconds: 8 });
+          later(7000, { type: 'offer' });
+        }
+      }
       state.lastSeen = now();
       dirty = true;
     }
@@ -817,7 +1025,12 @@
       }
 
       const active = ctx.idle < 120;
-      if (active) { activeMs += dt; waterMs += dt; chatterMs += dt; encourageMs += dt; }
+      if (active) {
+        activeMs += dt; waterMs += dt; chatterMs += dt; encourageMs += dt;
+        for (const c of state.checkins) if (c.enabled && c.every) checkinMs[c.id] = (checkinMs[c.id] || 0) + dt;
+      }
+      needsTick(t, dt);
+      prevIdle = ctx.idle;
       if (ctx.idle > 300 || ctx.focus === 'focus') streakStart = t;
       if (offer && t > offer.until) offer = null;
       if (!chatterDue) chatterDue = CHATTER[state.settings.chatter] ? between(CHATTER[state.settings.chatter]) : 0;
@@ -825,6 +1038,7 @@
       const s = state.settings;
       const h = new Date().getHours();
       const day = dayFlags();
+      let dueC = null;
       if (t - startedAt > 45000 && canSpeak(t, 3 * MINUTE)) {
         const late = h >= 23 || h < 5;
         if (s.lateNight && late && ctx.idle < 10 && t - lastNight > 75 * MINUTE) {
@@ -853,6 +1067,20 @@
           const mins = ctx.activeMinutes;
           const hours = mins >= 90 ? `${Math.round(mins / 6) / 10} hours` : `${mins} minutes`;
           say(line(ctx.tasks > 0 ? 'recap.agents' : 'recap', 'We spent {hours} together today 💕', { hours, tasks: ctx.tasks || 0, focus: ctx.focusSessions || 0 }), 8);
+        } else if (!offer && (dueC = dueCheckin())) {
+          const { topic, vars } = checkinTopic(dueC);
+          offer = { topic, vars, until: t + 20 * MINUTE };
+          effects.push({ type: 'offer' });
+          say(`${dueC.emoji} ${line('checkin.remind', '{title} time! Click me when you have 💪', { title: dueC.title })}`, 7);
+        } else if (s.journal && !offer && !day.journalAsked && h >= 19 && activeMs > 10 * MINUTE && !(state.journal[dayKey()] && state.journal[dayKey()].mood)) {
+          day.journalAsked = true;
+          dirty = true;
+          const topic = persona.topics.find((x) => x.id === 'journal.evening');
+          if (topic) {
+            offer = { topic, until: t + 90 * MINUTE };
+            effects.push({ type: 'offer' });
+            say(line('journal.prompt', 'Before the day ends… how was today? Click me 📔'), 8);
+          }
         } else if (chatterDue && !offer && chatterMs >= chatterDue) {
           chatterMs = 0;
           chatterDue = CHATTER[s.chatter] ? between(CHATTER[s.chatter]) : 0;
@@ -903,13 +1131,44 @@
       data = data || {};
       switch (name) {
         case 'launch': greet(); break;
-        case 'petted': changeAffection(0.25); say(line('petted', 'hehe 💕'), 2.2); break;
+        case 'petted': changeAffection(0.25); needsBoost(0, 2); say(line('petted', 'hehe 💕'), 2.2); break;
+        case 'xp': {
+          // Coins for treats: one per 10 XP.
+          state.needs.bank += Math.max(0, num(data.amount, 0));
+          const coins = Math.floor(state.needs.bank / 10);
+          if (coins) { state.needs.coins += coins; state.needs.bank -= coins * 10; dirty = true; }
+          break;
+        }
+        case 'playdate': {
+          const vars = { other: clean(data.other, 30) || 'my friend' };
+          effects.push({ type: 'mood', mood: 'petted', seconds: 4 });
+          say(line(data.first ? 'playdate.first' : 'playdate', 'hi {other}! let\'s play! 💕', vars), 4);
+          if (now() - lastPlaydate > 10 * MINUTE) { lastPlaydate = now(); changeAffection(0.5); needsBoost(0, 10); }
+          break;
+        }
+        case 'eventStart': {
+          const title = clean(data.title, 40);
+          say(line(`event.${clean(data.id, 20)}.start`, null, { title }) || line('event.start', "It's {title}! Spend an hour with me to earn something special ✨", { title }), 7);
+          break;
+        }
+        case 'eventEarned':
+          effects.push({ type: 'mood', mood: 'done', seconds: 4 });
+          say(line('event.earned', 'You earned the {title} outfit! Do I look cute? ✨', { title: clean(data.title, 40) }), 6);
+          break;
+        case 'meetingSoon':
+          effects.push({ type: 'mood', mood: 'startled', seconds: 1.5 });
+          say(line('calendar.soon', '📅 {title} in {minutes} minutes!', { title: clean(data.title, 60) || 'A meeting', minutes: Math.max(1, Math.round(num(data.minutes, 5))) }), 8);
+          break;
+        case 'meetingNow':
+          say(line('calendar.now', '📅 {title} is starting! Click me to join', { title: clean(data.title, 60) || 'Your meeting' }), 8);
+          break;
         case 'wake': say(line('wake', 'oh! hi! 😳'), 3); break;
         case 'thrown': {
           const day = dayFlags();
           // Playtime: throwing is a game, so it never counts as rough handling (and is a little fun).
           if (data.playful) {
             day.playThrows = (day.playThrows || 0) + 1;
+            needsBoost(0, 3);
             changeAffection(0.1);
             if (Math.random() < 0.35) say(line('thrown.playful', 'wheee! again! 🎾'), 2.2);
             dirty = true;
@@ -1007,6 +1266,33 @@
           convo = null;
           break;
         case 'summary': result = summary(); break;
+        case 'checkinSet': {
+          const c = checkinById(String(payload.id || ''));
+          const p = isObj(payload.patch) ? payload.patch : {};
+          if (c) {
+            if ('enabled' in p) c.enabled = !!p.enabled;
+            if ('every' in p && CHECKIN_EVERY.includes(Number(p.every))) c.every = Number(p.every);
+            if ('at' in p) c.at = /^\d\d:\d\d$/.test(String(p.at)) ? String(p.at) : '';
+            if (!c.builtin) for (const k of ['emoji', 'title', 'sentence', 'unit']) if (k in p) c[k] = clean(p[k], k === 'emoji' ? 4 : 60);
+            if (!c.builtin && 'target' in p) c.target = Math.max(1, Math.floor(num(Number(p.target), 1)));
+            dirty = true;
+          }
+          result = summary();
+          break;
+        }
+        case 'checkinAdd': {
+          const kind = payload.kind === 'count' ? 'count' : 'done';
+          state.checkins = normalizeCheckins(state.checkins.concat([{ ...payload, id: `c${now().toString(36)}`, kind, enabled: true }]));
+          dirty = true;
+          result = summary();
+          break;
+        }
+        case 'checkinRemove':
+          state.checkins = state.checkins.filter((c) => c.builtin || c.id !== payload.id);
+          dirty = true;
+          result = summary();
+          break;
+        case 'buyTreat': buyTreat(String(payload.id || '')); result = summary(); break;
         case 'setting': result = setSetting(payload.key, payload.value); break;
         case 'forget': forget(String(payload.key || '')); result = summary(); break;
         case 'remember': {
@@ -1049,6 +1335,16 @@
         firstMet: state.firstMet,
         offer: !!offer,
         trips: state.trips.slice(-10).reverse(),
+        checkins: checkinSummary(),
+        checkinEvery: CHECKIN_EVERY,
+        needs: needsSummary(),
+        journal: Object.fromEntries(Object.entries(state.journal).slice(-42)),
+        days: Object.keys(state.days).sort().slice(-14).map((d) => {
+          const f = state.days[d];
+          const checkins = {};
+          for (const c of state.checkins) if (f[`ci:${c.id}:n`]) checkins[c.id] = f[`ci:${c.id}`] || 0;
+          return { day: d, sips: f.sips || 0, waterBreaks: f.waterBreaks || 0, mood: (state.journal[d] && state.journal[d].mood) || null, checkins };
+        }),
         water: { today: dayFlags().sips || 0, breaksToday: dayFlags().waterBreaks || 0, total: state.counters.sips || 0, breaks: state.counters.waterBreaks || 0 },
       };
     }
@@ -1057,7 +1353,7 @@
 
     /** What travels in sync profiles and transfer keys (no timers or per-day flags). */
     function exportData() {
-      return { affection: state.affection, memory: state.memory, seen: state.seen, milestones: state.milestones, settings: state.settings, counters: state.counters, firstMet: state.firstMet, trips: state.trips };
+      return { affection: state.affection, memory: state.memory, seen: state.seen, milestones: state.milestones, settings: state.settings, counters: state.counters, firstMet: state.firstMet, trips: state.trips, checkins: state.checkins, journal: state.journal, needs: state.needs };
     }
 
     /** Sync: keeps the higher affection, the newer of each memory, and every topic either device has seen. */
@@ -1072,6 +1368,9 @@
       if (isObj(data.settings)) state.settings = incoming.settings;
       for (const k of Object.keys(incoming.counters)) state.counters[k] = Math.max(state.counters[k] || 0, num(incoming.counters[k], 0));
       if (incoming.firstMet < state.firstMet) state.firstMet = incoming.firstMet;
+      if (Array.isArray(data.checkins)) state.checkins = incoming.checkins;
+      for (const [d, e] of Object.entries(incoming.journal)) if (!state.journal[d]) state.journal[d] = e;
+      if (isObj(data.needs)) state.needs.coins = Math.max(state.needs.coins, incoming.needs.coins);
       const ids = new Set(state.trips.map((t) => t.id));
       state.trips = state.trips.concat(incoming.trips.filter((t) => !ids.has(t.id))).sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0)).slice(-TRIP_LOG);
       save();

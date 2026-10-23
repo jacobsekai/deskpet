@@ -75,6 +75,8 @@
     wireFocus();
     wireAccount();
     wireTrips();
+    wireCheckins();
+    wireGallery();
     wireAbout();
     render();
     if (state.openPage) show(state.openPage);
@@ -128,6 +130,12 @@
     renderSync();
     renderCompanion();
     renderTrips();
+    renderInsights();
+    renderCheckins();
+    renderNeeds();
+    renderQuiet();
+    renderCalendar();
+    renderEvent();
     document.querySelectorAll('.pet-name').forEach((n) => { n.textContent = state.names.petName; });
     $('#about-update').textContent = state.update.available ? `Version ${state.update.available} is available!` : `You're on the latest version (${state.version}).`;
     $('#about-update-btn').textContent = state.update.available ? `⬆️ Update to v${state.update.available}` : 'Check for updates';
@@ -155,7 +163,7 @@
       const dot = el('span', 'dot');
       dot.style.background = s.color;
       row.appendChild(dot);
-      row.appendChild(el('div', '', `<div class="title">${esc(s.name)}${s.project ? ` · ${esc(s.project)}` : ''}</div><div class="detail">${esc(s.detail)}${s.precise ? '' : ' (guessed)'}</div>`));
+      row.appendChild(el('div', '', `<div class="title">${esc(s.name)}${s.project ? ` · ${esc(s.project)}` : ''}</div><div class="detail">${esc(s.detail)}${s.precise ? '' : ' (guessed)'}</div>${s.summary ? `<div class="summary">✓ ${esc(s.summary)}</div>` : ''}`));
       row.appendChild(el('div', 'tokens', `${esc(s.elapsed)}${s.tokens ? `<br>${esc(s.tokens)}` : ''}`));
       const jump = el('button', 'jump', 'Jump ↗');
       jump.disabled = !s.pid;
@@ -333,7 +341,7 @@
         card.dataset.reward = rw.id;
         card.appendChild(el('canvas'));
         card.appendChild(el('div', 'name', esc(rw.title)));
-        card.appendChild(el('div', 'lvl', rw.unlocked ? (rw.worn ? 'Click to take off' : 'Click to wear') : `Unlocks at Lv ${rw.level}`));
+        card.appendChild(el('div', 'lvl', rw.unlocked ? (rw.worn ? 'Click to take off' : 'Click to wear') : rw.event ? `${EVENT_NAMES[rw.event] || 'Event'} reward` : `Unlocks at Lv ${rw.level}`));
         if (rw.unlocked) card.addEventListener('click', () => call('wear', { id: rw.id }).then(refresh));
         grid.appendChild(card);
       }
@@ -617,6 +625,346 @@
       ok: 'Combine', alt: 'Use synced progress', cancel: 'Cancel',
       onOk: () => call('syncEnable', { path, mode: 'merge' }).then(refresh),
       onAlt: () => call('syncEnable', { path, mode: 'fresh' }).then(refresh),
+    });
+  }
+
+  // MARK: Insights (charts follow the dataviz rules: one series per chart, one axis, hover values, labels never color-only)
+
+  const BAR = '#e85d3a';
+  const MOODS = [
+    { id: 'rough', emoji: '😢', label: 'Rough', color: '#d03b3b' },
+    { id: 'tiring', emoji: '🥱', label: 'Tiring', color: '#f0a39c' },
+    { id: 'okay', emoji: '😐', label: 'Okay', color: '#e4e1db' },
+    { id: 'good', emoji: '🙂', label: 'Good', color: '#86b6ef' },
+    { id: 'amazing', emoji: '🤩', label: 'Amazing', color: '#2a78d6' },
+  ];
+  const EVENT_NAMES = { halloween: '🎃 Halloween', winter: '❄️ Winter', valentine: '💕 Valentine' };
+  let lastInsights = '';
+
+  const dayLabel = (d, opts) => new Date(`${d}T12:00:00`).toLocaleDateString(undefined, opts || { weekday: 'short', month: 'short', day: 'numeric' });
+
+  function tip(e, html) {
+    const t = $('#chart-tip');
+    if (!html) { t.hidden = true; return; }
+    t.innerHTML = html;
+    t.hidden = false;
+    const r = $('#content').getBoundingClientRect();
+    t.style.left = `${Math.min(e.clientX - r.left + 12, r.width - 190)}px`;
+    t.style.top = `${e.clientY - r.top + $('#content').scrollTop + 14}px`;
+  }
+
+  /** A small single-series bar chart: 14 days, baseline at 0, 4px rounded tops, 2px gaps, hover for values. */
+  function barChart(title, days, value, format) {
+    const card = el('div', 'card chart');
+    const values = days.map(value);
+    const max = Math.max(1, ...values);
+    const total = values.reduce((a, b) => a + b, 0);
+    card.appendChild(el('div', 'chart-head', `<span class="chart-title">${esc(title)}</span><span class="chart-total">${esc(format(total))} total</span>`));
+    const W = 300, H = 92, pad = 2, bw = (W - pad * (days.length - 1)) / days.length;
+    const bars = values.map((v, i) => {
+      const h = v ? Math.max(3, (v / max) * (H - 14)) : 0;
+      const x = i * (bw + pad);
+      const y = H - h;
+      const r = Math.min(4, h, bw / 2);
+      return `<g data-i="${i}"><rect class="hit" x="${x}" y="0" width="${bw + pad}" height="${H}"></rect>${h ? `<path d="M${x},${H} V${y + r} q0,-${r} ${r},-${r} h${bw - 2 * r} q${r},0 ${r},${r} V${H} Z" fill="${BAR}"></path>` : ''}</g>`;
+    }).join('');
+    card.insertAdjacentHTML('beforeend', `<svg class="bars" viewBox="0 0 ${W} ${H + 16}" role="img" aria-label="${esc(title)}, last 14 days">
+      <line x1="0" x2="${W}" y1="${H}" y2="${H}" class="baseline"></line>${bars}
+      <text x="0" y="${H + 13}" class="axis">${esc(dayLabel(days[0].day, { month: 'short', day: 'numeric' }))}</text>
+      <text x="${W}" y="${H + 13}" class="axis" text-anchor="end">Today</text></svg>`);
+    card.querySelectorAll('g[data-i]').forEach((g) => {
+      const i = Number(g.dataset.i);
+      g.addEventListener('mousemove', (e) => tip(e, `<b>${esc(dayLabel(days[i].day))}</b><br>${esc(format(values[i]))}`));
+      g.addEventListener('mouseleave', () => tip(null));
+    });
+    return card;
+  }
+
+  function renderInsights() {
+    const history = state.history || [];
+    const c = state.companion || {};
+    const key = JSON.stringify([history, c.days, c.journal]);
+    if (key === lastInsights || !history.length) return;
+    lastInsights = key;
+    const engineDays = new Map((c.days || []).map((d) => [d.day, d]));
+    // 14 days, oldest first, with the engine's per-day numbers merged in.
+    const days = history.slice(-14).map((h) => ({ ...h, ...(engineDays.get(h.day) || {}), day: h.day }));
+    const today = days.length - 1;
+    const weekday = (new Date().getDay() + 6) % 7; // Monday = 0
+    const thisWeek = days.slice(Math.max(0, today - weekday));
+    const lastWeek = days.slice(Math.max(0, today - weekday - 7), Math.max(0, today - weekday)).slice(0, thisWeek.length);
+    const sum = (list, f) => list.reduce((a, d) => a + (f(d) || 0), 0);
+    const tiles = [
+      ['Time together', (d) => d.activeMinutes, hm],
+      ['Agents working', (d) => d.agentMinutes, hm],
+      ['Focus sessions', (d) => d.focusSessions, String],
+      ['Sips of water', (d) => d.sips, String],
+    ];
+    $('#in-tiles').innerHTML = tiles.map(([label, f, fmt]) => {
+      const now = sum(thisWeek, f);
+      const before = sum(lastWeek, f);
+      const diff = now - before;
+      const delta = !lastWeek.length || (!now && !before) ? '' : diff === 0 ? '<div class="delta">same as last week</div>'
+        : `<div class="delta ${diff > 0 ? 'up' : 'down'}">${diff > 0 ? '▲' : '▼'} ${esc(fmt(Math.abs(diff)))} vs last week</div>`;
+      return `<div class="tile"><div class="num">${esc(fmt(now))}</div><div class="lbl">${esc(label)}</div>${delta}</div>`;
+    }).join('');
+    const charts = $('#in-charts');
+    charts.innerHTML = '';
+    charts.appendChild(barChart('Time together', days, (d) => d.activeMinutes || 0, hm));
+    charts.appendChild(barChart('Agents working', days, (d) => d.agentMinutes || 0, hm));
+    charts.appendChild(barChart('Focus sessions', days, (d) => d.focusSessions || 0, (n) => `${n} session${n === 1 ? '' : 's'}`));
+    charts.appendChild(barChart('Sips of water', days, (d) => d.sips || 0, (n) => `${n} sip${n === 1 ? '' : 's'}`));
+
+    // Mood calendar: the last 6 weeks, Monday first; emoji in every cell so mood never rests on color alone.
+    const journal = c.journal || {};
+    const cal = $('#in-moods');
+    cal.innerHTML = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => `<div class="dow">${d}</div>`).join('');
+    const start = new Date();
+    start.setHours(12, 0, 0, 0);
+    start.setDate(start.getDate() - weekday - 35);
+    for (let i = 0; i < 42; i++) {
+      const d = new Date(start);
+      d.setDate(start.getDate() + i);
+      const id = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const future = d > new Date();
+      const e = journal[id];
+      const m = e && MOODS.find((x) => x.id === e.mood);
+      const cell = el('div', `cell${future ? ' future' : ''}${m ? '' : ' empty'}`, m ? m.emoji : '');
+      if (m) cell.style.background = m.color;
+      cell.addEventListener('mousemove', (ev) => tip(ev, `<b>${esc(dayLabel(id))}</b><br>${m ? `${m.emoji} ${esc(m.label)}` : 'No entry'}${e && e.note ? `<br>"${esc(e.note)}"` : ''}`));
+      cell.addEventListener('mouseleave', () => tip(null));
+      cal.appendChild(cell);
+    }
+    $('#in-mood-legend').innerHTML = MOODS.map((m) => `<span><i style="background:${m.color}"></i>${m.emoji} ${m.label}</span>`).join('')
+      + (Object.keys(journal).length ? '' : `<span class="muted">${esc(state.names.petName)} asks every evening.</span>`);
+  }
+
+  // MARK: Check-ins and needs
+
+  let lastCheckins = '';
+  function wireCheckins() {
+    const every = $('#ci-every');
+    for (const v of [0, 15, 20, 30, 45, 60, 90, 120]) every.add(new Option(v ? `${v} min of activity` : 'Only at a time', v));
+    every.value = '60';
+    const kind = () => document.querySelectorAll('.ci-count').forEach((n) => { n.hidden = $('#ci-kind').value !== 'count'; });
+    $('#ci-kind').addEventListener('change', kind);
+    kind();
+    $('#ci-add').addEventListener('click', async () => {
+      const title = $('#ci-title').value.trim();
+      const sentence = $('#ci-sentence').value.trim();
+      if (!title) { $('#ci-note').textContent = 'Give it a name'; return; }
+      if ($('#ci-kind').value === 'count' && !sentence.includes('__')) { $('#ci-note').textContent = 'Put __ where the number goes'; return; }
+      const after = sentence.split('__')[1] || '';
+      await companion('checkinAdd', {
+        emoji: $('#ci-emoji').value.trim() || '✅', title, kind: $('#ci-kind').value, sentence, unit: after.trim().split(' ')[0] || '',
+        target: Number($('#ci-target').value) || 1, every: Number($('#ci-every').value), at: $('#ci-at').value,
+      });
+      $('#ci-title').value = '';
+      $('#ci-sentence').value = '';
+      $('#ci-note').textContent = 'Added ✓';
+    });
+  }
+
+  function renderCheckins() {
+    const c = state.companion;
+    if (!c || !c.checkins) return;
+    const key = JSON.stringify(c.checkins);
+    if (key === lastCheckins) return;
+    lastCheckins = key;
+    const box = $('#cp-checkins');
+    box.innerHTML = '';
+    for (const ci of c.checkins) {
+      const row = el('div', 'checkin');
+      const today = ci.todayCount ? (ci.kind === 'count' ? `today: ${ci.today}${ci.unit ? ` ${ci.unit}` : ''}` : `done ${ci.todayCount}× today`) : '';
+      row.appendChild(el('div', 'ci-name', `<span class="ci-emoji">${esc(ci.emoji)}</span><div><b>${esc(ci.title)}</b><div class="meta">${esc(ci.at && !ci.every ? `every day at ${ci.at}` : `every ${ci.every} min of activity`)}${today ? ` · ${esc(today)}` : ''}</div></div>`));
+      const every = el('select', 'ci-every');
+      for (const v of c.checkinEvery || []) every.add(new Option(v ? `${v} min` : 'At a time', v));
+      every.value = String(ci.every);
+      every.addEventListener('change', () => companion('checkinSet', { id: ci.id, patch: { every: Number(every.value) } }));
+      row.appendChild(every);
+      if (!ci.builtin) {
+        const rm = el('button', 'ci-remove', '✕');
+        rm.title = 'Remove';
+        rm.addEventListener('click', () => companion('checkinRemove', { id: ci.id }));
+        row.appendChild(rm);
+      } else row.appendChild(el('span'));
+      const sw = el('div', `switch-btn${ci.enabled ? ' on' : ''}`);
+      sw.addEventListener('click', () => companion('checkinSet', { id: ci.id, patch: { enabled: !ci.enabled } }));
+      row.appendChild(sw);
+      box.appendChild(row);
+    }
+  }
+
+  let lastNeeds = '';
+  function renderNeeds() {
+    const n = state.companion && state.companion.needs;
+    if (!n) return;
+    const key = JSON.stringify(n);
+    if (key === lastNeeds) return;
+    lastNeeds = key;
+    const box = $('#cp-needs');
+    box.innerHTML = '';
+    const toggle = el('div', 'toggle-row', `<span>⚡ Energy and fun meters<small class="muted">Breaks restore energy, playing restores fun. Nothing bad happens if they run low.</small></span><div class="switch-btn${n.enabled ? ' on' : ''}"></div>`);
+    toggle.querySelector('.switch-btn').addEventListener('click', () => companion('setting', { key: 'needs', value: !n.enabled }));
+    box.appendChild(toggle);
+    if (!n.enabled) return;
+    const meter = (label, v) => `<div class="meter"><span>${label}</span><div class="meter-track"><div style="width:${v}%"></div></div><b>${v}</b></div>`;
+    box.appendChild(el('div', 'meters', meter('⚡ Energy', n.energy) + meter('🎈 Fun', n.fun)));
+    const shop = el('div', 'actions');
+    shop.appendChild(el('span', 'coins', `🪙 ${n.coins} coin${n.coins === 1 ? '' : 's'}`));
+    for (const t of n.treats) {
+      const b = el('button', 'ghost-btn', `${t.emoji} ${esc(t.title)} · ${t.cost}🪙`);
+      b.disabled = n.coins < t.cost;
+      b.title = [t.energy && `+${t.energy} energy`, t.fun && `+${t.fun} fun`].filter(Boolean).join(', ');
+      b.addEventListener('click', () => companion('buyTreat', { id: t.id }));
+      shop.appendChild(b);
+    }
+    box.appendChild(shop);
+    box.appendChild(el('p', 'note', 'You get 1 coin for every 10 XP.'));
+  }
+
+  // MARK: Quiet hours and calendar
+
+  const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  let lastQuiet = '';
+  function renderQuiet() {
+    const q = state.quietHours;
+    if (!q) return;
+    const key = JSON.stringify(q);
+    const focused = document.activeElement && document.activeElement.closest && document.activeElement.closest('#bh-quiet');
+    if (key === lastQuiet || focused) return;
+    lastQuiet = key;
+    const save = (patch) => set('quietHours', { enabled: q.enabled, days: q.days, from: q.from, to: q.to, notifications: q.notifications, ...patch });
+    const box = $('#bh-quiet');
+    box.innerHTML = '';
+    const on = el('div', 'toggle-row', `<span>No remarks or sounds on a schedule${q.active ? '<small class="ok-text">On right now</small>' : ''}</span><div class="switch-btn${q.enabled ? ' on' : ''}"></div>`);
+    on.querySelector('.switch-btn').addEventListener('click', () => save({ enabled: !q.enabled }));
+    box.appendChild(on);
+    const row = el('div', 'row-inline quiet-row');
+    const days = el('div', 'day-chips');
+    DAY_NAMES.forEach((name, i) => {
+      const b = el('button', q.days.includes(i) ? 'on' : '', name);
+      b.addEventListener('click', () => save({ days: q.days.includes(i) ? q.days.filter((x) => x !== i) : [...q.days, i].sort() }));
+      days.appendChild(b);
+    });
+    row.appendChild(days);
+    const from = el('input');
+    from.type = 'time';
+    from.value = q.from;
+    const to = el('input');
+    to.type = 'time';
+    to.value = q.to;
+    from.addEventListener('change', () => save({ from: from.value || '09:00' }));
+    to.addEventListener('change', () => save({ to: to.value || '17:00' }));
+    row.appendChild(el('span', 'field-label', 'from'));
+    row.appendChild(from);
+    row.appendChild(el('span', 'field-label', 'to'));
+    row.appendChild(to);
+    box.appendChild(row);
+    const notif = el('div', 'toggle-row', `<span>Still show agent notifications</span><div class="switch-btn${q.notifications ? ' on' : ''}"></div>`);
+    notif.querySelector('.switch-btn').addEventListener('click', () => save({ notifications: !q.notifications }));
+    box.appendChild(notif);
+  }
+
+  let lastCalendar = '';
+  function renderCalendar() {
+    const c = state.calendar;
+    if (!c) return;
+    const key = JSON.stringify(c);
+    if (key === lastCalendar || (document.activeElement && document.activeElement.id === 'cal-ics')) return;
+    lastCalendar = key;
+    const save = (patch) => set('calendar', { source: c.source, icsUrl: c.icsUrl, lead: c.lead, ...patch });
+    const box = $('#bh-calendar');
+    box.innerHTML = '';
+    box.appendChild(el('p', 'sub', `${esc(state.names.petName)} warns you before meetings and can open the meeting link. Event titles stay on this computer.`));
+    const sources = el('div', 'segmented');
+    const options = [['off', 'Off'], ...(c.system ? [['system', state.platform === 'mac' ? 'Calendar app' : 'Outlook']] : []), ['ics', 'Calendar link (ICS)']];
+    for (const [id, label] of options) {
+      const b = el('button', c.source === id ? 'on' : '', esc(label));
+      b.addEventListener('click', () => save({ source: id }));
+      sources.appendChild(b);
+    }
+    box.appendChild(sources);
+    if (c.source === 'ics') {
+      const url = el('input', 'wide-input');
+      url.id = 'cal-ics';
+      url.placeholder = 'https://…/calendar.ics';
+      url.value = c.icsUrl || '';
+      url.addEventListener('change', () => save({ icsUrl: url.value.trim() }));
+      box.appendChild(el('div', 'row-inline')).appendChild(url);
+    }
+    if (c.source !== 'off') {
+      const lead = el('div', 'setting-row', '<span>Warn me</span>');
+      const seg = el('div', 'segmented');
+      for (const m of [1, 5, 10, 15]) {
+        const b = el('button', c.lead === m ? 'on' : '', `${m} min before`);
+        b.addEventListener('click', () => save({ lead: m }));
+        seg.appendChild(b);
+      }
+      lead.appendChild(seg);
+      box.appendChild(lead);
+      const time = (ms) => new Date(ms).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+      const status = c.status === 'ok' ? (c.next ? `Next: ${c.next.title} at ${time(c.next.start)}` : 'Connected. No more meetings today.')
+        : c.status === 'denied' ? 'DeskPet needs calendar access: allow it in System Settings → Privacy & Security → Calendars.'
+          : c.status && c.status !== 'off' ? c.status : '';
+      const row = el('div', 'actions');
+      const note = el('span', `note ${c.status === 'ok' ? 'ok' : c.status === 'off' ? '' : 'error'}`, esc(status));
+      row.appendChild(note);
+      const test = el('button', 'ghost-btn', 'Check now');
+      test.addEventListener('click', async () => {
+        const r = await call('calendarTest');
+        lastCalendar = '';
+        if (r && !r.ok && r.error) note.textContent = r.error;
+        refresh();
+      });
+      row.appendChild(test);
+      box.appendChild(row);
+    }
+  }
+
+  // MARK: Seasonal events
+
+  function renderEvent() {
+    const e = state.events && state.events.active;
+    const b = $('#home-event');
+    b.hidden = !e;
+    if (!e) return;
+    const pct = Math.min(100, Math.round((e.minutes / e.goal) * 100));
+    b.innerHTML = e.earned ? `${esc(e.emoji)} ${esc(e.title)} event: outfit earned! Wear it from Rewards ✨`
+      : `${esc(e.emoji)} ${esc(e.title)} event until ${esc(dayLabel(`2000-${e.until}`, { month: 'short', day: 'numeric' }))}: <b>${Math.floor(e.minutes)}/${e.goal} min</b> together to earn the outfit <span class="event-bar"><i style="width:${pct}%"></i></span>`;
+  }
+
+  // MARK: Gallery
+
+  function wireGallery() {
+    $('#gallery-open').addEventListener('click', async () => {
+      const box = $('#look-gallery');
+      box.hidden = false;
+      box.innerHTML = '<div class="empty">Loading the gallery…</div>';
+      const r = await call('galleryList');
+      box.innerHTML = '';
+      if (!r || !r.ok) { box.appendChild(el('div', 'note error', esc((r && r.error) || "Couldn't reach the gallery. Are you online?"))); return; }
+      for (const p of r.packs) {
+        const card = el('div', 'gallery-card');
+        const img = el('img', 'gallery-preview');
+        img.src = p.preview;
+        img.alt = `${p.name} preview`;
+        card.appendChild(img);
+        card.appendChild(el('div', '', `<b>${esc(p.name)}</b><div class="meta">${esc(p.description || '')}${p.author ? ` · by ${esc(p.author)}` : ''}</div>`));
+        const b = el('button', p.installed ? 'ghost-btn' : 'primary', p.installed ? 'Installed ✓' : 'Install');
+        b.disabled = p.installed;
+        b.addEventListener('click', async () => {
+          b.textContent = 'Installing…';
+          const x = await call('galleryInstall', { id: p.id });
+          b.textContent = x && x.ok ? 'Installed ✓' : 'Try again';
+          b.disabled = !!(x && x.ok);
+          // Wear it straight away; the Character cards above switch back any time.
+          if (x && x.ok) { lastStatic = ''; await set('spritePack', p.id); }
+        });
+        card.appendChild(b);
+        box.appendChild(card);
+      }
+      if (!r.packs.length) box.appendChild(el('div', 'empty', 'No packs yet.'));
     });
   }
 

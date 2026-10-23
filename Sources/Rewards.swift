@@ -5,6 +5,18 @@ import Foundation
 enum Reward: String, CaseIterable {
     case bow, sparkleTrail, partyHat, balloon, petalTrail, cap, goldenAura, crown, butterfly, fireTrail
     case purpleAura, topHat, starBuddy, rainbowTrail, halo, snowAura, planets, diamondCrown, golden
+    // Seasonal event rewards (earned by time together during the event, not by level).
+    case witchHat, pumpkin, santaHat, snowman, heartAura
+
+    /// The seasonal event that awards it, if any.
+    var event: String? {
+        switch self {
+        case .witchHat, .pumpkin: return "halloween"
+        case .santaHat, .snowman: return "winter"
+        case .heartAura: return "valentine"
+        default: return nil
+        }
+    }
 
     /// Which slot it fills; one reward per slot is worn at a time ("golden" is a toggle).
     enum Slot: String, CaseIterable {
@@ -51,6 +63,7 @@ enum Reward: String, CaseIterable {
         case .planets: return 80
         case .diamondCrown: return 90
         case .golden: return 100
+        case .witchHat, .pumpkin, .santaHat, .snowman, .heartAura: return 0
         }
     }
 
@@ -75,15 +88,20 @@ enum Reward: String, CaseIterable {
         case .planets: return "🪐 Orbiting planets"
         case .diamondCrown: return "💎 Diamond crown"
         case .golden: return "🏆 Golden shimmer"
+        case .witchHat: return "🧙 Witch hat"
+        case .pumpkin: return "🎃 Pumpkin buddy"
+        case .santaHat: return "🎅 Santa hat"
+        case .snowman: return "⛄ Snowman buddy"
+        case .heartAura: return "💗 Heart aura"
         }
     }
 
     var slot: Slot {
         switch self {
-        case .bow, .partyHat, .cap, .crown, .topHat, .halo, .diamondCrown: return .hat
+        case .bow, .partyHat, .cap, .crown, .topHat, .halo, .diamondCrown, .witchHat, .santaHat: return .hat
         case .sparkleTrail, .petalTrail, .fireTrail, .rainbowTrail: return .trail
-        case .goldenAura, .purpleAura, .snowAura: return .aura
-        case .balloon, .butterfly, .starBuddy, .planets: return .companion
+        case .goldenAura, .purpleAura, .snowAura, .heartAura: return .aura
+        case .balloon, .butterfly, .starBuddy, .planets, .pumpkin, .snowman: return .companion
         case .golden: return .golden
         }
     }
@@ -98,12 +116,13 @@ enum Reward: String, CaseIterable {
         case .goldenAura: return "golden"
         case .purpleAura: return "purple"
         case .snowAura: return "snow"
+        case .heartAura: return "hearts"
         case .starBuddy: return "star"
         default: return rawValue
         }
     }
 
-    static func next(after level: Int) -> Reward? { allCases.first { $0.level > level } }
+    static func next(after level: Int) -> Reward? { allCases.first { $0.event == nil && $0.level > level } }
 }
 
 /// Prestige ranks, Call of Duty style: max level 100, prestige resets to level 1 (rewards stay

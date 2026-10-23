@@ -125,7 +125,47 @@
     "water.sips.good": ["{sipsText}! Look at you, hydration champion 🏆💧", "Wow, {sipsText}! Your body says thank you 💕 That's {todayText} today!"],
     "water.sips.lots": ["{sipsText}?! That's a whole glass! Amazing 🥤✨", "{sipsText}! You're glowing with hydration ✨ {todayText} today!"],
     "water.sips.fish": ["{sipsText}?! Are you secretly a fish? 🐟 Amazing, just don't overdo it!", "{sipsText}!! Okay, I'm impressed 😳💧"],
-    "water.sips.skip": ["That's okay! Just remember to drink something soon 💧"]
+    "water.sips.skip": ["That's okay! Just remember to drink something soon 💧"],
+    "checkin.remind": ["{title} time! Click me when you've done it 💪", "Time for: {title}! Tell me when you're done ✨"],
+    "checkin.ask": ["How did it go?", "Okay, report time 👀"],
+    "checkin.askDone": ["Did you do it?", "All done?"],
+    "checkin.zero": ["None? That's okay, there's always next time 💕", "Zero? Let's try again a bit later!"],
+    "checkin.some": ["{valueText}! A good start 😊", "Nice, {valueText}! Every bit counts ✨"],
+    "checkin.met": ["{valueText}! You did it! 🎉", "Yes! {valueText}, goal reached 💪"],
+    "checkin.lots": ["{valueText}?! Overachiever! I'm so proud 🏆", "Wow, {valueText}! Above and beyond ✨"],
+    "checkin.done": ["Done! Proud of you 💕", "Checked off! ✅ Nice one, {owner}!"],
+    "checkin.notYet": ["No worries! I'll remind you later 💕", "Okay! Do it when you can 😊"],
+    "checkin.skip": ["That's okay! Maybe next time 💕"],
+    "journal.prompt": ["Before the day ends… how was today? Click me 📔", "Hey {owner}, want to tell me about your day? 📔"],
+    "journal.ask": ["How was today, {owner}?", "So… how was your day?"],
+    "journal.mood.amazing": ["Yay!! I love amazing days 🎉", "That makes me so happy! ✨"],
+    "journal.mood.good": ["A good day! Those are the best 😊"],
+    "journal.mood.okay": ["Okay is okay! You made it through 💕"],
+    "journal.mood.tiring": ["Sounds exhausting… rest well tonight 💤"],
+    "journal.mood.rough": ["I'm sorry it was rough. I'm here 🫂", "That sounds hard. Tomorrow's a fresh start 💕"],
+    "journal.askNote": ["Anything you want to remember about today?", "One thing from today worth keeping?"],
+    "journal.noteThanks": ["Saved in our journal 📔💕", "I'll remember that ✨"],
+    "journal.noteSkip": ["That's okay! See you tomorrow 💕"],
+    "journal.checkupPrompt": ["Yesterday sounded hard… how are you today? Click me 💕"],
+    "journal.checkupAsk": ["How are you feeling today?"],
+    "journal.better": ["I'm so glad! 💕", "Yay, better is good! ✨"],
+    "journal.same": ["That's okay. One step at a time, I'm with you 💕"],
+    "journal.worse": ["I'm sorry, {owner}. Be gentle with yourself today, and talk to someone you trust if you can 🫂"],
+    "needs.tired": ["I'm getting sleepy… could we take a little break? 😴", "*yawns* a short break would be nice… for both of us 💤"],
+    "needs.bored": ["I'm a little bored… play with me? 🎾", "Psst… a quick game? 🎮"],
+    "needs.poor": ["Not enough coins yet! Coins come from XP 🪙"],
+    "needs.treat.cookie": ["🍪 Yum! Thank you! I feel so energized!"],
+    "needs.treat.strawberry": ["🍓 So sweet! Thank you, {owner}! 💕"],
+    "needs.treat.toy": ["🧸 A new toy! Best day ever! 🎉"],
+    "playdate.first": ["Oh! Hi {other}! I'm {pet}! Want to play? 💕", "A new friend! Hi {other}! ✨"],
+    "playdate": ["{other}! Let's play! 🎾", "Hehe, tag, {other}! You're it! 😆"],
+    "event.start": ["It's {title}! Spend an hour with me to earn a special outfit ✨"],
+    "event.halloween.start": ["Happy Halloween season! 🎃 Spend an hour with me to earn the witch hat and a pumpkin buddy! 👻"],
+    "event.winter.start": ["Winter holidays are here! ❄️ Spend an hour with me to earn a Santa hat and a snowman friend! ⛄"],
+    "event.valentine.start": ["Valentine's week! 💕 Spend an hour with me to earn the heart aura!"],
+    "event.earned": ["You earned the {title} outfit! Do I look cute? ✨"],
+    "calendar.soon": ["📅 {title} in {minutes} minutes!", "Heads up! 📅 {title} starts in {minutes} minutes"],
+    "calendar.now": ["📅 {title} is starting! Click me to join", "It's time! 📅 {title}"]
   },
   "words": ["sunshine", "rainbow", "coffee", "keyboard", "pillow", "blanket", "cookie", "pancake", "garden", "breeze", "thunder", "lantern", "puzzle", "teacup", "bubble", "comet", "galaxy", "planet", "rocket", "island", "ocean", "dolphin", "penguin", "hamster", "panda", "kitten", "puppy", "butterfly", "sunflower", "blossom", "picnic", "popcorn", "noodles", "strawberry", "melody", "guitar", "piano", "violin", "journey", "treasure", "castle", "dragon", "wizard", "marshmallow", "snowflake", "autumn", "winter", "spring", "summer", "midnight", "starlight", "friendship", "adventure", "computer", "monitor", "laptop", "window", "server", "project", "deadline", "weekend", "sandwich", "lemonade", "cupcake", "umbrella", "backpack", "notebook", "crayon", "camera"],
   "topics": [
@@ -745,6 +785,19 @@
       "steps": [
         {"pool": "water.intro", "mood": "happy"},
         {"input": "How much did you drink?", "inputPool": "water.askSips", "kind": "number", "max": 3, "prefix": "I took", "suffix": "sips of water this water break", "placeholder": "?", "log": "sips", "ranges": [{"max": 0, "steps": [{"pool": "water.sips.zero", "mood": "worried"}]}, {"max": 2, "steps": [{"pool": "water.sips.few", "mood": "happy"}]}, {"max": 5, "steps": [{"pool": "water.sips.some", "mood": "happy"}]}, {"max": 10, "steps": [{"pool": "water.sips.good", "mood": "proud"}]}, {"max": 20, "steps": [{"pool": "water.sips.lots", "mood": "excited"}]}, {"steps": [{"pool": "water.sips.fish", "mood": "surprised"}]}], "skip": [{"pool": "water.sips.skip"}]}
+      ]
+    },
+    {
+      "id": "journal.evening", "category": "journal", "title": "📔 How was today?", "affection": 1,
+      "steps": [
+        {"ask": "How was today, {owner}?", "askPool": "journal.ask", "journal": "mood", "choices": [{"label": "🤩 Amazing!", "value": "amazing", "steps": [{"pool": "journal.mood.amazing", "mood": "excited"}]}, {"label": "🙂 Good", "value": "good", "steps": [{"pool": "journal.mood.good", "mood": "happy"}]}, {"label": "😐 Okay", "value": "okay", "steps": [{"pool": "journal.mood.okay"}]}, {"label": "🥱 Tiring", "value": "tiring", "steps": [{"pool": "journal.mood.tiring", "mood": "sleepy"}]}, {"label": "😢 Rough", "value": "rough", "steps": [{"pool": "journal.mood.rough", "mood": "worried"}]}]},
+        {"input": "Anything you want to remember about today?", "inputPool": "journal.askNote", "journal": "note", "max": 120, "placeholder": "a moment, a win, anything (or skip)", "then": [{"pool": "journal.noteThanks", "mood": "love"}], "skip": [{"pool": "journal.noteSkip", "mood": "happy"}]}
+      ]
+    },
+    {
+      "id": "journal.checkup", "category": "journal", "title": "💕 How are you today?", "affection": 1,
+      "steps": [
+        {"ask": "How are you feeling today?", "askPool": "journal.checkupAsk", "journal": "followUp", "choices": [{"label": "🙂 Better", "value": "better", "steps": [{"pool": "journal.better", "mood": "happy"}]}, {"label": "😐 About the same", "value": "same", "steps": [{"pool": "journal.same", "mood": "love"}]}, {"label": "😔 Worse", "value": "worse", "steps": [{"pool": "journal.worse", "mood": "love"}]}]}
       ]
     }
   ]

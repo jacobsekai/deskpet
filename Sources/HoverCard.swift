@@ -54,6 +54,8 @@ final class HoverModel: ObservableObject {
         let elapsed: String
         let tokens: String
         let pid: pid_t
+        /// What the agent said it did, the last time it finished.
+        var summary = ""
     }
 
     @Published var petName = "Mochi"
@@ -64,6 +66,8 @@ final class HoverModel: ObservableObject {
     @Published var xpToNext = 0
     @Published var today = ""
     @Published var together = ""
+    /// "⚡ 70 · 🎈 40 · 🪙 12" when needs are turned on.
+    @Published var needs = ""
     @Published var focus = ""
     @Published var quiet = false
     @Published var nextReward = ""
@@ -90,6 +94,7 @@ private struct HoverCardView: View {
             ProgressView(value: model.progress).tint(model.accent)
             Text(model.today).font(.system(size: 11)).foregroundColor(.secondary)
             if !model.together.isEmpty { Text(model.together).font(.system(size: 11)).foregroundColor(.secondary) }
+            if !model.needs.isEmpty { Text(model.needs).font(.system(size: 11)).foregroundColor(.secondary) }
             if !model.nextReward.isEmpty { Text(model.nextReward).font(.system(size: 10.5)).foregroundColor(.secondary) }
             if !model.focus.isEmpty { Text(model.focus).font(.system(size: 11.5, weight: .semibold)) }
             if model.quiet { Text("🤫 Quiet mode: you're on a call").font(.system(size: 11)).foregroundColor(.secondary) }
@@ -104,6 +109,7 @@ private struct HoverCardView: View {
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(row.title).font(.system(size: 12, weight: .semibold))
                                 Text(row.detail).font(.system(size: 11)).foregroundColor(.secondary)
+                                if !row.summary.isEmpty { Text("✓ \(row.summary)").font(.system(size: 10.5)).foregroundColor(.secondary).lineLimit(2) }
                                 if !row.tokens.isEmpty { Text(row.tokens).font(.system(size: 10)).foregroundColor(.secondary.opacity(0.8)) }
                             }
                             Spacer(minLength: 8)

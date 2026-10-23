@@ -79,6 +79,7 @@
   // MARK: Snapshot mode: a contact sheet of every pose, for checking the art without a screen.
 
   async function runSnapshot(request) {
+    if (request.gallery) return makeGalleryFrames(request.gallery);
     const snapPack = request.pack ? await SpritePack.load(request.pack) : null;
     const moods = ['idle', 'typing', 'thinking', 'reading', 'searching', 'delegating', 'needsYou', 'done',
       'sleeping', 'petted', 'dragged', 'error', 'tidying', 'oops', 'sleepy', 'flying', 'dizzy', 'walking'];
@@ -97,6 +98,10 @@
     cases.push({ label: 'cap + fire trail + planets', pose: { mood: 'walking', hat: 'cap', trail: 'fire', companion: 'planets' } });
     cases.push({ label: 'golden + diamond crown + P10', pose: { mood: 'idle', golden: true, hat: 'diamondCrown', aura: 'snow', prestige: 10 } });
     cases.push({ label: 'needsYou + halo + balloon', pose: { mood: 'needsYou', hat: 'halo', companion: 'balloon', aura: 'purple' } });
+    cases.push({ label: 'witch hat + pumpkin', pose: { mood: 'idle', hat: 'witchHat', companion: 'pumpkin' } });
+    cases.push({ label: 'santa hat + snowman + hearts', pose: { mood: 'petted', hat: 'santaHat', companion: 'snowman', aura: 'hearts' } });
+    cases.push({ label: 'gallery: midnight', pose: { mood: 'idle', fur: { base: '#4B4B5E', light: '#8A8AA0' } } });
+    cases.push({ label: 'gallery: ginger (typing)', pose: { mood: 'typing', fur: { base: '#F39A45', light: '#FFE0BD', stripes: '#C9661F' } } });
     for (const c of cases.slice(1, 8)) { c.pose.caption = `Claude: ${c.label}`; c.pose.captionColor = '#007AFF'; }
 
     const cellW = 300, cellH = 300, cols = 6;
@@ -126,5 +131,25 @@
       sctx.fillText(c.label, x + 8, y + 16);
     });
     window.deskpet.send('snapshot-done', sheet.toDataURL('image/png'));
+  }
+
+  /** Renders the built-in cat (recolored) as sprite-pack frames: `{ palettes, frames, scale }` → { '<pack>/<file>': dataURL }. */
+  function makeGalleryFrames({ palettes, frames, scale = 2 }) {
+    const W = 260, H = 220;
+    const cell = document.createElement('canvas');
+    cell.width = W * scale;
+    cell.height = H * scale;
+    const cctx = cell.getContext('2d');
+    const out = {};
+    for (const p of palettes) {
+      for (const f of frames) {
+        cctx.setTransform(1, 0, 0, 1, 0, 0);
+        cctx.clearRect(0, 0, cell.width, cell.height);
+        renderer.lastSpriteRect = null;
+        renderer.render(cctx, cell.width, cell.height, { look: { x: 0.15, y: 0 }, scale, facingLeft: false, bare: true, fur: p.fur, ...f.pose }, f.t, null);
+        out[`${p.id}/${f.name}`] = cell.toDataURL('image/png');
+      }
+    }
+    window.deskpet.send('snapshot-done', JSON.stringify(out));
   }
 })();

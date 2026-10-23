@@ -6,7 +6,7 @@ window.deskpetCard.onModel((m) => {
   const rows = m.rows.length
     ? m.rows.map((r) => `<div class="row" data-pid="${r.pid}" title="Jump to this session">
         <span class="dot" style="background:${r.color}"></span>
-        <div><div class="title">${esc(r.title)}</div><div class="muted">${esc(r.detail)}</div>${r.tokens ? `<div class="tokens">${esc(r.tokens)}</div>` : ''}</div>
+        <div><div class="title">${esc(r.title)}</div><div class="muted">${esc(r.detail)}</div>${r.summary ? `<div class="summary">✓ ${esc(r.summary)}</div>` : ''}${r.tokens ? `<div class="tokens">${esc(r.tokens)}</div>` : ''}</div>
         <span class="elapsed">${esc(r.elapsed)}</span></div>`).join('') + '<div class="hint">Click a session to jump to it</div>'
     : '<div class="muted">No AI agents running</div>';
   card.innerHTML = `
@@ -16,6 +16,8 @@ window.deskpetCard.onModel((m) => {
     <div class="bar"><div style="width:${Math.round(m.progress * 100)}%;background:${m.accent}"></div></div>
     <div class="muted">${esc(m.today)}</div>
     ${m.together ? `<div class="muted">${esc(m.together)}</div>` : ''}
+    ${m.needs ? `<div class="muted">${esc(m.needs)}</div>` : ''}
+    ${m.quietHours ? `<div class="muted">${esc(m.quietHours)}</div>` : ''}
     ${m.nextReward ? `<div class="muted">${esc(m.nextReward)}</div>` : ''}
     ${m.focus ? `<div class="focus">${esc(m.focus)}</div>` : ''}
     ${m.quiet ? '<div class="muted">🤫 Quiet mode: you\'re on a call</div>' : ''}

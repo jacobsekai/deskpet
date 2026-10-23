@@ -196,6 +196,18 @@ final class Stats {
         let lo = Self.xpNeeded(level), hi = Self.xpNeeded(level + 1)
         return Double(levelXP - lo) / Double(max(1, hi - lo))
     }
+    /// The last `count` days (oldest first), all synced devices combined, for the Insights page.
+    func history(days count: Int = 14) -> [[String: Any]] {
+        let cal = Calendar.current
+        return (0..<count).reversed().compactMap { back -> [String: Any]? in
+            guard let date = cal.date(byAdding: .day, value: -back, to: Date()) else { return nil }
+            let key = Self.dayFormatter.string(from: date)
+            let d = (file.days[key] ?? Day()) + (remoteDays[key] ?? Day())
+            return ["day": key, "activeMinutes": d.activeMinutes, "agentMinutes": d.agentMinutes, "tasks": d.tasks,
+                    "focusSessions": d.focusSessions, "pets": d.pets, "openMinutes": d.openMinutes]
+        }
+    }
+
     /// Lifetime minutes you've been active with the pet open, on every synced device.
     var togetherMinutes: Int {
         file.archivedMinutes + file.days.values.reduce(0) { $0 + $1.activeMinutes } + remoteDays.values.reduce(0) { $0 + $1.activeMinutes }

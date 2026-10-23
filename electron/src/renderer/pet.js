@@ -13,6 +13,8 @@
   // Swapped to gold when the golden fur reward is on (set at the start of each frame).
   let fur = BASE_FUR;
   let furLight = BASE_FUR_LIGHT;
+  // Gallery recolors ("midnight", "ginger"…) set these through pose.fur.
+  let furStripes = null;
   const pink = new Color(1.0, 0.6, 0.66);
   const GROUND = 34;
   const FONT = '-apple-system, "Segoe UI", "Segoe UI Emoji", system-ui, sans-serif';
@@ -46,8 +48,10 @@
       this.scale = pose.scale || 1;
       this.theme = pose.theme ? Theme.fromHex(pose.theme) : new Theme();
       this.lastSpriteRect = pack ? this.lastSpriteRect : null;
-      fur = pose.golden ? GOLD_FUR : BASE_FUR;
-      furLight = pose.golden ? GOLD_FUR_LIGHT : BASE_FUR_LIGHT;
+      const custom = pose.fur && !pose.golden ? pose.fur : null;
+      fur = pose.golden ? GOLD_FUR : (custom && Color.hex(custom.base)) || BASE_FUR;
+      furLight = pose.golden ? GOLD_FUR_LIGHT : (custom && Color.hex(custom.light)) || BASE_FUR_LIGHT;
+      furStripes = custom && custom.stripes ? Color.hex(custom.stripes) : null;
 
       ctx.save();
       ctx.clearRect(0, 0, width, height);
@@ -153,10 +157,12 @@
       const lift = m === 'dragged' ? 8 : 0;
 
       const s = m === 'dragged' ? 0.55 : 1 - min(bob, 12) / 36;
-      if (m !== 'flying') this.fill(this.oval(cx, g - 1, 78 * s, 11 * s), new Color(0, 0, 0, 0.16));
+      // `bare`: just the character and its props (for rendering sprite-pack frames).
+      const bare = !!this.pose.bare;
+      if (m !== 'flying' && !bare) this.fill(this.oval(cx, g - 1, 78 * s, 11 * s), new Color(0, 0, 0, 0.16));
 
-      this.drawRewardsBehind(m, t, cx, base, 82);
-      if (this.pose.subagents > 0 && m !== 'idle' && m !== 'sleeping') this.drawMinis(cx, g, t);
+      if (!bare) this.drawRewardsBehind(m, t, cx, base, 82);
+      if (this.pose.subagents > 0 && m !== 'idle' && m !== 'sleeping' && !bare) this.drawMinis(cx, g, t);
       if (m === 'typing') this.at(cx + 46, g, {}, () => this.drawLaptop(t));
 
       const face = this.faceFor(m, t);
@@ -168,6 +174,7 @@
       }, () => this.drawCat(m, t, face.eyes, face.mouth, face.look || this.pose.look));
 
       this.drawProps(m, t, cx, g, base);
+      if (bare) return { x: cx, y: base + 92 };
       this.drawEffects(m, t, cx, base);
       this.drawCompanion(m, t, rect(cx - 42, base, 84, 82));
       this.drawBadge(rect(cx - 42, base, 84, 82));
@@ -309,6 +316,15 @@
       body.roundRect(-42, 0, 84, 66, [{ x: 38, y: 32 }]);
       this.fillStroke(body, fur);
       this.fill(this.oval(0, 17, 50, 26), furLight);
+      if (furStripes) {
+        // Tabby markings: three on the forehead, two on each side.
+        const stripes = new Path2D();
+        for (const x of [-8, 0, 8]) { stripes.moveTo(x, 63); stripes.lineTo(x * 0.8, 54); }
+        for (const side of [-1, 1]) {
+          for (const y of [22, 34]) { stripes.moveTo(side * 41, y + 4); stripes.quadraticCurveTo(side * 33, y, side * 30, y - 5); }
+        }
+        this.strokePath(stripes, furStripes, 3.2, 'round');
+      }
 
       const lx = look.x * 3.5, ly = look.y * 2.5;
       this.drawEyes(eyes, t, lx, ly);
@@ -361,7 +377,7 @@
       const aura = this.pose.aura;
       if (aura) {
         const r = Math.max(64, height * 0.75) * (1 + sin(t * 2.2) * 0.06);
-        const rgb = aura === 'purple' ? '168,107,255' : aura === 'snow' ? '153,217,255' : '255,209,77';
+        const rgb = aura === 'purple' ? '168,107,255' : aura === 'snow' ? '153,217,255' : aura === 'hearts' ? '255,120,175' : '255,209,77';
         ctx.save();
         ctx.translate(cx, base + height * 0.45);
         ctx.scale(1, 0.85);
@@ -373,6 +389,15 @@
         ctx.arc(0, 0, r, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
+        if (aura === 'hearts') {
+          // Hearts circling the character.
+          for (let i = 0; i < 6; i++) {
+            const a = t * 0.9 + (i / 6) * Math.PI * 2;
+            const x = cx + cos(a) * r * 0.85, y = base + height * 0.45 + sin(a) * r * 0.55;
+            const beat = 1 + 0.15 * abs(sin(t * 4 + i));
+            this.fill(this.heart(x, y, 9 * beat), new Color(1, 0.36 + 0.1 * (i % 2), 0.6, 0.85));
+          }
+        }
         if (aura === 'snow') {
           for (let i = 0; i < 10; i++) {
             const phase = fmod(t * 0.25 + i * 0.137, 1);
@@ -444,6 +469,37 @@
         const ring = this.oval(0, 24 + sin(t * 2) * 2, 42, 12);
         this.strokePath(ring, new Color(1, 0.85, 0.3, 0.35), 7);
         this.strokePath(ring, new Color(1, 0.8, 0.2), 3.5);
+      } else if (hat === 'witchHat') {
+        const dark = new Color(0.2, 0.15, 0.27);
+        this.fillStroke(this.oval(0, 4, 68, 12), dark);
+        const cone = new Path2D();
+        cone.moveTo(-17, 5);
+        cone.lineTo(-3, 36);
+        cone.quadraticCurveTo(4, 48, 19, 42); // the tip flops over
+        cone.quadraticCurveTo(10, 38, 6, 31);
+        cone.lineTo(17, 5);
+        cone.closePath();
+        this.fill(cone, dark);
+        const ctx = this.ctx;
+        ctx.save();
+        ctx.clip(cone);
+        this.fillRect(rect(-20, 6, 40, 7), new Color(0.6, 0.32, 0.9));
+        ctx.restore();
+        this.strokePath(cone, outline, 2.5, 'butt', 'round');
+        this.fillStroke(this.poly([[-4, 6.5], [4, 6.5], [4, 12], [-4, 12]]), new Color(1, 0.8, 0.25), 1.5);
+        this.fill(this.star(-8 + sin(t * 2) * 1, 22, 2.6), new Color(1, 0.9, 0.4, 0.5 + 0.5 * abs(sin(t * 3))));
+      } else if (hat === 'santaHat') {
+        const red = new Color(0.87, 0.15, 0.2);
+        const cone = new Path2D();
+        cone.moveTo(-21, 4);
+        cone.bezierCurveTo(-14, 32, 10, 42, 27, 30);
+        cone.quadraticCurveTo(16, 24, 21, 4);
+        cone.closePath();
+        this.fillStroke(cone, red);
+        const trim = new Path2D();
+        trim.roundRect(-25, -3, 50, 10, 5);
+        this.fillStroke(trim, Color.white, 2);
+        this.fillStroke(this.oval(28 + sin(t * 2) * 1.5, 28, 12, 12), Color.white, 2);
       } else if (hat === 'crown' || hat === 'diamondCrown') {
         const diamond = hat === 'diamondCrown';
         const body = diamond ? new Color(0.62, 0.9, 1) : new Color(1, 0.78, 0.24);
@@ -483,6 +539,30 @@
         this.fillStroke(this.star(x, y, 8), new Color(1, 0.85, 0.2), 1.5);
         this.fill(this.oval(x - 2, y + 1, 1.8, 2.2), new Color(0.25, 0.25, 0.25));
         this.fill(this.oval(x + 2, y + 1, 1.8, 2.2), new Color(0.25, 0.25, 0.25));
+      } else if (companion === 'pumpkin') {
+        // Hops along beside the character's feet.
+        const x = right + 18, y = r.y + 12 + abs(sin(t * 3.2)) * 7;
+        const orange = new Color(1, 0.55, 0.12);
+        this.fillStroke(this.oval(x - 6, y, 16, 22), orange, 2);
+        this.fillStroke(this.oval(x + 6, y, 16, 22), orange, 2);
+        this.fillStroke(this.oval(x, y, 18, 23), new Color(1, 0.62, 0.18), 2);
+        this.fillStroke(this.poly([[x - 1.5, y + 10], [x + 1.5, y + 10], [x + 3, y + 16], [x - 0.5, y + 16]]), new Color(0.35, 0.55, 0.2), 1.5);
+        const face = new Color(0.33, 0.15, 0.04);
+        this.fill(this.poly([[x - 7, y + 3], [x - 3, y + 3], [x - 5, y + 7]]), face);
+        this.fill(this.poly([[x + 3, y + 3], [x + 7, y + 3], [x + 5, y + 7]]), face);
+        this.fill(this.poly([[x - 7, y - 3], [x - 4, y - 6], [x - 1, y - 3], [x + 2, y - 6], [x + 5, y - 3], [x + 7, y - 4], [x + 3, y - 8], [x - 3, y - 8]]), face);
+      } else if (companion === 'snowman') {
+        const x = r.x - 18, y = r.y;
+        this.at(x, y, { rotate: sin(t * 1.6) * 0.06, pivotY: 0 }, () => {
+          this.fillStroke(this.oval(0, 12, 24, 24), Color.white, 2);
+          this.fillStroke(this.oval(0, 31, 17, 17), Color.white, 2);
+          const coal = new Color(0.15, 0.15, 0.18);
+          this.fill(this.oval(-3, 33, 2.6, 2.6), coal);
+          this.fill(this.oval(3, 33, 2.6, 2.6), coal);
+          for (const by of [8, 14, 20]) this.fill(this.oval(0, by, 2.4, 2.4), coal);
+          this.fill(this.poly([[0, 30], [0, 28], [9, 29]]), new Color(1, 0.55, 0.15));
+          this.strokePath(this.poly([[-7, 24], [7, 24]]), new Color(0.85, 0.2, 0.25), 3, 'round');
+        });
       } else if (companion === 'planets') {
         [[4, 0.62, SYS.blue, 10], [6.5, 0.8, SYS.orange, 8]].forEach(([period, reach, color, d], i) => {
           const a = t * ((2 * Math.PI) / period) + i * 2;

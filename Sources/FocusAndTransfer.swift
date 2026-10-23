@@ -72,7 +72,8 @@ enum TransferKey {
     /// Settings that make sense on another machine (no window positions, hooks, or login items).
     static let settingKeys = ["spritePack", "themeColor", "thoughtBubble", "wander", "gravity", "walkOnWindows",
                               "quietInCalls", "notifications", "sounds", "autoUpdate", "blocklist", "strictBlock",
-                              "hat", "trail", "auraStyle", "companion", "goldenFur", "showPrestigeBadge", "blockDuringFocus"]
+                              "hat", "trail", "auraStyle", "companion", "goldenFur", "showPrestigeBadge", "blockDuringFocus",
+                              "eventRewards", "quietHours", "typeAlong", "panicKey"]
 
     static func encode(_ payload: [String: Any]) throws -> String {
         let json = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])

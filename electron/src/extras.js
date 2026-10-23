@@ -73,6 +73,21 @@ class Stats {
     return m;
   }
 
+  /** The last `count` days (oldest first) across all synced devices, for the Insights charts. */
+  history(count = 14) {
+    const { addDays } = require('./sync');
+    const out = [];
+    const d = new Date();
+    for (let i = count - 1; i >= 0; i--) {
+      const day = new Date(d.getFullYear(), d.getMonth(), d.getDate() - i);
+      const key = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+      const v = addDays(this.data.days[key], this.remote.days[key]) || {};
+      out.push({ day: key, activeMinutes: v.activeMinutes || 0, agentMinutes: v.agentMinutes || 0, tasks: v.tasks || 0,
+        focusSessions: v.focusSessions || 0, pets: v.pets || 0, openMinutes: v.openMinutes || 0 });
+    }
+    return out;
+  }
+
   /** This device's contribution, for its sync file. */
   get deviceExport() { return { xp: this.data.xp, days: this.data.days }; }
 
@@ -512,7 +527,7 @@ function closeBlockedTab(word) {
 const zlib = require('zlib');
 const TRANSFER_PREFIX = 'DESKPET-1:';
 const TRANSFER_SETTINGS = ['spritePack', 'themeColor', 'thoughtBubble', 'wander', 'gravity', 'walkOnWindows', 'quietInCalls', 'notifications', 'sounds', 'autoUpdate', 'blocklist', 'strictBlock',
-  'hat', 'trail', 'auraStyle', 'companion', 'goldenFur', 'showPrestigeBadge', 'blockDuringFocus'];
+  'hat', 'trail', 'auraStyle', 'companion', 'goldenFur', 'showPrestigeBadge', 'blockDuringFocus', 'eventRewards', 'quietHours', 'typeAlong', 'panicKey'];
 
 const transferKey = {
   encode(payload) {
@@ -605,7 +620,11 @@ const REWARDS = [
   ['halo', 60, '😇 Halo', 'hat', 'halo'], ['snowAura', 70, '❄️ Snow aura', 'aura', 'snow'],
   ['planets', 80, '🪐 Orbiting planets', 'companion', 'planets'], ['diamondCrown', 90, '💎 Diamond crown', 'hat', 'diamondCrown'],
   ['golden', 100, '🏆 Golden shimmer', 'golden', true],
-].map(([id, level, title, slot, value]) => ({ id, level, title, slot, key: SLOTS.find((s) => s.id === slot).key, value }));
+  // Seasonal event rewards: earned by spending an hour together during the event (see seasons.js).
+  ['witchHat', 0, '🧙 Witch hat', 'hat', 'witchHat', 'halloween'], ['pumpkin', 0, '🎃 Pumpkin buddy', 'companion', 'pumpkin', 'halloween'],
+  ['santaHat', 0, '🎅 Santa hat', 'hat', 'santaHat', 'winter'], ['snowman', 0, '⛄ Snowman', 'companion', 'snowman', 'winter'],
+  ['heartAura', 0, '💗 Heart aura', 'aura', 'hearts', 'valentine'],
+].map(([id, level, title, slot, value, event]) => ({ id, level, title, slot, key: SLOTS.find((s) => s.id === slot).key, value, event: event || null }));
 
 /** Call of Duty style: max level 100, prestige back to 1 (rewards stay), Prestige 10 levels to 1000. */
 const PRESTIGE = {

@@ -23,6 +23,11 @@ const { Sync } = require('./sync');
 const hooks = require('./hooks');
 const { createCompanion, personalityFor } = require('./companion-host');
 const trips = require('./trips');
+const { sessionSummary } = require('./summary');
+const seasons = require('./seasons');
+const { CalendarWatcher } = require('./calendar');
+const presence = require('./presence');
+const gallery = require('./gallery');
 const { spawn } = require('child_process');
 
 // Visitor mode (a pet on a trip, docs/trips-and-moving.md) keeps Chromium's profile in the trip's temp folder,
@@ -141,6 +146,16 @@ class Pet {
     this.visitorsAtDoor = [];
     this.announcedDoors = new Set();
     this.letOut = new Set();
+    // 1.5: agent summaries, calendar, playdates, seasonal events.
+    this.summaries = new Map();
+    this.calendar = new CalendarWatcher();
+    this.calendarNotified = new Set();
+    this.meetingLink = null;
+    this.lastCalendarTick = -15;
+    this.lastPresence = 0;
+    this.playdate = null;
+    this.metPets = new Set();
+    this.nextPlaydateAt = 0;
   }
 
   // MARK: Settings
@@ -169,7 +184,18 @@ class Pet {
   get strictBlock() { return this.settings.get('strictBlock', false); }
   toggle(key, fallback) { this.settings.set(key, !this.settings.get(key, fallback)); }
   /** On a call: no sounds and no chatty remarks. */
-  get quiet() { return (this.quietInCalls && this.agents.inCall) || this.panicHidden; }
+  get quiet() { return (this.quietInCalls && this.agents.inCall) || this.panicHidden || this.quietHoursOn; }
+
+  // Quiet hours: a weekly schedule with no remarks or sounds (notifications optional).
+  get quietHours() { return seasons.quietSettings(this.settings.get('quietHours', null)); }
+  get quietHoursOn() { return seasons.quietHoursActive(this.quietHours); }
+
+  /** Calendar heads-up settings: { source: 'off'|'system'|'ics', icsUrl, lead }. */
+  get calendarCfg() {
+    const c = this.settings.get('calendar', null) || {};
+    const source = ['off', 'system', 'ics'].includes(c.source) ? c.source : 'off';
+    return { source: this.visitor ? 'off' : source, icsUrl: String(c.icsUrl || ''), lead: [1, 2, 5, 10, 15].includes(Number(c.lead)) ? Number(c.lead) : 5 };
+  }
 
   // Emergency hide: one global shortcut hides the pet and everything it shows, and silences it, until pressed again.
   get panicKeyID() { return this.settings.get('panicKey', 'ctrl-alt-h'); }
@@ -366,6 +392,7 @@ class Pet {
         if (idle < 60) d.activeMinutes++;
         if (busy) d.agentMinutes++;
       });
+      this.eventTick(idle < 60);
     }
     if (!this.stats.today.greeted && !this.away) {
       this.gainXP(10, false, (d) => { d.greeted = true; });
@@ -378,7 +405,15 @@ class Pet {
     if (this.perch && !this.walkOnWindows) this.dropFromPerch();
 
     this.mood = this.resolveMood(t, idle, sinceKey);
-    if (this.mood === 'idle' && this.wander && this.win.isVisible() && t > this.nextWalkAt && !this.velocity && !this.resizing && !this.talkOpen) this.startWalk(t);
+    if (t - this.lastPresence >= 1) {
+      this.lastPresence = t;
+      this.presenceTick(t);
+    }
+    if (t - this.lastCalendarTick >= 15) {
+      this.lastCalendarTick = t;
+      this.calendarTick();
+    }
+    if (this.mood === 'idle' && this.wander && this.win.isVisible() && t > this.nextWalkAt && !this.velocity && !this.resizing && !this.talkOpen && !this.playdate) this.startWalk(t);
   }
 
   resolveMood(t, idle, sinceKey) {
@@ -411,7 +446,6 @@ class Pet {
       if (previous.activity === s.activity) continue;
       const project = s.project || s.name;
       if (s.activity === 'done') {
-        this.say(`${s.name} is done! ✨`, 4);
         this.taskFinished(s, project);
       } else if (s.activity === 'needsYou') {
         this.say(`${s.name} needs you! 🙋`, 5);
@@ -421,9 +455,8 @@ class Pet {
         this.say(`uh oh, ${s.name} hit an error 😵`, 4);
         this.notifyUnlessWatching(s, `${s.name} hit an error`, project);
       } else if (s.activity === 'idle' && !s.precise && t - (this.busySince.get(s.id) || t) > 15) {
-        this.say(`${s.name} looks done ✨`, 4);
         this.transient = { mood: 'done', until: t + 3 };
-        this.taskFinished(s, project);
+        this.taskFinished(s, project, true);
       }
     }
     if (!firstPass) for (const [id, old] of this.known) if (!current.has(id)) this.say(`bye, ${old.name}! 👋`, 3);
@@ -462,6 +495,15 @@ class Pet {
     p.companion = (worn('companion') || {}).value || null;
     p.golden = !!worn('golden');
     p.prestige = this.settings.get('showPrestigeBadge', true) ? this.stats.prestige : 0;
+    // During an event its outfit shows in any empty slot, even before it's earned.
+    const ev = seasons.activeEvent();
+    if (ev) {
+      for (const id of ev.rewards) {
+        const r = REWARDS.find((x) => x.id === id);
+        if (r && !p[r.slot]) p[r.slot] = r.value;
+      }
+    }
+    if (!p.hat && this.birthdayToday()) p.hat = 'partyHat';
     return p;
   }
 
@@ -710,6 +752,14 @@ class Pet {
   tapped() {
     const t = now();
     this.walkTarget = null;
+    // A meeting is about to start (or just did): a click joins it.
+    if (this.meetingLink && Date.now() < this.meetingLink.until) {
+      const { link, title } = this.meetingLink;
+      this.meetingLink = null;
+      shell.openExternal(link);
+      this.say(`joining ${title} 📅`, 2.5);
+      return;
+    }
     const top = this.topSession;
     // When an agent wants attention, a click takes you to it.
     if (top && ['needsYou', 'done', 'error', 'oops'].includes(top.activity) && top.pid) {
@@ -864,7 +914,8 @@ class Pet {
     const template = [
       { label: `${pet} · ${this.stats.rankTitle} — ${away ? 'on a trip' : this.mood}`, enabled: false },
       { label: `Today: ${this.todaySummary()}`, enabled: false },
-      ...(this.quiet ? [{ label: '🤫 Quiet: a mic or camera is in use', enabled: false }] : []),
+      ...(this.quietHoursOn ? [{ label: `🌙 Quiet hours until ${this.quietHours.to}`, enabled: false }]
+        : this.quiet && !this.panicHidden ? [{ label: '🤫 Quiet: a mic or camera is in use', enabled: false }] : []),
       ...(this.updater.available && !this.visitor ? [{ label: `⬆️ Update to v${this.updater.available.version}`, click: () => this.installUpdate() }] : []),
       ...(tripItems.length ? [{ type: 'separator' }, ...tripItems] : []),
       { type: 'separator' },
@@ -1054,9 +1105,16 @@ class Pet {
       },
       nextReward: st.canPrestige ? '⭐ Ready to prestige!' : st.prestige ? '' : next ? `Next reward: ${next.title} at Lv ${next.level}` : '',
       slots: SLOTS.map((x) => ({ id: x.id, title: x.title })),
-      rewards: REWARDS.map((r) => ({ id: r.id, title: r.title, level: r.level, slot: r.slot, value: r.value, unlocked: this.isUnlocked(r), worn: this.isUnlocked(r) && this.wearing(r) })),
+      rewards: REWARDS.map((r) => ({
+        id: r.id, title: r.title, level: r.level, slot: r.slot, value: r.value, unlocked: this.isUnlocked(r), worn: this.isUnlocked(r) && this.wearing(r),
+        event: r.event, eventTitle: r.event ? (seasons.EVENTS.find((e) => e.id === r.event) || {}).title || null : null,
+      })),
       today: this.stats.today,
       togetherMinutes: this.stats.togetherMinutes,
+      history: this.stats.history(14),
+      quietHours: { ...this.quietHours, active: this.quietHoursOn },
+      calendar: this.calendarState(),
+      events: this.eventsState(),
       sessions: card.rows.map((r, i) => ({ ...r, name: r.title.split(' · ')[0], project: r.title.split(' · ')[1] || '', precise: !r.detail.endsWith('(guessed)'), detail: r.detail.replace(' (guessed)', ''), id: i })),
       focus: { phase: this.focus.phase, label: this.focus.label, remaining: this.focus.remaining, total: (this.focus.phase === 'rest' ? Math.max(5, Math.round(this.focus.minutes / 5)) : this.focus.minutes) * 60, minutes: this.focus.minutes },
       blocklist: this.blocklist, blockDuringFocus: this.blockDuringFocus, strictBlock: this.strictBlock,
@@ -1081,7 +1139,8 @@ class Pet {
   async panelCall(action, payload) {
     payload = payload || {};
     // A visiting pet can't change this computer's setup.
-    const hostOnly = ['hooks', 'kiro', 'transferImport', 'syncEnable', 'syncPacks', 'checkUpdates', 'installUpdate', 'openWizard', 'tripTake', 'movingApply', 'tripLetOut'];
+    const hostOnly = ['hooks', 'kiro', 'transferImport', 'syncEnable', 'syncPacks', 'checkUpdates', 'installUpdate', 'openWizard', 'tripTake', 'movingApply', 'tripLetOut',
+      'galleryInstall', 'calendarTest'];
     if (this.visitor && (hostOnly.includes(action) || (action === 'set' && payload.key === 'startAtLogin'))) {
       return { ok: false, error: `${this.config.petName} is just visiting this computer` };
     }
@@ -1096,6 +1155,15 @@ class Pet {
           case 'panicKey':
             this.settings.set('panicKey', String(payload.value || 'ctrl-alt-h'));
             return { value: this.panicKeyID, ok: this.registerPanicKey() };
+          case 'quietHours': this.settings.set('quietHours', seasons.quietSettings(payload.value)); return { ok: true, value: this.quietHours, active: this.quietHoursOn };
+          case 'calendar': {
+            if (this.visitor) return { ok: false, error: `${this.config.petName} is just visiting this computer` };
+            const v = payload.value || {};
+            this.settings.set('calendar', { ...this.calendarCfg, ...v });
+            this.calendarNotified.clear();
+            this.calendar.refresh(this.calendarCfg, { force: true }).catch(() => {});
+            return { ok: true, value: this.calendarCfg };
+          }
           default:
             this.settings.set(payload.key, payload.value);
             if (payload.key === 'sounds' && payload.value) this.playSound('pet');
@@ -1165,9 +1233,144 @@ class Pet {
       case 'movingPack': return this.movingPackDialog(this.panel);
       case 'movingOpen': return this.movingOpenDialog(this.panel);
       case 'movingApply': return this.movingApply(payload.path);
+      case 'calendarTest': {
+        await this.calendar.refresh(this.calendarCfg, { force: true });
+        const ok = this.calendar.status === 'ok';
+        return { ok, events: this.calendar.events.length, next: this.calendar.next(), error: ok ? null : this.calendar.status };
+      }
+      case 'galleryList':
+        try { return { ok: true, packs: await gallery.list(paths.sprites) }; } catch (e) { return { ok: false, packs: [], error: e.message || "couldn't reach the gallery" }; }
+      case 'galleryInstall':
+        try {
+          await gallery.install(String(payload.id || ''), paths.sprites);
+          return { ok: true };
+        } catch (e) { return { ok: false, error: e.message || "couldn't install that pack" }; }
       case 'close': if (this.panel && !this.panel.isDestroyed()) this.panel.close(); return { ok: true };
       case 'log': console.error('panel:', payload.message); return { ok: true };
       default: return null;
+    }
+  }
+
+  // MARK: Seasonal events
+
+  birthdayToday() {
+    try {
+      const b = this.companion._state().memory.birthday;
+      return !!b && b.value === seasons.monthDay(new Date());
+    } catch (_) { return false; }
+  }
+
+  /** Once a minute: announce the event, count minutes together toward its rewards, unlock them at 60. */
+  eventTick(active) {
+    const ev = seasons.activeEvent();
+    if (!ev || this.away) return;
+    if (!this.settings.get(`eventSeen.${ev.key}`, false)) {
+      this.settings.set(`eventSeen.${ev.key}`, true);
+      this.applyCompanion(this.companion.event('eventStart', { id: ev.id, title: ev.title }));
+    }
+    const earned = this.settings.get('eventRewards', []);
+    if (!active || ev.rewards.every((id) => earned.includes(id))) return;
+    const minutes = this.settings.get(`event.${ev.key}`, 0) + 1;
+    this.settings.set(`event.${ev.key}`, minutes);
+    if (minutes < seasons.EVENT_GOAL) return;
+    this.settings.set('eventRewards', [...new Set([...earned, ...ev.rewards])]);
+    for (const id of ev.rewards) {
+      const r = REWARDS.find((x) => x.id === id);
+      if (r) this.settings.set(r.key, r.value);
+    }
+    this.transient = { mood: 'done', until: now() + 3 };
+    this.playSound('level-up');
+    this.applyCompanion(this.companion.event('eventEarned', { id: ev.id, title: ev.title }));
+    const names = ev.rewards.map((id) => (REWARDS.find((x) => x.id === id) || {}).title).filter(Boolean).join(' and ');
+    this.notify(`${ev.title} reward!`, `${this.config.petName} earned ${names}. They're yours to keep.`, 0);
+  }
+
+  eventsState() {
+    const ev = seasons.activeEvent();
+    const next = seasons.nextEvent();
+    const earned = this.settings.get('eventRewards', []);
+    return {
+      active: ev ? {
+        id: ev.id, title: ev.title, emoji: ev.emoji, until: ev.to, minutes: Math.min(seasons.EVENT_GOAL, this.settings.get(`event.${ev.key}`, 0)),
+        goal: seasons.EVENT_GOAL, earned: ev.rewards.every((id) => earned.includes(id)), rewards: ev.rewards,
+      } : null,
+      next: next ? { id: next.id, title: next.title, from: next.from } : null,
+    };
+  }
+
+  // MARK: Calendar heads-up
+
+  calendarState() {
+    const cfg = this.calendarCfg;
+    const next = cfg.source === 'off' ? null : this.calendar.next();
+    return {
+      system: isWindows, source: cfg.source, icsUrl: cfg.icsUrl, lead: cfg.lead,
+      status: cfg.source === 'off' ? 'off' : this.calendar.status, next: next ? { title: next.title, start: next.start, link: next.link } : null,
+    };
+  }
+
+  /** Every 15 s: refresh when due, then remind `lead` minutes before a meeting and again when it starts. */
+  calendarTick() {
+    const cfg = this.calendarCfg;
+    if (cfg.source === 'off') return;
+    this.calendar.refresh(cfg).then(() => this.checkMeetings(cfg)).catch(() => {});
+    this.checkMeetings(cfg);
+  }
+
+  checkMeetings(cfg) {
+    if (this.panicHidden || cfg.source === 'off') return;
+    const nowMs = Date.now();
+    for (const e of this.calendar.events) {
+      const soonKey = `${e.start}|${e.title}|soon`, nowKey = `${e.start}|${e.title}|now`;
+      if (nowMs >= e.start - cfg.lead * 60000 && nowMs < e.start && !this.calendarNotified.has(soonKey)) {
+        this.calendarNotified.add(soonKey);
+        const minutes = Math.max(1, Math.round((e.start - nowMs) / 60000));
+        this.transient = { mood: 'startled', until: now() + 1.2 };
+        this.applyCompanion(this.companion.event('meetingSoon', { title: e.title, minutes }));
+        this.notify(`📅 ${e.title} in ${minutes} minute${minutes === 1 ? '' : 's'}`, e.link ? `Click ${this.config.petName} to join` : 'Heads up!', 0);
+        if (e.link) this.meetingLink = { link: e.link, title: e.title, until: e.start + 10 * 60000 };
+      } else if (nowMs >= e.start && nowMs < e.start + 2 * 60000 && !this.calendarNotified.has(nowKey)) {
+        this.calendarNotified.add(soonKey);
+        this.calendarNotified.add(nowKey);
+        this.transient = { mood: 'needsYou', until: now() + 3 };
+        this.applyCompanion(this.companion.event('meetingNow', { title: e.title }));
+        if (e.link) this.meetingLink = { link: e.link, title: e.title, until: e.start + 10 * 60000 };
+      }
+    }
+  }
+
+  // MARK: Playdates
+
+  /** Every second: say where this pet is; if another pet is around, go say hi now and then. */
+  presenceTick(t) {
+    const visible = this.win.isVisible() && !this.away && !this.panicHidden;
+    if (!visible) { presence.remove(); this.playdate = null; return; }
+    const b = this.win.getBounds();
+    const body = this.geometry ? this.geometry.bodyExtent : { halfWidth: 46, height: 84 };
+    presence.write({ pet: this.config.petName, x: b.x + b.width / 2, y: b.y + b.height, width: body.halfWidth * 2, height: body.height, mood: this.mood, visitor: this.visitor });
+    const myX = b.x + b.width / 2;
+    const other = presence.others().sort((p, q) => Math.abs(p.x - myX) - Math.abs(q.x - myX))[0] || null;
+    const top = this.topSession;
+    const step = presence.playdateStep({
+      me: { x: myX, halfWidth: body.halfWidth, mood: this.mood, busy: !!(top && top.activity !== 'idle' && top.activity !== 'done'), blocked: !!(this.velocity || this.press || this.resizing || this.talkOpen) },
+      other, state: this.playdate, met: this.metPets, t, nextAt: this.nextPlaydateAt,
+    });
+    this.playdate = step.state;
+    if (step.action === 'play') {
+      // Close enough: face each other and play.
+      this.walkTarget = null;
+      this.walkDirection = step.direction;
+      this.transient = { mood: 'petted', until: t + 4 };
+      this.metPets.add(other.pid);
+      this.applyCompanion(this.companion.event('playdate', { other: other.pet, first: step.first }));
+      this.nextPlaydateAt = t + 180;
+      this.savePosition();
+    } else if (step.action === 'giveUp') {
+      this.nextPlaydateAt = t + 60;
+    } else if (step.action === 'walk') {
+      // Walk to a spot just beside the other pet (both walk, so they meet in the middle).
+      const wa = this.display().workArea;
+      this.walkTarget = Math.max(wa.x - 40, Math.min(wa.x + wa.width - this.size.width + 40, step.center - this.size.width / 2));
     }
   }
 
@@ -1184,6 +1387,7 @@ class Pet {
 
   notify(title, body, pid) {
     if (this.visitor || this.panicHidden || !this.notificationsOn || !Notification.isSupported()) return;
+    if (this.quietHoursOn && !this.quietHours.notifications) return;
     const n = new Notification({ title, body, silent: true, icon: path.join(__dirname, '..', 'assets', 'icon.png') });
     if (pid) n.on('click', () => this.jump(pid));
     n.show();
@@ -1196,10 +1400,17 @@ class Pet {
     this.notify(title, body, s.pid);
   }
 
-  taskFinished(s, project) {
+  /** An agent finished: say what it did (from its last reply in the session log) and notify. */
+  taskFinished(s, project, guessed = false) {
     this.playSound('done');
-    this.notifyUnlessWatching(s, `${s.name} is done ✨`, project);
     this.gainXP(10, false, (d) => { d.tasks++; });
+    // The final reply lands in the log a moment after the turn ends.
+    setTimeout(() => {
+      const summary = sessionSummary(s);
+      if (summary) this.summaries.set(s.id, summary);
+      this.say(summary ? `${s.name}: ${summary} ✓` : guessed ? `${s.name} looks done ✨` : `${s.name} is done! ✨`, summary ? 6 : 4);
+      this.notifyUnlessWatching(s, `${s.name} is done ✨`, summary || project);
+    }, 900);
   }
 
   /** Awards XP (play XP is capped per day), shows "+N XP", and celebrates level-ups. */
@@ -1213,6 +1424,8 @@ class Pet {
       const t = now();
       const pending = this.xpPopup && t - this.xpPopup.at < 1.2 ? this.xpPopup.amount : 0;
       this.xpPopup = { amount: pending + xp, at: t };
+      // Needs meters: XP earns coins for treats.
+      this.applyCompanion(this.companion.event('xp', { amount: xp }));
     }
     this.levelUp(level);
   }
@@ -1244,7 +1457,10 @@ class Pet {
   }
 
   /** Rewards stay unlocked forever once you've prestiged. */
-  isUnlocked(r) { return this.stats.prestige > 0 || this.stats.level >= r.level; }
+  isUnlocked(r) {
+    if (r.event) return this.settings.get('eventRewards', []).includes(r.id);
+    return this.stats.prestige > 0 || this.stats.level >= r.level;
+  }
   wearing(r) { return r.slot === 'golden' ? this.settings.get(r.key, false) === true : this.settings.get(r.key, '') === r.value; }
   worn(slot) { return REWARDS.find((r) => r.slot === slot && this.isUnlocked(r) && this.wearing(r)); }
 
@@ -1301,8 +1517,9 @@ class Pet {
       items.push({ type: 'separator' }, { label: slot.title, enabled: false });
       for (const r of REWARDS.filter((x) => x.slot === slot.id)) {
         const unlocked = this.isUnlocked(r);
+        const ev = r.event && seasons.EVENTS.find((e) => e.id === r.event);
         items.push({
-          label: unlocked ? r.title : `🔒 ${r.title} · Lv ${r.level}`, type: 'checkbox', enabled: unlocked, checked: unlocked && this.wearing(r),
+          label: unlocked ? r.title : `🔒 ${r.title} · ${ev ? `${ev.title} event` : `Lv ${r.level}`}`, type: 'checkbox', enabled: unlocked, checked: unlocked && this.wearing(r),
           click: () => this.settings.set(r.key, r.slot === 'golden' ? !this.wearing(r) : (this.wearing(r) ? '' : r.value)),
         });
       }
@@ -1355,6 +1572,11 @@ class Pet {
       today: this.todaySummary(), focus: this.focus.phase === 'off' ? '' : this.focus.label, quiet: this.quiet,
       together: (() => { const m = this.stats.togetherMinutes; return `⏱ ${m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`} together`; })(),
       rank: this.stats.rankTitle, atMax: this.stats.atMax,
+      quietHours: this.quietHoursOn ? `🌙 Quiet hours until ${this.quietHours.to}` : '',
+      needs: (() => {
+        const n = this.companion.summary().needs;
+        return n && n.enabled !== false && typeof n.energy === 'number' ? `⚡ ${Math.round(n.energy)} energy · 🎈 ${Math.round(n.fun)} fun · 🪙 ${n.coins || 0}` : '';
+      })(),
       nextReward: this.stats.canPrestige ? '⭐ Ready to prestige! (tray menu → Rewards)'
         : this.stats.prestige ? '' : (() => { const n = REWARDS.find((r) => r.level > this.stats.level); return n ? `Next reward: ${n.title} at Lv ${n.level}` : ''; })(),
       accent: this.themeHex || '#FF9500',
@@ -1365,6 +1587,7 @@ class Pet {
           title: s.name + (s.project ? ` · ${s.project}` : ''), detail: s.detail + (s.precise ? '' : ' (guessed)'),
           color: STATUS_COLORS[s.activity], elapsed: s.activity === 'idle' ? 'idle' : secs >= 60 ? `${Math.floor(secs / 60)}m` : `${secs}s`,
           tokens: usage ? `${compact(usage.output)} out · ${compact(usage.context)} context` : '', pid: s.pid || 0,
+          summary: this.summaries.get(s.id) || '',
         };
       }),
     };
@@ -2162,6 +2385,7 @@ function quitApp() {
 /** Quits without cleanup handlers (snapshots, tests, and when a normal quit stalls). */
 function exitNow(code) {
   exitWatchdog(2);
+  presence.remove();
   for (const w of BrowserWindow.getAllWindows()) { try { w.destroy(); } catch (_) { /* already gone */ } }
   app.exit(code);
 }
@@ -2206,6 +2430,11 @@ function runSnapshot() {
   setTimeout(() => { console.error('snapshot timed out'); exitNow(2); }, 45000);
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'), { query: { snapshot: '1' } });
   ipcMain.once('snapshot-done', (_e, dataURL) => {
+    if (process.argv.includes('--make-gallery-packs')) {
+      const index = require('../scripts/gallery-packs').write(JSON.parse(dataURL), path.join(__dirname, '..', '..', 'packs'));
+      console.log(`wrote ${index.length} gallery packs`);
+      return exitNow(0);
+    }
     const out = path.join(__dirname, '..', 'test-output');
     fs.mkdirSync(out, { recursive: true });
     const file = path.join(out, packName ? `snapshot-${packName}.png` : 'snapshot.png');
@@ -2223,13 +2452,17 @@ function runSnapshot() {
         files: fs.readdirSync(dir).filter((f) => /\.(png|gif|webp|jpe?g)$/i.test(f)).map((f) => ({ name: f, data: fs.readFileSync(path.join(dir, f)) })),
       };
     }
+    if (process.argv.includes('--make-gallery-packs')) {
+      win.webContents.send('snapshot', { gallery: require('../scripts/gallery-packs').request() });
+      return;
+    }
     win.webContents.send('snapshot', { pack: source, ownerName: loadConfig().ownerName });
   });
 }
 
 // MARK: - Startup
 
-if (process.argv.includes('--snapshot')) {
+if (process.argv.includes('--snapshot') || process.argv.includes('--make-gallery-packs')) {
   app.whenReady().then(runSnapshot);
 } else if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -2260,7 +2493,7 @@ if (process.argv.includes('--snapshot')) {
     const fail = (e) => { console.error('self-test failed:', e && e.stack ? e.stack : e); exitNow(1); };
     process.on('uncaughtException', fail);
     process.on('unhandledRejection', fail);
-    setTimeout(() => { console.error('self-test timed out'); exitNow(2); }, 30000);
+    setTimeout(() => { console.error('self-test timed out'); exitNow(2); }, ((Number(process.argv[process.argv.indexOf('--self-test-seconds') + 1]) || 7) + 23) * 1000);
   }
   app.whenReady().then(() => {
     pet = new Pet();
@@ -2312,10 +2545,15 @@ if (process.argv.includes('--snapshot')) {
         fs.mkdirSync(out, { recursive: true });
         const wait = (ms) => new Promise((r) => setTimeout(r, ms));
         await wait(1500);
-        for (const page of ['home', 'companion', 'rewards', 'look', 'focus', 'agents', 'behavior', 'trips', 'account', 'about']) {
+        for (const page of ['home', 'insights', 'companion', 'rewards', 'look', 'focus', 'agents', 'behavior', 'trips', 'account', 'about']) {
           await pet.panel.webContents.executeJavaScript(`window.__panelShow('${page}')`);
           await wait(page === 'look' || page === 'rewards' ? 1800 : 900);
           fs.writeFileSync(path.join(out, `panel-${page}.png`), (await pet.panel.webContents.capturePage()).toPNG());
+          if (['insights', 'companion', 'behavior', 'look'].includes(page)) {
+            await pet.panel.webContents.executeJavaScript("document.getElementById('content').scrollTop = 99999");
+            await wait(400);
+            fs.writeFileSync(path.join(out, `panel-${page}-end.png`), (await pet.panel.webContents.capturePage()).toPNG());
+          }
         }
         console.log('panel screenshots written');
         quitApp(); // the same path as Quit in the control center
@@ -2371,13 +2609,17 @@ if (process.argv.includes('--snapshot')) {
           scans: pet.agents.scanCount, pack: pet.pack && pet.pack.name, menuItems: pet.buildMenu().items.length,
           windowsToStandOn: pet.platforms.platforms.length, inCall: pet.agents.inCall, version: app.getVersion(),
           trip: pet.tripPanelState(), visitorSaved: pet.visitor ? pet.saveVisit() : undefined, root: paths.root,
+          playdates: [...pet.metPets], calendar: pet.calendarState(), meetingLink: pet.meetingLink, reminded: [...pet.calendarNotified],
+          quietHours: pet.quietHours, quietNow: pet.quietHoursOn, events: pet.eventsState(), historyDays: pet.stats.history(14).length,
+          summaries: [...pet.summaries.values()],
         }, null, 2));
         quitApp();
-      }, 7000);
+      }, (Number(process.argv[process.argv.indexOf('--self-test-seconds') + 1]) || 7) * 1000);
     }
   });
   app.on('window-all-closed', (e) => e.preventDefault());
   app.on('before-quit', () => {
+    presence.remove();
     if (!pet) return;
     if (pet.visitor) {
       pet.saveVisit();
