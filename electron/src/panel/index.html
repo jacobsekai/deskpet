@@ -19,6 +19,7 @@
       <nav class="sidebar" id="sidebar">
         <button data-page="home" class="on"><span>🏠</span>Home</button>
         <button data-page="companion"><span>💞</span>Companion</button>
+        <button data-page="trips"><span>🧳</span>Trips</button>
         <button data-page="rewards"><span>🏆</span>Rewards</button>
         <button data-page="look"><span>🎨</span>Look</button>
         <button data-page="focus"><span>🍅</span>Focus</button>
@@ -90,6 +91,22 @@
             <div class="memories" id="cp-memories"></div>
             <div class="actions"><button class="ghost-btn" id="cp-forget-all">Forget everything…</button></div>
           </div>
+        </section>
+
+        <!-- Trips -->
+        <section class="page" data-page="trips">
+          <div class="card trip-hero">
+            <div class="trip-emoji" id="trip-emoji">🧳</div>
+            <div>
+              <p class="eyebrow" id="trip-eyebrow">Trips</p>
+              <h2 id="trip-title">Take your pet with you</h2>
+              <p class="sub" id="trip-sub"></p>
+            </div>
+          </div>
+          <div class="card" id="trip-box"></div>
+          <div id="trip-visitors"></div>
+          <h3>📔 Trips together</h3>
+          <div class="card"><div class="trip-log" id="trip-log"></div></div>
         </section>
 
         <!-- Rewards -->
@@ -188,13 +205,18 @@
             <div id="sync-box"></div>
           </div>
           <div class="card">
-            <h3 class="card-title">Move to another device</h3>
-            <p class="sub">One code with your names, level, prestige, stats, look, and settings. Works between Mac, Windows, and Linux. Sprite pack images aren't included: export packs as zips.</p>
-            <textarea id="acc-key" rows="3" readonly></textarea>
-            <div class="actions"><button class="primary" id="acc-copy">Copy transfer key</button><button class="ghost-btn" id="acc-save-key">Save as file…</button></div>
-            <h3 class="card-title spaced">Import from another device</h3>
-            <textarea id="acc-import" rows="3" spellcheck="false" placeholder="Paste a DESKPET-1:… key"></textarea>
-            <div class="actions"><button class="primary" id="acc-import-btn">Import</button><button class="ghost-btn" id="acc-open-key">Open file…</button><span class="note" id="acc-note"></span></div>
+            <h3 class="card-title">📦 Moving homes</h3>
+            <p class="sub">Pack <span class="pet-name">your pet</span> into one file: names, level, prestige, stats, memories, settings, and the sprite pack. Open it on your new computer (Mac, Windows, or Linux), or drop it onto the pet there, to move in.</p>
+            <div class="actions"><button class="primary" id="mv-pack">📦 Pack up for moving…</button><button class="ghost-btn" id="mv-open">🏠 Move in from a file…</button><span class="note" id="mv-note"></span></div>
+            <details class="text-key">
+              <summary>Use a text key instead</summary>
+              <p class="sub">A code you can paste anywhere. It carries everything except the sprite pack.</p>
+              <textarea id="acc-key" rows="3" readonly></textarea>
+              <div class="actions"><button class="primary" id="acc-copy">Copy transfer key</button><button class="ghost-btn" id="acc-save-key">Save as file…</button></div>
+              <h3 class="card-title spaced">Import a text key</h3>
+              <textarea id="acc-import" rows="3" spellcheck="false" placeholder="Paste a DESKPET-1:… key"></textarea>
+              <div class="actions"><button class="primary" id="acc-import-btn">Import</button><button class="ghost-btn" id="acc-open-key">Open file…</button><span class="note" id="acc-note"></span></div>
+            </details>
           </div>
         </section>
 

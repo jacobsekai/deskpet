@@ -27,9 +27,10 @@
           <h1>Meet <span class="pet-name">Mochi</span></h1>
           <p class="lead">A tiny desk buddy who keeps you company and keeps an eye on your AI agents: thinking when they think, typing when they code, waving when they need you.</p>
           <button class="primary big" data-next>Get started <span class="arrow">→</span></button>
-          <button class="link" id="have-key">Moving from another computer? Use a transfer key</button>
+          <button class="link" id="have-key">Moving from another computer? Bring your pet along</button>
           <div class="transfer" id="transfer" hidden>
-            <textarea id="transfer-key" rows="3" spellcheck="false" placeholder="Paste your DESKPET-1:… key"></textarea>
+            <div class="transfer-row"><button class="ghost-btn" id="moving-open">🏠 Open a moving-homes file…</button><span class="transfer-note">a .deskpet file</span></div>
+            <textarea id="transfer-key" rows="3" spellcheck="false" placeholder="…or paste a DESKPET-1:… text key"></textarea>
             <div class="transfer-row"><span class="transfer-note" id="transfer-note"></span><button class="primary" id="transfer-apply">Import</button></div>
           </div>
         </article>

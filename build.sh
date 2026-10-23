@@ -51,6 +51,24 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>LSUIElement</key><true/>
     <key>NSAppleEventsUsageDescription</key><string>DeskPet checks which website is open during focus sessions, so it can keep you off your blocklist.</string>
     <key>NSHighResolutionCapable</key><true/>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key><string>DeskPet moving-homes file</string>
+            <key>CFBundleTypeRole</key><string>Editor</string>
+            <key>LSHandlerRank</key><string>Owner</string>
+            <key>LSItemContentTypes</key><array><string>local.deskpet.moving</string></array>
+        </dict>
+    </array>
+    <key>UTExportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key><string>local.deskpet.moving</string>
+            <key>UTTypeDescription</key><string>DeskPet moving-homes file</string>
+            <key>UTTypeConformsTo</key><array><string>public.json</string></array>
+            <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>deskpet</string></array></dict>
+        </dict>
+    </array>
 </dict>
 </plist>
 PLIST

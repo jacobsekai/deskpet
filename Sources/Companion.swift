@@ -19,6 +19,8 @@ final class Companion {
               let script = try? String(contentsOf: web.appendingPathComponent("engine.js"), encoding: .utf8) else { return }
         context.evaluateScript(script)
 
+        // State and personalities go over as JSON text: bridging Foundation dictionaries turns every empty
+        // `{}` into one shared JavaScript object, which tangled memories and milestones together.
         var personalities: [String: Any] = [:]
         let dir = web.appendingPathComponent("personalities")
         for url in (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? [] where url.pathExtension == "json" {
@@ -31,11 +33,15 @@ final class Companion {
         let host = JSValue(newObjectIn: context)!
         host.setObject(save, forKeyedSubscript: "save" as NSString)
         host.setObject("mac", forKeyedSubscript: "platform" as NSString)
-        var options: [String: Any] = ["personalities": personalities, "personality": "cat"]
-        if let state = Self.readJSON(Self.stateURL) { options["state"] = state }
+        var options: [String: Any] = ["personalities": Self.json(personalities), "personality": "cat"]
+        if let state = try? String(contentsOf: Self.stateURL, encoding: .utf8) { options["state"] = state }
         let opts = JSValue(object: options, in: context)!
         opts.setObject(host, forKeyedSubscript: "host" as NSString)
         engine = context.objectForKeyedSubscript("DeskPetCompanion")?.invokeMethod("create", withArguments: [opts])
+    }
+
+    private static func json(_ object: Any) -> String {
+        (try? JSONSerialization.data(withJSONObject: object)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
     }
 
     private static func readJSON(_ url: URL) -> Any? {
@@ -67,8 +73,8 @@ final class Companion {
     var hasOffer: Bool { call("hasOffer")?.toBool() ?? false }
     func summary() -> [String: Any] { call("summary")?.toDictionary() as? [String: Any] ?? [:] }
     func exportData() -> [String: Any] { call("exportData")?.toDictionary() as? [String: Any] ?? [:] }
-    func mergeData(_ data: [String: Any]) { _ = call("mergeData", [data]) }
-    func replaceData(_ data: [String: Any]) { _ = call("replaceData", [data]) }
+    func mergeData(_ data: [String: Any]) { _ = call("mergeData", [Self.json(data)]) }
+    func replaceData(_ data: [String: Any]) { _ = call("replaceData", [Self.json(data)]) }
     func setNames(owner: String, pet: String) { _ = call("setNames", [owner, pet]) }
     func flush() { _ = call("flush") }
 

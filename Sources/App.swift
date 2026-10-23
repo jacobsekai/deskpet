@@ -62,7 +62,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     private var config = Config.load()
     private var wizard: WizardController?
     private var controlCenter: WizardController?
-    private let defaults = UserDefaults.standard
+    private let defaults = appDefaults
 
     private var lastTick = CACurrentMediaTime()
     private var lastLogic = 0.0
@@ -115,6 +115,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     private var lastBlockNag = 0.0
     /// Recent XP gain shown floating above the pet.
     private var xpPopup: (amount: Int, at: Double)?
+    // Trips: the pet away on a drive (home), or visiting this computer from one (visitor).
+    private var tripState: [String: Any]? {
+        get { defaults.dictionary(forKey: "trip") }
+        set { defaults.set(newValue, forKey: "trip") }
+    }
+    private var petAway: Bool { tripState != nil }
+    private var lastTripWatch = 0.0
+    private var tripLaunchCheck = true
+    /// Other people's pets on drives plugged in here, by trip folder path.
+    private var visitorsAtDoor: [String: [String: Any]] = [:]
+    private var announcedVisitors = Set<String>()
+    private var letOut = Set<String>()
+    /// Visitor mode: the trip.json this instance is visiting from.
+    private var visitorTrip: [String: Any]?
+    private var visitStarted = Date()
+    private var lastVisitSave = 0.0
+    private lazy var appCopySize = TripFiles.appSize()
+
     /// The window the pet is standing on, and where it was last seen.
     private var perch: (id: Int, rect: NSRect)?
     private var platforms: [Platform] = []
@@ -173,13 +191,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
 
     func applicationWillTerminate(_ notification: Notification) {
         companion.flush()
+        if Visitor.active {
+            saveVisit()
+            Visitor.cleanUp()
+        }
+    }
+
+    /// Opening a moving-homes file (double-click, or dragging it onto the app icon).
+    func application(_ application: NSApplication, open urls: [URL]) {
+        if let url = urls.first(where: { $0.pathExtension.lowercased() == "deskpet" }) {
+            DispatchQueue.main.async { self.confirmMoveIn(url) }
+        }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        if let id = Bundle.main.bundleIdentifier,
-           NSRunningApplication.runningApplications(withBundleIdentifier: id).count > 1 {
-            NSApp.terminate(nil)
-            return
+        if Visitor.active {
+            guard checkVisit() else { return NSApp.terminate(nil) }
+        } else if let id = Bundle.main.bundleIdentifier {
+            // One pet per computer, though a visiting pet can run alongside it.
+            let visitors = Visitor.visitorPIDs()
+            let others = NSRunningApplication.runningApplications(withBundleIdentifier: id)
+                .filter { $0.processIdentifier != getpid() && !visitors.contains($0.processIdentifier) }
+            if !others.isEmpty {
+                NSApp.terminate(nil)
+                return
+            }
+            for pid in visitors where kill(pid, 0) != 0 { try? FileManager.default.removeItem(at: Visitor.markers.appendingPathComponent("\(pid)")) }
+            HookRepair.run()
         }
         NSApp.setActivationPolicy(.accessory)
         try? FileManager.default.createDirectory(at: SpritePack.root, withIntermediateDirectories: true)
@@ -200,8 +238,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.wizard?.snapshotSteps() }
         } else if CommandLine.arguments.contains("talk-snapshot") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { self.snapshotTalk() }
+        } else if let i = CommandLine.arguments.firstIndex(of: "take-trip"), i + 1 < CommandLine.arguments.count {
+            // Test mode: pack for a trip into the given folder, print the result, quit.
+            let path = CommandLine.arguments[i + 1]
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                let r = self.takeTrip(path: path, copyApp: true)
+                print((try? JSONSerialization.data(withJSONObject: r)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}")
+                fflush(stdout)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 5) { NSApp.terminate(nil) }
+            }
+        } else if Visitor.active {
+            beginVisit()
         } else if defaults.bool(forKey: "setupComplete") {
             apply(companion.event("launch"))
+            if petAway {
+                panel.orderOut(nil)
+                statusItem.button?.title = "🧳"
+            }
         } else {
             openWizard()
         }
@@ -211,12 +264,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
 
         sounds.enabled = soundsOn
         notifier.onClick = { [weak self] pid in self?.jump(to: pid) }
-        if notificationsOn && defaults.bool(forKey: "setupComplete") { notifier.requestPermission() }
+        if notificationsOn && defaults.bool(forKey: "setupComplete") && !Visitor.active { notifier.requestPermission() }
         hoverCard.model.onSelect = { [weak self] pid in self?.jump(to: pid) }
-        if kiroHooksOn { KiroHooks.apply(true) }
+        if kiroHooksOn && !Visitor.active { KiroHooks.apply(true) }
         DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in self?.wearEarnedRewardsOnce() }
         // Last time it may have been standing on a window; drop onto whatever is there now.
         if gravity && panel.frame.minY > petScreen().visibleFrame.minY + 2 { velocity = .zero }
+        guard !Visitor.active else { return }
         if autoUpdate { DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in self?.checkForUpdates(manual: false) } }
         Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { [weak self] _ in
             if self?.autoUpdate == true { self?.checkForUpdates(manual: false) }
@@ -250,7 +304,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
 
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.title = "🐾"
+        statusItem.button?.title = Visitor.active ? "🧳" : "🐾"
         let menu = NSMenu()
         menu.delegate = self
         statusItem.menu = menu
@@ -311,9 +365,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         let hour = Calendar.current.component(.hour, from: Date())
         night = hour >= 23 || hour < 6
         // Greetings, reminders (water, breaks, bedtime), remarks about your day, and conversations it starts.
-        if now - lastCompanionTick >= 5 {
+        if now - lastCompanionTick >= 5 && !petAway {
             lastCompanionTick = now
             tickCompanion(now, idle: idle)
+        }
+        if now - lastTripWatch >= 3 {
+            lastTripWatch = now
+            if Visitor.active { watchVisit(now) } else { watchTrips() }
         }
 
         if now - lastCallCheck > 2 {
@@ -773,6 +831,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
                 sounds.play(.needsYou)
             case "tier":
                 if f["down"] as? Bool != true { sounds.play(.levelUp) }
+            case "openTalk":
+                openTalk(topic: f["topic"] as? String)
+            case "trip":
+                openControlCenter(page: "trips")
             case "quit":
                 DispatchQueue.main.asyncAfter(deadline: .now() + (f["delay"] as? Double ?? 500) / 1000) { [weak self] in
                     self?.talk?.close()
@@ -1056,7 +1118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     private func updateHoverCard(_ now: Double) {
         let m = NSEvent.mouseLocation
         let local = NSPoint(x: m.x - panel.frame.minX, y: m.y - panel.frame.minY)
-        let overPet = petView.hitRect.contains(local) && !petView.dragging && !petView.resizing && velocity == nil
+        let overPet = panel.isVisible && petView.hitRect.contains(local) && !petView.dragging && !petView.resizing && velocity == nil
         let overCard = hoverCard.isVisible && hoverCard.frame.insetBy(dx: -8, dy: -8).contains(m)
         if overPet || overCard {
             hoverLeftAt = nil
@@ -1143,6 +1205,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     }
 
     func petReceivedFiles(_ urls: [URL]) {
+        if let url = urls.first(where: { $0.pathExtension.lowercased() == "deskpet" }) { return confirmMoveIn(url) }
         do {
             let name = try PackArchive.importItems(urls, currentPack: spritePackName)
             spritePackName = name
@@ -1200,6 +1263,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     }
 
     private func syncTick() {
+        guard !Visitor.active else { return }
         let levelBefore = stats.level
         if stats.syncedPrestige == nil { stats.syncedPrestige = (stats.prestige, stats.prestigeBase) }
         guard let result = sync.sync(localStats: stats.deviceExport, profile: syncProfile()) else { return }
@@ -1358,7 +1422,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
 
     /// Applies an imported key. Returns a note about anything that didn't come along.
     @discardableResult
-    private func applyTransfer(_ payload: [String: Any]) throws -> String {
+    private func applyTransfer(_ payload: [String: Any], quietly: Bool = false) throws -> String {
         let incoming = payload["config"] as? [String: Any] ?? [:]
         let owner = incoming["ownerName"] as? String ?? config.ownerName
         let pet = incoming["petName"] as? String ?? config.petName
@@ -1381,6 +1445,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         petView.theme = Theme(hex: themeHex) ?? .default
         petView.thoughtBubble = thoughtBubble
         sounds.enabled = soundsOn
+        companion.setNames(owner: owner, pet: pet)
+        setPersonality()
+        guard !quietly else { return note }
         transient = (.done, CACurrentMediaTime() + 3)
         say(note.isEmpty ? "welcome home, \(owner)! everything's here ✨" : note, for: 5)
         return note
@@ -1507,7 +1574,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     /// The quick menu (menu bar and right-click). Everything else lives in the control center.
     private func fill(_ menu: NSMenu) {
         menu.removeAllItems()
-        menu.addItem(disabled("\(config.petName) · \(stats.rankTitle) — \(String(describing: mood))"))
+        if Visitor.active {
+            menu.addItem(disabled("🧳 \(config.petName) is visiting \(sync.deviceName)"))
+        } else if petAway {
+            menu.addItem(disabled("🧳 \(config.petName) is out with you"))
+        } else {
+            menu.addItem(disabled("\(config.petName) · \(stats.rankTitle) — \(String(describing: mood))"))
+        }
         menu.addItem(disabled("Today: \(todaySummary())"))
         if quiet { menu.addItem(disabled("🤫 Quiet: a mic or camera is in use")) }
         if let update = updater.available { menu.addItem(item("⬆️ Update to v\(update.version)", #selector(installUpdate))) }
@@ -1523,7 +1596,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
                 menu.addItem(i)
             }
         }
+        for (path, trip) in visitorsAtDoor where !letOut.contains(path) {
+            let i = item("🚪 Let \(trip["pet"] as? String ?? "them") out (visiting from \(Self.homeName(trip)))", #selector(letOutVisitor(_:)))
+            i.representedObject = path
+            menu.addItem(i)
+        }
         menu.addItem(.separator())
+        if petAway {
+            if tripFolderPresent() { menu.addItem(item("🏠 Welcome \(config.petName) home", #selector(welcomeHomeAction))) }
+            menu.addItem(item("Call \(config.petName) home without the drive", #selector(callHomeAction)))
+            menu.addItem(item("Open DeskPet…", #selector(openControlCenterAction), key: ","))
+            menu.addItem(.separator())
+            menu.addItem(item("Quit DeskPet", #selector(quit), key: "q"))
+            return
+        }
         menu.addItem(item("💬 Talk to \(config.petName)…", #selector(openTalkAction)))
         menu.addItem(item("Open DeskPet…", #selector(openControlCenterAction), key: ","))
         if focus.phase == .off {
@@ -1534,16 +1620,364 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             menu.addItem(item("⏹ Stop focus (\(focus.label))", #selector(stopFocus)))
         }
         menu.addItem(item("Rewards (\(stats.rankTitle))…", #selector(openRewardsPage)))
+        if !Visitor.active { menu.addItem(item("🧳 Take \(config.petName) on a trip…", #selector(openTripsPage))) }
         menu.addItem(item("Bring \(config.petName) here", #selector(bringHere)))
         menu.addItem(item(panel.isVisible ? "Hide \(config.petName)" : "Show \(config.petName)", #selector(toggleVisible)))
         menu.addItem(.separator())
-        menu.addItem(item("Quit DeskPet", #selector(quit), key: "q"))
+        menu.addItem(Visitor.active ? item("🏠 Go home (quit)", #selector(quit), key: "q") : item("Quit DeskPet", #selector(quit), key: "q"))
+    }
+
+    // MARK: - Trips (home side)
+
+    private static func homeName(_ trip: [String: Any]) -> String { (trip["home"] as? [String: Any])?["name"] as? String ?? "another computer" }
+    private static func nowMs() -> Double { Date().timeIntervalSince1970 * 1000 }
+
+    private func tripFolderPresent() -> Bool {
+        guard let s = tripState, let path = s["path"] as? String else { return false }
+        return TripFiles.read(URL(fileURLWithPath: path))?["id"] as? String == s["id"] as? String
+    }
+
+    /// Packs the pet onto a drive (or any folder) and sends it off with you.
+    private func takeTrip(path: String, copyApp: Bool) -> [String: Any] {
+        guard !Visitor.active else { return ["ok": false, "error": "\(config.petName) is already visiting"] }
+        guard !petAway else { return ["ok": false, "error": "\(config.petName) is already on a trip"] }
+        let folder = TripFiles.folder(for: URL(fileURLWithPath: path))
+        let id = UUID().uuidString.lowercased()
+        let iso = TripFiles.iso.string(from: Date())
+        let profile = transferPayload()
+        let pack = SpritePack.available().contains(spritePackName) ? spritePackName : ""
+        let trip: [String: Any] = [
+            "app": "deskpet", "kind": "trip", "v": 1, "id": id, "status": "away",
+            "home": ["device": sync.deviceID, "name": sync.deviceName, "os": "macOS"],
+            "pet": config.petName, "owner": config.ownerName, "leftAt": iso,
+            "departure": ["stats": profile["stats"] ?? [:]], "profile": profile, "pack": pack, "visits": [], "updatedAt": iso,
+        ]
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try TripFiles.copyPack(pack, to: folder)
+            if copyApp { try TripFiles.copyApp(to: folder) }
+            try TripFiles.write(trip, to: folder)
+            TripFiles.writeReadMe(to: folder, pet: config.petName, owner: config.ownerName)
+        } catch {
+            let full = (error as NSError).code == NSFileWriteOutOfSpaceError
+            return ["ok": false, "error": full ? "the drive is full" : error.localizedDescription]
+        }
+        let volume = (try? folder.resourceValues(forKeys: [.volumeNameKey]).volumeName) ?? folder.deletingLastPathComponent().lastPathComponent
+        tripState = ["id": id, "path": folder.path, "volume": volume, "leftAt": Self.nowMs(), "sawGone": false]
+        talk?.close()
+        hoverCard.hide()
+        walkTarget = nil
+        apply(companion.event("tripLeave"))
+        statusItem.button?.title = "🧳"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { [weak self] in
+            guard let self, self.petAway else { return }
+            self.panel.orderOut(nil)
+        }
+        return ["ok": true, "ejectable": TripFiles.ejectableVolume(of: folder) != nil]
+    }
+
+    /// Every few seconds: is the pet's drive back? Is someone else's pet at the door?
+    private func watchTrips() {
+        let state = tripState
+        var foreign: [String: [String: Any]] = [:]
+        var present = false
+        for folder in TripFiles.candidates(including: state?["path"] as? String) {
+            guard let trip = TripFiles.read(folder), trip["status"] as? String == "away" else { continue }
+            let home = trip["home"] as? [String: Any] ?? [:]
+            guard home["device"] as? String == sync.deviceID else {
+                foreign[folder.path] = trip
+                continue
+            }
+            if let state, trip["id"] as? String == state["id"] as? String {
+                present = true
+                let away = Self.nowMs() - (state["leftAt"] as? Double ?? 0)
+                // Back from the trip once the drive has been away (or, after a restart, once some time has passed).
+                if state["sawGone"] as? Bool == true || (tripLaunchCheck && away > 10 * 60 * 1000) {
+                    tripLaunchCheck = false
+                    return tripReturned(folder: folder, trip: trip)
+                }
+            } else {
+                absorbLuggage(folder: folder, trip: trip)
+            }
+        }
+        tripLaunchCheck = false
+        if var s = state, !present, s["sawGone"] as? Bool != true {
+            s["sawGone"] = true
+            tripState = s
+        }
+        letOut = letOut.filter { foreign[$0] != nil }
+        for (path, trip) in foreign where !letOut.contains(path) {
+            let id = trip["id"] as? String ?? path
+            guard announcedVisitors.insert(id).inserted else { continue }
+            let pet = trip["pet"] as? String ?? "Someone"
+            if !petAway { say("🧳 knock knock! \(pet) is visiting from \(Self.homeName(trip))!", for: 5) }
+            post("🧳 \(pet) is at the door", "Visiting from \(Self.homeName(trip)). Open the 🐾 menu to let them out.", pid: 0)
+        }
+        visitorsAtDoor = foreign
+    }
+
+    /// Back home: unpack what the pet earned on the trip, then ask about your day.
+    private func tripReturned(folder: URL, trip: [String: Any]) {
+        let levelBefore = stats.level
+        unpack(trip)
+        var done = trip
+        done["status"] = "home"
+        done["returnedAt"] = TripFiles.iso.string(from: Date())
+        try? TripFiles.write(done, to: folder)
+        let leftAt = tripState?["leftAt"] as? Double ?? Self.nowMs()
+        tripState = nil
+        statusItem.button?.title = "🐾"
+        panel.orderFrontRegardless()
+        if gravity { velocity = .zero }
+        sounds.play(.wake)
+        let visits = (trip["visits"] as? [[String: Any]] ?? []).compactMap { $0["device"] as? String }
+        apply(companion.event("tripReturn", ["minutes": (Self.nowMs() - leftAt) / 60000, "visits": visits, "id": trip["id"] ?? ""]))
+        if stats.level > levelBefore { levelUp(stats.level) }
+    }
+
+    /// Stats earned on the trip, the pet's memories, and a rename made while away.
+    private func unpack(_ trip: [String: Any]) {
+        let profile = trip["profile"] as? [String: Any] ?? [:]
+        let departure = (trip["departure"] as? [String: Any])?["stats"] as? [String: Any] ?? [:]
+        if let s = profile["stats"] as? [String: Any] { stats.absorb(trip: s, departure: departure) }
+        if let c = profile["companion"] as? [String: Any] { companion.mergeData(c) }
+        let names = profile["config"] as? [String: Any] ?? [:]
+        if let pet = names["petName"] as? String, pet != trip["pet"] as? String, !pet.isEmpty {
+            Config.save(["petName": pet])
+            config.petName = pet
+            companion.setNames(owner: config.ownerName, pet: pet)
+        }
+    }
+
+    /// An older trip's drive (the pet was called home without it): bring its progress back quietly.
+    private func absorbLuggage(folder: URL, trip: [String: Any]) {
+        let levelBefore = stats.level
+        unpack(trip)
+        var done = trip
+        done["status"] = "home"
+        done["returnedAt"] = TripFiles.iso.string(from: Date())
+        try? TripFiles.write(done, to: folder)
+        if !petAway { apply(companion.event("tripLuggage")) }
+        if stats.level > levelBefore { levelUp(stats.level) }
+    }
+
+    @objc private func callHomeAction() { callHome() }
+
+    private func callHome() {
+        guard petAway else { return }
+        tripState = nil
+        statusItem.button?.title = "🐾"
+        panel.orderFrontRegardless()
+        if gravity { velocity = .zero }
+        apply(companion.event("tripCalledHome"))
+    }
+
+    @objc private func welcomeHomeAction() { _ = welcomeHome() }
+
+    private func welcomeHome() -> Bool {
+        guard let s = tripState, let path = s["path"] as? String else { return false }
+        let folder = URL(fileURLWithPath: path)
+        guard let trip = TripFiles.read(folder), trip["id"] as? String == s["id"] as? String else { return false }
+        tripReturned(folder: folder, trip: trip)
+        return true
+    }
+
+    private func ejectTripDrive() -> [String: Any] {
+        guard let path = tripState?["path"] as? String, let volume = TripFiles.ejectableVolume(of: URL(fileURLWithPath: path)) else {
+            return ["ok": false, "error": "that isn't an ejectable drive"]
+        }
+        do {
+            try NSWorkspace.shared.unmountAndEjectDevice(at: volume)
+            if var s = tripState { s["sawGone"] = true; tripState = s }
+            return ["ok": true]
+        } catch {
+            return ["ok": false, "error": "couldn't eject: \(error.localizedDescription)"]
+        }
+    }
+
+    @objc private func letOutVisitor(_ sender: NSMenuItem) {
+        if let path = sender.representedObject as? String { _ = letVisitorOut(path) }
+    }
+
+    /// Starts a second DeskPet for someone else's pet, with its data on their drive.
+    private func letVisitorOut(_ path: String) -> [String: Any] {
+        guard !Visitor.active, visitorsAtDoor[path] != nil else { return ["ok": false, "error": "that pet isn't here anymore"] }
+        let cfg = NSWorkspace.OpenConfiguration()
+        cfg.createsNewApplicationInstance = true
+        cfg.arguments = ["--trip", path]
+        cfg.activates = false
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: cfg) { _, _ in }
+        letOut.insert(path)
+        return ["ok": true]
+    }
+
+    private func tripPanelState() -> [String: Any] {
+        var away: Any = NSNull()
+        if let s = tripState {
+            let leftAt = s["leftAt"] as? Double ?? Self.nowMs()
+            let path = s["path"] as? String ?? ""
+            away = ["volume": s["volume"] ?? "", "leftAt": leftAt, "minutes": Int((Self.nowMs() - leftAt) / 60000),
+                    "present": tripFolderPresent(), "ejectable": TripFiles.ejectableVolume(of: URL(fileURLWithPath: path)) != nil]
+        }
+        var visiting: Any = NSNull()
+        if let trip = visitorTrip { visiting = ["host": sync.deviceName, "homeName": Self.homeName(trip)] }
+        return [
+            "mode": Visitor.active ? "visiting" : petAway ? "away" : "home",
+            "drives": TripFiles.drives().map { ["path": $0.url.path, "name": $0.name] },
+            "away": away, "visiting": visiting,
+            "ejectable": (away as? [String: Any])?["ejectable"] as? Bool ?? false,
+            "visitors": visitorsAtDoor.filter { !letOut.contains($0.key) }.map { path, trip in
+                ["path": path, "pet": trip["pet"] as? String ?? "Someone", "homeName": Self.homeName(trip)]
+            },
+            "appCopy": ["possible": !Visitor.active, "size": appCopySize],
+        ]
+    }
+
+    // MARK: - Trips (visitor side)
+
+    /// Before anything loads: is this a trip we can visit from?
+    private func checkVisit() -> Bool {
+        let alert = NSAlert()
+        guard let folder = Visitor.trip, let trip = TripFiles.read(folder) else {
+            alert.messageText = "No trip here"
+            alert.informativeText = "This drive's trip file is missing or damaged."
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+            return false
+        }
+        let pet = trip["pet"] as? String ?? "Your pet"
+        let atHome = (trip["home"] as? [String: Any])?["device"] as? String == Sync.thisDeviceID()
+        if atHome || trip["status"] as? String != "away" {
+            alert.messageText = atHome ? "\(pet) lives on this computer!" : "\(pet) is already home"
+            alert.informativeText = atHome
+                ? "Plug the drive in while DeskPet is open here and \(pet) comes home from the trip."
+                : "This trip is over. Take \(pet) on a new trip from their home computer."
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+            return false
+        }
+        visitorTrip = trip
+        Visitor.register()
+        return true
+    }
+
+    private func beginVisit() {
+        guard let folder = Visitor.trip, var trip = visitorTrip else { return }
+        if let profile = trip["profile"] as? [String: Any] { _ = try? applyTransfer(profile, quietly: true) }
+        var visits = trip["visits"] as? [[String: Any]] ?? []
+        let first = !visits.contains { $0["device"] as? String == sync.deviceName }
+        visits.append(["device": sync.deviceName, "os": "macOS", "at": TripFiles.iso.string(from: Date()), "minutes": 0])
+        trip["visits"] = visits
+        visitStarted = Date()
+        visitorTrip = trip
+        try? TripFiles.write(trip, to: folder)
+        apply(companion.event("tripArrive", ["host": sync.deviceName, "homeName": Self.homeName(trip), "first": first]))
+        // Ejecting the drive: save first, then leave with it.
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willUnmountNotification, object: nil, queue: .main) { [weak self] n in
+            guard let vol = n.userInfo?[NSWorkspace.volumeURLUserInfoKey] as? URL, folder.path.hasPrefix(vol.path) else { return }
+            self?.saveVisit()
+            NSApp.terminate(nil)
+        }
+    }
+
+    private func watchVisit(_ now: Double) {
+        guard let folder = Visitor.trip else { return }
+        // The drive is gone: nothing left to save to.
+        guard FileManager.default.fileExists(atPath: folder.appendingPathComponent("trip.json").path) else {
+            visitorTrip = nil
+            return NSApp.terminate(nil)
+        }
+        if now - lastVisitSave >= 20 {
+            lastVisitSave = now
+            saveVisit()
+        }
+    }
+
+    /// Writes the pet's progress here back to the drive.
+    private func saveVisit() {
+        guard let folder = Visitor.trip, var trip = visitorTrip,
+              FileManager.default.fileExists(atPath: folder.appendingPathComponent("trip.json").path) else { return }
+        stats.saveIfNeeded()
+        companion.flush()
+        trip["profile"] = transferPayload()
+        if var visits = trip["visits"] as? [[String: Any]], !visits.isEmpty {
+            visits[visits.count - 1]["minutes"] = Int(Date().timeIntervalSince(visitStarted) / 60)
+            trip["visits"] = visits
+        }
+        trip["updatedAt"] = TripFiles.iso.string(from: Date())
+        try? TripFiles.write(trip, to: folder)
+        visitorTrip = trip
+    }
+
+    // MARK: - Moving homes
+
+    private static let movingType = UTType(filenameExtension: "deskpet") ?? .data
+
+    private func packForMoving() -> [String: Any] {
+        let save = NSSavePanel()
+        save.nameFieldStringValue = "\(config.petName).deskpet"
+        save.allowedContentTypes = [Self.movingType]
+        NSApp.activate(ignoringOtherApps: true)
+        guard save.runModal() == .OK, let url = save.url else { return ["ok": false] }
+        let made = MovingFile.make(profile: transferPayload(), packName: spritePackName, device: sync.deviceName)
+        do {
+            try made.data.write(to: url, options: .atomic)
+        } catch {
+            return ["ok": false, "error": error.localizedDescription]
+        }
+        apply(companion.event("movingOut"))
+        return ["ok": true, "path": url.path, "note": made.note as Any]
+    }
+
+    private func openMovingFile() -> [String: Any] {
+        let open = NSOpenPanel()
+        open.allowedContentTypes = [Self.movingType, .json]
+        NSApp.activate(ignoringOtherApps: true)
+        guard open.runModal() == .OK, let url = open.url else { return ["ok": false] }
+        do {
+            return ["ok": true, "path": url.path, "summary": MovingFile.summary(try MovingFile.read(url))]
+        } catch {
+            return ["ok": false, "error": error.localizedDescription]
+        }
+    }
+
+    @discardableResult
+    private func moveIn(from url: URL) -> [String: Any] {
+        guard !Visitor.active else { return ["ok": false, "error": "can't move in while visiting"] }
+        do {
+            let file = try MovingFile.read(url)
+            _ = try MovingFile.installPack(file)
+            let note = try applyTransfer(file["profile"] as? [String: Any] ?? [:], quietly: true)
+            if note.isEmpty { apply(companion.event("movedIn")) } else { say(note, for: 5) }
+            return ["ok": true, "note": note]
+        } catch {
+            return ["ok": false, "error": error.localizedDescription]
+        }
+    }
+
+    /// Dropped on the pet or opened from Finder.
+    private func confirmMoveIn(_ url: URL) {
+        let alert = NSAlert()
+        do {
+            let file = try MovingFile.read(url)
+            alert.messageText = "Move in \(MovingFile.summary(file))?"
+            alert.informativeText = "This replaces the names, level, stats, memories, and settings on this Mac (a backup of the stats is kept)."
+            alert.addButton(withTitle: "Move in")
+            alert.addButton(withTitle: "Cancel")
+            NSApp.activate(ignoringOtherApps: true)
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            let r = moveIn(from: url)
+            if r["ok"] as? Bool != true { say("hmm: \(r["error"] as? String ?? "couldn't move in")", for: 4) }
+        } catch {
+            say("hmm: \(error.localizedDescription)", for: 4)
+        }
     }
 
     // MARK: - Control center (the shared HTML in electron/src/panel)
 
     @objc private func openControlCenterAction() { openControlCenter(page: nil) }
     @objc private func openRewardsPage() { openControlCenter(page: "rewards") }
+    @objc private func openTripsPage() { openControlCenter(page: "trips") }
 
     private func openControlCenter(page: String?) {
         if let controlCenter {
@@ -1612,6 +2046,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             "update": ["available": updater.available?.version as Any],
             "sync": syncState(),
             "companion": companion.summary(),
+            "trip": tripPanelState(),
             "preview": ["hat": pose.hat as Any, "trail": pose.trail as Any, "aura": pose.aura as Any,
                         "companion": pose.companion as Any, "golden": pose.golden, "prestige": pose.prestige],
         ]
@@ -1620,9 +2055,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     }
 
     private func panelCall(_ action: String, _ payload: [String: Any]) -> Any? {
+        let homeOnly = ["hooks", "kiro", "transferImport", "syncEnable", "syncPacks", "checkUpdates", "installUpdate", "openWizard",
+                        "tripTake", "movingApply", "tripLetOut"]
+        if Visitor.active && (homeOnly.contains(action) || (action == "set" && payload["key"] as? String == "startAtLogin")) {
+            return ["ok": false, "error": "not while \(config.petName) is visiting"]
+        }
         switch action {
         case "state":
             return panelState()
+        case "tripDrives":
+            return ["drives": TripFiles.drives().map { ["path": $0.url.path, "name": $0.name] }]
+        case "tripChooseFolder":
+            let open = NSOpenPanel()
+            open.canChooseDirectories = true
+            open.canChooseFiles = false
+            open.canCreateDirectories = true
+            open.prompt = "Pack here"
+            NSApp.activate(ignoringOtherApps: true)
+            return open.runModal() == .OK ? ["path": open.url?.path ?? ""] : nil
+        case "tripTake":
+            return takeTrip(path: payload["path"] as? String ?? "", copyApp: payload["copyApp"] as? Bool ?? false)
+        case "tripEject":
+            return ejectTripDrive()
+        case "tripCallHome":
+            callHome()
+            return ["ok": true]
+        case "tripWelcome":
+            return welcomeHome() ? ["ok": true] : ["ok": false, "error": "the drive isn't plugged in"]
+        case "tripLetOut":
+            return letVisitorOut(payload["path"] as? String ?? "")
+        case "movingPack":
+            return packForMoving()
+        case "movingOpen":
+            return openMovingFile()
+        case "movingApply":
+            return moveIn(from: URL(fileURLWithPath: payload["path"] as? String ?? ""))
         case "set":
             let value = payload["value"]
             switch payload["key"] as? String ?? "" {
@@ -1951,6 +2418,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         case "openSprites":
             NSWorkspace.shared.open(SpritePack.root)
             return ["ok": true]
+        case "moving-open":
+            return openMovingFile()
+        case "moving-apply":
+            let r = moveIn(from: URL(fileURLWithPath: payload["path"] as? String ?? ""))
+            if r["ok"] as? Bool == true, let file = try? MovingFile.read(URL(fileURLWithPath: payload["path"] as? String ?? "")) {
+                return r.merging(["summary": MovingFile.summary(file)]) { a, _ in a }
+            }
+            return r
         case "transfer-import":
             do {
                 let payload = try TransferKey.decode(payload["key"] as? String ?? "")
@@ -2032,7 +2507,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     /// Quit from a menu: the pet counts it as a goodbye.
     @objc private func quit() {
         _ = companion.event("quit")
-        NSApp.terminate(nil)
+        guard Visitor.active else { return NSApp.terminate(nil) }
+        // Going home from a visit: a little goodbye, then pack up (saving to the drive happens on terminate).
+        say(companion.line("trip.goHome", "see you at home! 🏠"), for: 2)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { NSApp.terminate(nil) }
     }
 
     @objc private func toggleVisible() {

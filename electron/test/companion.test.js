@@ -10,13 +10,13 @@ const personalities = {};
 for (const f of fs.readdirSync(dir)) personalities[path.basename(f, '.json')] = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
 
 const STEP_KEYS = new Set(['say', 'mood', 'ask', 'choices', 'key', 'label', 'input', 'placeholder', 'kind', 'then', 'skip', 'when', 'else', 'steps',
-  'affection', 'remember', 'forget', 'farewell', 'action', 'random', 'pick', 'pool', 'game', 'text']);
+  'affection', 'remember', 'forget', 'farewell', 'action', 'random', 'pick', 'pool', 'game', 'text', 'askPool', 'inputPool', 'max']);
 const CHOICE_KEYS = new Set(['label', 'value', 'say', 'steps', 'affection', 'remember', 'mood', 'when', 'farewell']);
 const MOODS = new Set(['happy', 'love', 'excited', 'proud', 'thinking', 'sleepy', 'surprised', 'nervous', 'sad', 'worried', 'reading', 'idle', 'dizzy', 'typing']);
 
 function lint(steps, where) {
   for (const s of [].concat(steps || [])) {
-    if (typeof s === 'string') { assert(!/\{(?!owner|pet|name|mem:|timeOfDay|weekday|tier|value|hours|tasks|focus)[^}]*\}/.test(s), `${where}: unknown placeholder in "${s}"`); continue; }
+    if (typeof s === 'string') { assert(!/\{(?!owner|pet|name|mem:|timeOfDay|weekday|tier|value|hours|tasks|focus|time|places|count|host|home)[^}]*\}/.test(s), `${where}: unknown placeholder in "${s}"`); continue; }
     if (Array.isArray(s)) { lint(s, where); continue; }
     for (const k of Object.keys(s)) assert(STEP_KEYS.has(k), `${where}: unknown step key "${k}"`);
     if (s.mood) assert(MOODS.has(s.mood), `${where}: unknown mood ${s.mood}`);
@@ -72,10 +72,12 @@ for (const id of Object.keys(personalities)) {
     assert(t.category, `${id}/${t.id}: category`);
     if (t.category === 'milestone') assert(['friends', 'good', 'close', 'best', 'soul'].includes(t.tier), `${id}/${t.id}: milestone tier`);
     lint(t.steps, `${id}/${t.id}`);
+    // Trip talks need the trip's details; they're played below through the event that starts them.
+    if (t.category === 'trip') continue;
     for (const pick of [0, 1, 2, 3]) {
       const fresh = make(id, { affection: 600 }).e;
       const end = play(fresh, fresh._run(t.id), pick);
-      assert(end.kind === 'menu' || (end.kind === 'end' && end.quit), `${id}/${t.id} ends in a menu or a goodbye`);
+      assert(end.kind === 'menu' || (end.kind === 'end' && (end.quit || end.close)), `${id}/${t.id} ends in a menu or a goodbye`);
       checks++;
     }
   }
@@ -205,6 +207,77 @@ assert.strictEqual(Companion.categorize('Finder'), 'other');
   const e = Companion.create({ personalities, personality: { extends: 'cat', name: 'Tama', tierNames: { soul: 'Soulmates' }, pools: { petted: ['nya!'] } } });
   assert.strictEqual(e.line('petted'), 'nya!');
   assert(e.summary().tiers.some((t) => t.name === 'Soulmates'));
+  checks++;
+}
+
+// Trips: leaving, coming home, the "how was your day?" talk, the trip log, and visiting other computers.
+for (const id of Object.keys(personalities)) {
+  for (const pick of [0, 1, 2, 3, 4, 5]) {
+    const { e } = make(id, { affection: 60 });
+    e.event('launch');
+    const leave = e.event('tripLeave');
+    assert(leave.some((f) => f.type === 'say' && f.text), `${id}: trip leave line`);
+    const back = e.event('tripReturn', { minutes: 200, visits: ["Sam's PC", "Sam's PC"], id: `trip-${pick}` });
+    const xp = back.find((f) => f.type === 'xp');
+    assert(xp && xp.amount === 11, `${id}: trip XP (${xp && xp.amount})`);
+    assert(back.some((f) => f.type === 'say' && f.text.includes("Sam's PC")), `${id}: back line names the place`);
+    assert(e.hasOffer(), `${id}: trip talk offered`);
+    const first = e.ui('open', { topic: 'offer' }).result;
+    assert(/3 hours|Sam's PC/.test(first.text), `${id}: trip talk knows the trip: ${first.text}`);
+    let inputs = 0;
+    let node = first;
+    for (let i = 0; i < 40 && node.kind !== 'menu'; i++) {
+      assert(!/\{[a-z]+(:\w+)?\}/i.test(node.text || ''), `${id}: unfilled placeholder: ${node.text}`);
+      if (node.kind === 'ask') node = e.ui('choose', { index: Math.min(pick, node.choices.length - 1) }).result;
+      else if (node.kind === 'input') { inputs++; node = e.ui('input', { value: 'we got bubble tea' }).result; }
+      else node = e.ui('next').result;
+    }
+    assert.strictEqual(node.kind, 'menu', `${id}: trip talk ends in the menu`);
+    const trips = e.summary().trips;
+    assert.strictEqual(trips.length, 1, `${id}: trip logged`);
+    assert.deepStrictEqual(trips[0].places, ["Sam's PC"]);
+    assert.strictEqual(trips[0].minutes, 200);
+    assert(trips[0].mood && trips[0].activity, `${id}: trip log has mood and activity`);
+    assert.strictEqual(trips[0].moment, 'we got bubble tea', `${id}: trip moment`);
+    // A rough day asks about it once; the "one thing that happened" question isn't repeated.
+    assert(inputs <= 2, `${id}: asked ${inputs} times`);
+    const arrive = e.event('tripArrive', { host: 'Library PC', homeName: 'MacBook', first: true });
+    assert(arrive.some((f) => f.type === 'say' && f.text.includes('Library PC')) || arrive.some((f) => f.type === 'say'), `${id}: arrive line`);
+    for (const ev of ['tripCalledHome', 'tripLuggage', 'movedIn', 'movingOut']) assert(e.event(ev).some((f) => f.type === 'say' && f.text), `${id}: ${ev} line`);
+    checks++;
+  }
+  // "Come with me!" in the goodbye menu asks the host to start a trip.
+  const { e } = make(id);
+  const bye = e._run('bye_trip');
+  let n = bye;
+  let effects = [];
+  for (let i = 0; i < 5 && n.kind !== 'end'; i++) { const r = e.ui('next'); n = r.result; effects = effects.concat(r.effects); }
+  assert(n.kind === 'end' && n.close && effects.some((f) => f.type === 'trip'), `${id}: bye_trip starts a trip`);
+  checks++;
+}
+{
+  // Trip logs merge by id across devices.
+  const a = make('friend').e;
+  const b = make('friend').e;
+  a.mergeData({ trips: [{ id: 'x', day: '2026-10-20', minutes: 30, places: [] }] });
+  b.mergeData({ trips: [{ id: 'x', day: '2026-10-20', minutes: 30, places: [] }, { id: 'y', day: '2026-10-21', minutes: 5, places: [] }] });
+  a.mergeData(b.exportData());
+  assert.deepStrictEqual(a.summary().trips.map((t) => t.id), ['y', 'x']);
+  checks++;
+}
+
+{
+  // State tangled by the old macOS bridge (one shared object for memory, milestones, and a day) heals on load,
+  // and JSON text works as well as objects.
+  const shared = { greeted: true, birthday: { value: '01-01', label: 'birthday', at: 1 } };
+  const e = Companion.create({ personalities: JSON.stringify(personalities), personality: 'friend', state: JSON.stringify({ memory: shared, milestones: shared, seen: shared, days: { '2026-10-23': shared } }) });
+  const st = e._state();
+  assert.deepStrictEqual(Object.keys(st.memory), ['birthday']);
+  assert.deepStrictEqual(st.milestones, {});
+  assert.deepStrictEqual(st.seen, {});
+  assert.deepStrictEqual(st.days['2026-10-23'], { greeted: true });
+  e.mergeData(JSON.stringify({ memory: { hobby: { value: 'drawing', label: 'hobby', at: 2 } } }));
+  assert(e._state().memory.hobby, 'merge from JSON text');
   checks++;
 }
 

@@ -16,7 +16,7 @@ const isOurs = (group) => (group.hooks || []).some((h) => /deskpet/i.test(h.comm
 /** Any DeskPet hook, including the macOS app's. */
 const isAnyDeskPet = (group) => (group.hooks || []).some((h) => /deskpet/i.test(h.command || ''));
 
-const HOOK_JS = path.join(paths.root, 'hook.js');
+const HOOK_JS = path.join(paths.realRoot, 'hook.js');
 
 /** Finds `node` on PATH, so hooks start fast; otherwise DeskPet itself runs the script as Node. */
 function nodeBinary() {
@@ -41,7 +41,7 @@ function hookCommand(agent, event) {
 
 /** Copies the hook script out of the app bundle (or AppImage) to ~/.deskpet, where agents can run it. */
 function installScripts() {
-  fs.mkdirSync(paths.root, { recursive: true });
+  fs.mkdirSync(paths.realRoot, { recursive: true });
   // Read+write rather than copyFile: the source sits inside the app's asar archive.
   if (process.platform === 'win32') fs.writeFileSync(paths.hookScript, fs.readFileSync(path.join(__dirname, 'hook.ps1')));
   else fs.writeFileSync(HOOK_JS, fs.readFileSync(path.join(__dirname, 'hook.js')));
@@ -83,4 +83,39 @@ function setInstalled(install) {
   fs.renameSync(tmp, SETTINGS);
 }
 
-module.exports = { installed, setInstalled, SETTINGS, hookCommand, installScripts };
+/** Paths quoted in a hook command ("…/node" "…/hook.js", or -File "…/hook.ps1"). */
+const quotedPaths = (cmd) => [...String(cmd).matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+
+/**
+ * Launch-time repair: if DeskPet's Claude Code hooks point at a program or script that no longer exists
+ * (the AppImage moved, Node was uninstalled…), rewrite them to the current command. Only broken hooks are
+ * touched, so a different-but-working Node on PATH doesn't cause churn. Returns how many were fixed.
+ */
+function heal(settingsFile = SETTINGS, { platform = process.platform } = {}) {
+  if (platform === 'darwin') return 0; // the native macOS app owns hooks there
+  const settings = readJSON(settingsFile, null);
+  if (!settings || !settings.hooks) return 0;
+  let fixed = 0;
+  for (const groups of Object.values(settings.hooks)) {
+    for (const g of groups || []) {
+      if (!isOurs(g)) continue;
+      for (const h of g.hooks || []) {
+        const m = / --agent (\w+)| -Agent (\w+)/.exec(h.command || '');
+        if (!m || !/deskpet/i.test(h.command || '')) continue;
+        const broken = quotedPaths(h.command).some((p) => !fs.existsSync(p));
+        const wanted = hookCommand(m[1] || m[2]);
+        if (broken && h.command !== wanted) { h.command = wanted; fixed++; }
+      }
+    }
+  }
+  if (!fixed) return 0;
+  installScripts();
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  fs.copyFileSync(settingsFile, `${settingsFile}.deskpet-backup-${stamp}`);
+  const tmp = `${settingsFile}.tmp`;
+  fs.writeFileSync(tmp, `${JSON.stringify(settings, null, 2)}\n`);
+  fs.renameSync(tmp, settingsFile);
+  return fixed;
+}
+
+module.exports = { installed, setInstalled, SETTINGS, hookCommand, installScripts, heal };

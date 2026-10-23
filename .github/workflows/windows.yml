@@ -93,6 +93,23 @@ jobs:
           '--- stderr'; Get-Content self-test-err.txt | Select-String -NotMatch 'gpu|GPU|DEP0169' | Select-Object -Last 40
           if (-not $exited -or $p.ExitCode -ne 0) { throw "self-test failed (exited: $exited, code: $($p.ExitCode))" }
 
+      - name: Trip visitor (portable copy inside a trip folder)
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $drive = Join-Path $env:RUNNER_TEMP 'FakeUSB'
+          New-Item -ItemType Directory -Force $drive | Out-Null
+          node -e "const t=require('./src/trips'); t.createTrip({ base: process.argv[1], profile: { app: 'deskpet', v: 1, config: { petName: 'Minori', ownerName: 'CI' }, settings: {}, stats: { xp: 500, days: {} }, companion: {} }, home: { device: 'ci-home', name: 'CI-Home', os: 'macOS' } })" $drive
+          $trip = Join-Path $drive 'DeskPet Trip'
+          Copy-Item -Recurse dist\DeskPet-win32-x64 (Join-Path $trip 'DeskPet-Windows')
+          $p = Start-Process (Join-Path $trip 'DeskPet-Windows\DeskPet.exe') -ArgumentList '--self-test' -PassThru -RedirectStandardOutput visit.txt -RedirectStandardError visit-err.txt
+          $exited = $p.WaitForExit(60000)
+          if (-not $exited) { $p.Kill() }
+          Get-Content visit.txt | Select-String '"mode"|visiting|visitorSaved|failed'
+          $t = Get-Content (Join-Path $trip 'trip.json') -Raw | ConvertFrom-Json
+          "visits: $($t.visits.Count), xp now: $($t.profile.stats.xp)"
+          if (-not (Select-String -Path visit.txt -Pattern '"mode": "visiting"' -Quiet) -or $t.visits.Count -ne 1) { throw "the portable visitor didn't start" }
+
       - name: Zip
         shell: powershell
         run: Compress-Archive -Path dist\DeskPet-win32-x64 -DestinationPath dist\DeskPet-win32-x64.zip

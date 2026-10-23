@@ -40,7 +40,8 @@ final class SpritePack {
 
     /// ~/.deskpet/sprites, or the cloud sync folder's sprites when "sync sprite packs" is on.
     static var root: URL {
-        let d = UserDefaults.standard
+        if let trip = Visitor.trip { return trip.appendingPathComponent("sprites") }
+        let d = appDefaults
         if d.bool(forKey: "syncPacks"), let folder = d.string(forKey: "syncFolder") {
             return URL(fileURLWithPath: folder).appendingPathComponent("DeskPet/sprites")
         }

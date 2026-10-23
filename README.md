@@ -75,7 +75,7 @@ npm run package:linux              # build the AppImages and tar.gz (on Linux; C
 | Click / double-click / drag | purrs with hearts / opens the talk window / dangles from the scruff |
 | Throw (flick and release) | flies, spins, and bounces off the screen edges; dizzy after a wild throw. With Gravity off it drifts and ricochets instead of falling |
 
-**Control center:** 🐾 → **Open DeskPet…** (⌘, / Ctrl+,) has everything, in the same style as setup: Home (your pet, rank, today's stats, live agents), Companion (your bond, reminders, and what the pet remembers), Rewards (live previews of each reward on your pet, prestige), Look (sprite packs, theme, thought bubble, size), Focus (timer and blocklist), Agents (connections and live sessions), Behavior, Account (rename, transfer keys), and About (updates). The 🐾 menu and right-clicking the pet give a quick menu: status, agents, quick focus, and Open DeskPet.
+**Control center:** 🐾 → **Open DeskPet…** (⌘, / Ctrl+,) has everything, in the same style as setup: Home (your pet, rank, today's stats, live agents), Companion (your bond, reminders, and what the pet remembers), Rewards (live previews of each reward on your pet, prestige), Look (sprite packs, theme, thought bubble, size), Focus (timer and blocklist), Agents (connections and live sessions), Behavior, Trips (take the pet with you on a drive), Account (rename, sync, moving homes), and About (updates). The 🐾 menu and right-clicking the pet give a quick menu: status, agents, quick focus, and Open DeskPet.
 
 ### Talking with your pet
 Inspired by Monika After Story. **Double-click the pet** (or 🐾 → 💬 Talk to …) to open a dialogue box beside it:
@@ -155,8 +155,15 @@ Control center → Account → **Sync across devices**: pick a folder your cloud
 
 If the folder already has progress when you join, you choose **Combine** (add both) or **Use synced progress** (start this device fresh, with a backup), so progress you already moved with a transfer key isn't counted twice.
 
-### Moving to another device
-🐾 → Move to another device → Export transfer key… gives you one pasteable code (`DESKPET-1:…`) with your names, level and stats, your bond and what the pet remembers, look, size, and settings. Import it on the other machine from the same menu, or with "Have a transfer key?" in setup. Keys work between macOS and Windows. Sprite pack images aren't in the key: move packs with Sprites → Export.
+### Trips: take your pet with you
+Control center → **Trips** (or 🐾 → 🧳 Take … on a trip, or Talk → Goodbye → "Come with me!"): pick a USB drive (or any folder) and the pet packs into `DeskPet Trip/` on it and leaves your screen. Turn on **Put DeskPet on the drive too** to add a portable copy of the app.
+
+- **On another computer:** plug the drive in. If that computer runs DeskPet, it says someone's at the door and offers **Let … out**. Otherwise, open the portable copy from the drive (`DeskPet.app`, `DeskPet-Windows\DeskPet.exe`, or `DeskPet-Linux.AppImage`). The visiting pet keeps its own level, bond, and memories, sees that computer's agents, and saves everything back to the drive every 20 seconds. Choose **Go home** before ejecting.
+- **Back home:** plug the drive in. The pet comes home with what it earned on the trip (plus a little XP for coming along) and asks how your day was, what you did, and one thing that happened. Past trips are listed on the Trips page.
+- **Forgot the drive?** **Call … home without the drive** brings the pet back now; the trip's progress is unpacked the next time that drive is plugged in.
+
+### Moving homes
+Account → **Moving homes** → **Pack up for moving…** saves one `<Pet>.deskpet` file with your names, level, prestige, stats, bond, memories, settings, and the sprite pack. On the new computer (macOS, Windows, or Linux), open the file (double-click on macOS), drop it onto the pet, use **Move in from a file…**, or pick it in setup. Text keys (`DESKPET-1:…`) still work under **Use a text key instead**, for everything except the sprite pack.
 
 ### Updates
 DeskPet checks GitHub Releases every 6 hours (🐾 → Check for updates…) and can update itself in place. On macOS, move the app to Applications first.

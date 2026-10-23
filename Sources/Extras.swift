@@ -299,6 +299,42 @@ final class Stats {
         saveIfNeeded()
     }
 
+    /// Back from a trip: adds what the pet earned while away (the trip's stats minus what they were when it
+    /// left), so progress made here in the meantime isn't lost. Returns the XP added.
+    @discardableResult
+    func absorb(trip: [String: Any], departure: [String: Any]) -> Int {
+        let decode = { (json: [String: Any]) in
+            (try? JSONSerialization.data(withJSONObject: json)).flatMap { try? JSONDecoder().decode(File.self, from: $0) }
+        }
+        guard let t = decode(trip), let d = decode(departure) else { return 0 }
+        let gained = max(0, t.xp - d.xp)
+        for (key, day) in t.days {
+            let before = d.days[key] ?? Day()
+            var delta = Day()
+            delta.activeMinutes = max(0, day.activeMinutes - before.activeMinutes)
+            delta.agentMinutes = max(0, day.agentMinutes - before.agentMinutes)
+            delta.tasks = max(0, day.tasks - before.tasks)
+            delta.pets = max(0, day.pets - before.pets)
+            delta.throwsCount = max(0, day.throwsCount - before.throwsCount)
+            delta.focusSessions = max(0, day.focusSessions - before.focusSessions)
+            delta.openMinutes = max(0, day.openMinutes - before.openMinutes)
+            delta.playXP = max(0, day.playXP - before.playXP)
+            delta.blocked = max(0, day.blocked - before.blocked)
+            delta.greeted = day.greeted && !before.greeted
+            file.days[key] = (file.days[key] ?? Day()) + delta
+        }
+        file.xp += gained
+        // Prestiged on the trip: keep the same progress into the new rank.
+        if t.prestige > prestige {
+            file.prestige = t.prestige
+            file.prestigeBase = xp - (t.xp - t.prestigeBase)
+            if syncedPrestige != nil { syncedPrestige = (file.prestige, file.prestigeBase) }
+        }
+        dirty = true
+        saveIfNeeded()
+        return gained
+    }
+
     /// Replaces all stats (from a transfer key), keeping a backup of the old file.
     func replace(with json: [String: Any]) throws {
         let data = try JSONSerialization.data(withJSONObject: json)

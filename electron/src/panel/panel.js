@@ -73,6 +73,7 @@
     wireLook();
     wireFocus();
     wireAccount();
+    wireTrips();
     wireAbout();
     render();
     if (state.openPage) show(state.openPage);
@@ -125,6 +126,8 @@
     }
     renderSync();
     renderCompanion();
+    renderTrips();
+    document.querySelectorAll('.pet-name').forEach((n) => { n.textContent = state.names.petName; });
     $('#about-update').textContent = state.update.available ? `Version ${state.update.available} is available!` : `You're on the latest version (${state.version}).`;
     $('#about-update-btn').textContent = state.update.available ? `⬆️ Update to v${state.update.available}` : 'Check for updates';
   }
@@ -584,11 +587,176 @@
     });
   }
 
+  // MARK: Trips
+
+  let tripPick = null;
+  let tripCopyApp = true;
+  let tripBusy = false;
+  let tripDone = null;
+  let tripError = '';
+  let lastTrips = '';
+
+  function ago(ms) {
+    const m = Math.max(0, Math.round((Date.now() - ms) / 60000));
+    return m < 60 ? `${m} min` : m < 36 * 60 ? `${Math.round(m / 60)} h` : `${Math.round(m / 1440)} days`;
+  }
+
+  function wireTrips() {
+    // Drives come and go; refresh the list whenever the page is opened.
+    document.querySelector('#sidebar button[data-page="trips"]').addEventListener('click', () => call('tripDrives').then((r) => {
+      if (r && r.drives && state.trip) { state.trip.drives = r.drives; lastTrips = ''; renderTrips(); }
+    }));
+  }
+
+  function tripButton(label, cls, onClick) {
+    const b = el('button', cls, label);
+    b.addEventListener('click', onClick);
+    return b;
+  }
+
+  function renderTrips() {
+    const t = state.trip;
+    if (!t) return;
+    const c = state.companion || {};
+    const key = JSON.stringify([t, c.trips, state.names, tripPick, tripCopyApp, tripBusy, tripDone, tripError, t.away && Math.floor(Date.now() / 60000)]);
+    if (key === lastTrips) return;
+    lastTrips = key;
+    const pet = esc(state.names.petName);
+    const box = $('#trip-box');
+    box.innerHTML = '';
+
+    if (t.mode === 'visiting') {
+      const v = t.visiting || {};
+      $('#trip-emoji').textContent = '🗺️';
+      $('#trip-eyebrow').textContent = 'Visiting';
+      $('#trip-title').textContent = `${state.names.petName} is visiting ${v.host || 'this computer'}`;
+      $('#trip-sub').textContent = `From ${v.homeName || 'home'}. Everything ${state.names.petName} earns here is saved to the drive and comes home with them.`;
+      box.appendChild(el('p', 'sub', `When you're done, choose <b>Go home</b> (or quit DeskPet) before you eject the drive.`));
+      box.appendChild(el('div', 'actions', '')).appendChild(tripButton('🏠 Go home', 'primary', () => call('quit')));
+    } else if (t.mode === 'away') {
+      const a = t.away || {};
+      $('#trip-emoji').textContent = '🧳';
+      $('#trip-eyebrow').textContent = 'On a trip';
+      $('#trip-title').textContent = `${state.names.petName} is out with you`;
+      $('#trip-sub').textContent = `On ${a.volume || 'your drive'} for ${a.leftAt ? ago(a.leftAt) : 'a bit'}. Plug the drive back in here and ${state.names.petName} comes home and asks about your day.`;
+      const row = el('div', 'actions');
+      if (a.present) {
+        row.appendChild(tripButton(`🏠 Welcome ${pet} home`, 'primary', () => call('tripWelcome').then(refresh)));
+        if (t.ejectable !== false) row.appendChild(tripButton('⏏️ Eject the drive', 'ghost-btn', () => call('tripEject').then(refresh)));
+      }
+      row.appendChild(tripButton(`Call ${pet} home without the drive…`, 'ghost-btn', () => {
+        $('#modal-emblem').textContent = '🏠';
+        $('#modal-title').textContent = `Call ${state.names.petName} home?`;
+        $('#modal-text').textContent = `${state.names.petName} comes back right away. Anything from the trip stays on the drive and gets unpacked next time you plug it in here.`;
+        openModal({ ok: 'Call home', cancel: 'Wait for the drive', onOk: () => call('tripCallHome').then(refresh) });
+      }));
+      box.appendChild(row);
+    } else {
+      $('#trip-emoji').textContent = '🧳';
+      $('#trip-eyebrow').textContent = 'Trips';
+      $('#trip-title').textContent = `Take ${state.names.petName} with you`;
+      $('#trip-sub').textContent = `${state.names.petName} packs into a USB drive and leaves your screen. On another computer they can come out and keep you company. Plug the drive back in here and ${state.names.petName} comes home and asks how your day went.`;
+      if (tripDone) {
+        box.appendChild(el('div', 'sync-on', `<span class="dot-live"></span>${pet} is packed on ${esc(tripDone.name)}!`));
+        box.appendChild(el('p', 'sub', tripDone.ejectable ? 'Eject the drive and take it with you.' : 'Take the folder with you, then bring it back here.'));
+        return;
+      }
+      const drives = t.drives || [];
+      if (tripPick && !drives.some((d) => d.path === tripPick.path) && !tripPick.custom) tripPick = null;
+      if (!tripPick && drives.length) tripPick = drives[0];
+      box.appendChild(el('h3', 'card-title', 'Pick a drive'));
+      const list = el('div', 'actions');
+      for (const d of drives) {
+        const b = el('button', `ghost-btn folder-btn${tripPick && tripPick.path === d.path ? ' picked' : ''}`, `<span>💾 ${esc(d.name)}</span><small>${esc(d.path)}</small>`);
+        b.addEventListener('click', () => { tripPick = d; renderTrips(); });
+        list.appendChild(b);
+      }
+      if (tripPick && tripPick.custom) list.appendChild(el('button', 'ghost-btn folder-btn picked', `<span>📁 ${esc(tripPick.name)}</span><small>${esc(tripPick.path)}</small>`));
+      list.appendChild(tripButton(drives.length ? 'Another folder…' : 'Choose a drive or folder…', 'ghost-btn', async () => {
+        const r = await call('tripChooseFolder');
+        if (r && r.path) { tripPick = { path: r.path, name: r.path.split(/[\\/]/).filter(Boolean).pop() || r.path, custom: true }; renderTrips(); }
+      }));
+      box.appendChild(list);
+      if (!drives.length && !tripPick) box.appendChild(el('p', 'note', 'No USB drive found. Plug one in, or choose any folder.'));
+      const copy = t.appCopy || {};
+      if (copy.possible) {
+        const row = el('div', 'toggle-row', `<span>Put DeskPet on the drive too${copy.size ? ` (${esc(copy.size)})` : ''}<small class="muted"> so ${pet} can come out on computers without DeskPet</small></span><div class="switch-btn${tripCopyApp ? ' on' : ''}"></div>`);
+        row.querySelector('.switch-btn').addEventListener('click', () => { tripCopyApp = !tripCopyApp; renderTrips(); });
+        box.appendChild(row);
+      }
+      const go = el('div', 'actions');
+      const pack = tripButton(tripBusy ? 'Packing…' : `🧳 Pack ${pet}'s bag`, 'primary', async () => {
+        if (!tripPick || tripBusy) return;
+        tripBusy = true;
+        tripError = '';
+        renderTrips();
+        const r = await call('tripTake', { path: tripPick.path, copyApp: !!(copy.possible && tripCopyApp) });
+        tripBusy = false;
+        if (r && r.ok) tripDone = { name: tripPick.name, ejectable: r.ejectable };
+        else tripError = (r && r.error) || "couldn't pack the bag";
+        renderTrips();
+        refresh();
+      });
+      pack.disabled = !tripPick || tripBusy;
+      go.appendChild(pack);
+      if (tripError) go.appendChild(el('span', 'note error', esc(tripError)));
+      box.appendChild(go);
+    }
+    if (t.mode !== 'home') tripDone = null;
+
+    const visitors = $('#trip-visitors');
+    visitors.innerHTML = '';
+    for (const v of t.visitors || []) {
+      const card = el('div', 'card visitor-card', `<div class="trip-emoji">🚪</div><div><b>${esc(v.pet)} is at the door!</b><div class="meta">Visiting from ${esc(v.homeName)}</div></div>`);
+      card.appendChild(tripButton(`Let ${esc(v.pet)} out`, 'primary', () => call('tripLetOut', { path: v.path }).then(refresh)));
+      visitors.appendChild(card);
+    }
+
+    const log = $('#trip-log');
+    log.innerHTML = '';
+    const trips = c.trips || [];
+    if (!trips.length) log.appendChild(el('div', 'empty', `No trips yet. When ${pet} comes home, they'll ask about your day, and it shows up here.`));
+    const MOOD_ICONS = { amazing: '🤩', 'pretty good': '🙂', okay: '😐', tiring: '🥱', rough: '😢' };
+    for (const tr of trips) {
+      const where = tr.places && tr.places.length ? ` · visited ${esc(tr.places.join(', '))}` : '';
+      const day = new Date(`${tr.day}T12:00:00`);
+      const when = isNaN(day) ? tr.day : day.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+      log.appendChild(el('div', 'device', `<span class="icon">${MOOD_ICONS[tr.mood] || '🧳'}</span>
+        <div><div><b>${esc(when)}</b>${tr.activity ? ` · ${esc(tr.activity)}` : ''}</div><div class="meta">${hm(tr.minutes || 0)}${where}${tr.moment ? ` · "${esc(tr.moment)}"` : ''}</div></div><span></span>`));
+    }
+  }
+
   // MARK: Account & About
 
   function note(text, kind) { $('#acc-note').textContent = text; $('#acc-note').className = `note ${kind || ''}`; }
 
+  function moveNote(text, kind) { $('#mv-note').textContent = text; $('#mv-note').className = `note ${kind || ''}`; }
+
   function wireAccount() {
+    $('#mv-pack').addEventListener('click', async () => {
+      const r = await call('movingPack');
+      if (r && r.ok) moveNote(r.note || 'Packed! Open the file on your new computer 📦', r.note ? '' : 'ok');
+      else if (r && r.error) moveNote(r.error, 'error');
+    });
+    $('#mv-open').addEventListener('click', async () => {
+      const p = await call('movingOpen');
+      if (!p || (!p.ok && !p.error)) return;
+      if (!p.ok) return moveNote(p.error, 'error');
+      $('#modal-emblem').textContent = '🏠';
+      $('#modal-title').textContent = 'Move in?';
+      $('#modal-text').textContent = `${p.summary}. This replaces the names, level, stats, memories, and settings on this device (a backup of the stats is kept).`;
+      openModal({
+        ok: 'Move in', cancel: 'Cancel',
+        onOk: async () => {
+          const r = await call('movingApply', { path: p.path });
+          if (!r.ok) return moveNote(r.error, 'error');
+          moveNote(r.note || 'Moved in! Welcome home ✨', r.note ? '' : 'ok');
+          lastStatic = '';
+          lastRewards = '';
+          refresh();
+        },
+      });
+    });
     $('#acc-save').addEventListener('click', () => call('rename', { petName: $('#acc-pet').value, ownerName: $('#acc-owner').value }).then(refresh));
     $('#acc-copy').addEventListener('click', async () => { await call('copy', { text: $('#acc-key').value }); $('#acc-copy').textContent = 'Copied! 📋'; setTimeout(() => { $('#acc-copy').textContent = 'Copy transfer key'; }, 1500); });
     $('#acc-save-key').addEventListener('click', () => call('saveKey', { key: $('#acc-key').value }));

@@ -53,8 +53,10 @@
   };
   /** Categories with their own main-menu entries (the rest are listed under "Ask {pet} about…"). */
   const OWN_ENTRY = ['you', 'feeling', 'tell', 'goodbye', 'special', 'milestone'];
-  /** Topics that only come up on their own: holidays, birthdays, and relationship milestones. */
-  const HIDDEN = ['special', 'milestone'];
+  /** Topics that only come up on their own: holidays, birthdays, relationship milestones, and coming home from a trip. */
+  const HIDDEN = ['special', 'milestone', 'trip'];
+  /** Trips kept in the log (control center → Trips). */
+  const TRIP_LOG = 30;
 
   /** What you're doing, from the foreground app (and window title, where the platform provides it). */
   const APP_CATEGORIES = [
@@ -93,34 +95,71 @@
     return m >= 1 && m <= 12 && d >= 1 && d <= 31 ? `${MONTHS[m - 1]} ${d}` : String(mmdd);
   }
 
+  /** Hosts may pass JSON text (the macOS bridge does, so empty objects don't come through as one shared object). */
+  function parsed(v) {
+    if (typeof v !== 'string') return v;
+    try { return JSON.parse(v); } catch (_) { return null; }
+  }
+
+  const TIER_IDS = new Set(TIERS.map((t) => t.id));
+
   function normalize(s) {
     s = isObj(s) ? s : {};
+    // Older macOS builds could tangle these maps together; keep only entries of the right shape.
+    const memory = {};
+    for (const [k, v] of Object.entries(isObj(s.memory) ? s.memory : {})) if (isObj(v) && v.value != null) memory[k] = v;
+    const milestones = {};
+    for (const [k, v] of Object.entries(isObj(s.milestones) ? s.milestones : {})) if (TIER_IDS.has(k) && typeof v === 'string') milestones[k] = v;
+    const seen = {};
+    for (const [k, v] of Object.entries(isObj(s.seen) ? s.seen : {})) if (typeof v === 'number') seen[k] = v;
+    const days = {};
+    for (const [d, flags] of Object.entries(isObj(s.days) ? s.days : {})) {
+      if (!isObj(flags)) continue;
+      days[d] = {};
+      for (const [k, v] of Object.entries(flags)) if (!isObj(v) && !Array.isArray(v)) days[d][k] = v;
+    }
     const settings = { ...DEFAULT_SETTINGS };
     for (const [k, v] of Object.entries(isObj(s.settings) ? s.settings : {})) if (k in DEFAULT_SETTINGS && typeof v === typeof DEFAULT_SETTINGS[k]) settings[k] = v;
     return {
       v: 1,
       affection: Math.max(MIN_AFFECTION, Math.min(MAX_AFFECTION, num(s.affection, 0))),
-      milestones: isObj(s.milestones) ? s.milestones : {},
+      milestones,
       cleanExit: s.cleanExit !== false,
       gained: isObj(s.gained) && typeof s.gained.day === 'string' ? { day: s.gained.day, amount: num(s.gained.amount, 0) } : { day: '', amount: 0 },
-      memory: isObj(s.memory) ? s.memory : {},
-      seen: isObj(s.seen) ? s.seen : {},
+      memory,
+      seen,
       settings,
-      days: isObj(s.days) ? s.days : {},
+      days,
       counters: { talks: 0, games: 0, wins: 0, ...(isObj(s.counters) ? s.counters : {}) },
       lastSeen: num(s.lastSeen, 0),
       farewell: isObj(s.farewell) ? s.farewell : null,
       firstMet: typeof s.firstMet === 'string' ? s.firstMet : dayKey(),
+      trips: Array.isArray(s.trips) ? s.trips.filter((t) => isObj(t) && t.id).slice(-TRIP_LOG) : [],
     };
+  }
+
+  /** "45 minutes", "3 hours", "2 days" */
+  function duration(minutes) {
+    const m = Math.max(1, Math.round(minutes));
+    if (m < 90) return `${m} minute${m === 1 ? '' : 's'}`;
+    if (m < 36 * 60) { const h = Math.round(m / 60); return `${h} hour${h === 1 ? '' : 's'}`; }
+    const d = Math.round(m / 1440);
+    return `${d} day${d === 1 ? '' : 's'}`;
+  }
+
+  /** ["Sam's PC"] → "Sam's PC"; ["A", "B", "C"] → "A, B and C" */
+  function listNames(names) {
+    const list = [...new Set(names.map((n) => clean(n, 40)).filter(Boolean))];
+    return list.length <= 1 ? (list[0] || '') : `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`;
   }
 
   function create(options) {
     options = options || {};
-    const personalities = options.personalities || {};
+    const personalities = parsed(options.personalities) || {};
     const host = options.host || {};
     const now = () => Date.now();
 
-    let state = normalize(options.state);
+    let state = normalize(parsed(options.state));
     let persona = null;
     let personaInfo = { id: 'friend', name: 'Friend', source: 'built-in' };
     let names = { owner: 'friend', pet: 'Mochi' };
@@ -289,7 +328,7 @@
       key = clean(key, 40);
       if (!key) return;
       const prev = state.memory[key];
-      state.memory[key] = { value: clean(value, 60), label: label || (prev && prev.label) || key, at: now() };
+      state.memory[key] = { value: clean(value, 120), label: label || (prev && prev.label) || key, at: now() };
       if (display) state.memory[key].display = display;
       dirty = true;
     }
@@ -308,6 +347,14 @@
       const d = new Date();
       const h = d.getHours();
       const md = monthDay(d);
+      if (cond.flag && !(convo && convo.vars && convo.vars[cond.flag])) return false;
+      if (cond.noFlag && convo && convo.vars && convo.vars[cond.noFlag]) return false;
+      if (cond.freshMem || cond.noFreshMem) {
+        // Answered during this conversation (e.g. the trip talk already heard about your day).
+        const fresh = (k) => !!(state.memory[k] && convo && convo.vars && convo.vars.since && state.memory[k].at >= convo.vars.since);
+        if (cond.freshMem && !fresh(cond.freshMem)) return false;
+        if (cond.noFreshMem && fresh(cond.noFreshMem)) return false;
+      }
       if (cond.mem && !state.memory[cond.mem]) return false;
       if (cond.noMem && state.memory[cond.noMem]) return false;
       if (cond.memIs) {
@@ -348,9 +395,9 @@
       return { kind, speaker: names.pet, text: text == null ? null : String(text), mood: mood || null, affection: affectionInfo(), ...(extra || {}) };
     }
 
-    function startTopic(topic) {
+    function startTopic(topic, vars) {
       if (!topic) return menuNode('main', line('talk.allSeen', "I'm out of new things to say for now. Let's play a game?"));
-      convo = { topic, queue: [...(topic.steps || [])], pending: null };
+      convo = { topic, queue: [...(topic.steps || [])], pending: null, vars: vars ? { ...vars } : undefined };
       if (topic.confetti) effects.push({ type: 'confetti' });
       const first = advance();
       if (topic.confetti) first.confetti = true;
@@ -381,6 +428,8 @@
       if (step.steps) convo.queue.unshift(...step.steps);
       if (step.action === 'quit') convo.quit = true;
       if (step.action === 'recall') convo.queue.unshift(...recallSteps());
+      if (step.action === 'trip') convo.trip = true;
+      if (step.action === 'logTrip') logTrip();
       if (step.random) { convo.queue.unshift(pickOne(step.random)); return null; }
       if (step.say) return node('line', fill(step.say), step.mood);
       if (step.pick) return node('line', fill(pickOne(step.pick)), step.mood);
@@ -388,11 +437,13 @@
       if (step.ask) {
         const choices = (step.choices || []).filter((c) => check(c.when));
         convo.pending = { type: 'ask', step, choices };
-        return node('ask', fill(step.ask), step.mood, { choices: choices.map((c) => fill(c.label)) });
+        const text = step.askPool ? line(step.askPool, step.ask) : fill(step.ask);
+        return node('ask', text, step.mood, { choices: choices.map((c) => fill(c.label)) });
       }
       if (step.input) {
         convo.pending = { type: 'input', step };
-        return node('input', fill(step.input), step.mood, { input: { placeholder: step.placeholder || '', kind: step.kind || 'text', max: 40 } });
+        const text = step.inputPool ? line(step.inputPool, step.input) : fill(step.input);
+        return node('input', text, step.mood, { input: { placeholder: step.placeholder || '', kind: step.kind || 'text', max: step.max || 40 } });
       }
       if (step.game) {
         convo.pending = { type: 'game', step };
@@ -416,6 +467,10 @@
       if (c && c.quit) {
         effects.push({ type: 'quit', delay: 600 });
         return node('end', null, null, { quit: true });
+      }
+      if (c && c.trip) {
+        effects.push({ type: 'trip' });
+        return node('end', null, null, { close: true });
       }
       return menuNode('main', line('talk.anything', 'Anything else?'));
     }
@@ -443,7 +498,7 @@
       if (!convo || !convo.pending || convo.pending.type !== 'input') return menuNode('main', line('talk.menu', "What's up?"));
       const { step } = convo.pending;
       convo.pending = null;
-      let value = clean(raw, 40);
+      let value = clean(raw, step.max || 40);
       let display = null;
       if (step.kind === 'date') {
         const m = /^(\d{1,2})-(\d{1,2})$/.exec(value);
@@ -477,6 +532,41 @@
         { ask: line('game.again', 'Again?'), choices: [{ label: 'Again! 🔁', steps: [{ game }] }, { label: 'Something else', steps: [] }] },
       );
       return advance();
+    }
+
+    // MARK: Trips
+
+    function logTrip() {
+      const v = (convo && convo.vars) || {};
+      const m = (k) => (state.memory[k] && state.memory[k].at >= (v.since || 0) ? state.memory[k].value : null);
+      state.trips.push({
+        id: v.tripId || `t${now()}`, day: dayKey(), minutes: v.minutesRaw || 0, places: v.placeList || [],
+        mood: m('tripDay'), activity: m('tripActivity'), moment: m('tripMoment'),
+      });
+      state.trips = state.trips.slice(-TRIP_LOG);
+      dirty = true;
+    }
+
+    /** Back from a trip: a little XP for coming along, then the "how was your day?" talk. */
+    function tripReturned(data) {
+      const minutes = Math.max(0, num(data.minutes, 0));
+      const places = [].concat(data.visits || []).map(String).filter(Boolean);
+      const vars = {
+        time: duration(minutes), places: listNames(places), count: new Set(places).size, visited: places.length > 0,
+        minutesRaw: Math.round(minutes), placeList: [...new Set(places)].slice(0, 6), tripId: clean(data.id, 60) || `t${now()}`, since: now(),
+      };
+      changeAffection(2);
+      state.cleanExit = true;
+      const xp = Math.min(30, 5 + Math.floor(minutes / 30));
+      effects.push({ type: 'xp', amount: xp });
+      effects.push({ type: 'mood', mood: 'done', seconds: 4 });
+      say(line(vars.visited ? 'trip.back.visited' : 'trip.back', "I'm home! 🏠", vars), 5);
+      const topic = persona.topics.find((t) => t.id === 'trip.home');
+      if (topic) {
+        offer = { topic, vars, until: now() + 3 * 60 * MINUTE };
+        later(3500, { type: 'openTalk', topic: 'offer' });
+      }
+      dirty = true;
     }
 
     function recallSteps() {
@@ -757,6 +847,27 @@
           break;
         }
         case 'app': return appChanged(data.name, data.title);
+        case 'tripLeave':
+          state.cleanExit = true;
+          state.lastSeen = now();
+          effects.push({ type: 'mood', mood: 'done', seconds: 3.5 });
+          say(line('trip.leave', "a trip?! let's go! 🧳"), 3.5);
+          save();
+          break;
+        case 'tripReturn': tripReturned(data); break;
+        case 'tripArrive': {
+          const vars = { host: clean(data.host, 40) || 'here', home: clean(data.homeName, 40) || 'home' };
+          effects.push({ type: 'mood', mood: 'startled', seconds: 1.5 });
+          say(line(data.first ? 'trip.arrive.first' : 'trip.arrive', 'ooh, a new computer! ✨', vars), 6);
+          break;
+        }
+        case 'tripCalledHome': say(line('trip.calledHome', "oh! I'm back! 🏠"), 5); break;
+        case 'tripLuggage': say(line('trip.luggage', 'found my stuff from our trip! 🧳'), 4); break;
+        case 'movedIn':
+          effects.push({ type: 'mood', mood: 'done', seconds: 3 });
+          say(line('moving.in', 'a new home! ✨'), 6);
+          break;
+        case 'movingOut': say(line('moving.out', 'all packed! 📦'), 4); break;
         default: break;
       }
       return drain();
@@ -784,7 +895,7 @@
       switch (action) {
         case 'open': {
           const topicId = payload.topic;
-          if (topicId === 'offer' && offer) { const t = offer.topic; offer = null; dayFlags()[`special:${t.id}`] = true; result = startTopic(t); }
+          if (topicId === 'offer' && offer) { const o = offer; offer = null; dayFlags()[`special:${o.topic.id}`] = true; result = startTopic(o.topic, o.vars); }
           else if (topicId && topicId !== 'offer') result = selectMenu(topicId);
           else result = menuNode('main');
           break;
@@ -843,6 +954,7 @@
         topics: { total: topics.length, seen: topics.filter((t) => state.seen[t.id]).length },
         firstMet: state.firstMet,
         offer: !!offer,
+        trips: state.trips.slice(-10).reverse(),
       };
     }
 
@@ -850,11 +962,12 @@
 
     /** What travels in sync profiles and transfer keys (no timers or per-day flags). */
     function exportData() {
-      return { affection: state.affection, memory: state.memory, seen: state.seen, milestones: state.milestones, settings: state.settings, counters: state.counters, firstMet: state.firstMet };
+      return { affection: state.affection, memory: state.memory, seen: state.seen, milestones: state.milestones, settings: state.settings, counters: state.counters, firstMet: state.firstMet, trips: state.trips };
     }
 
     /** Sync: keeps the higher affection, the newer of each memory, and every topic either device has seen. */
     function mergeData(data) {
+      data = parsed(data);
       if (!isObj(data)) return;
       const incoming = normalize({ ...data, days: {}, gained: state.gained, lastSeen: state.lastSeen });
       state.affection = Math.max(state.affection, incoming.affection);
@@ -864,11 +977,14 @@
       if (isObj(data.settings)) state.settings = incoming.settings;
       for (const k of Object.keys(incoming.counters)) state.counters[k] = Math.max(state.counters[k] || 0, num(incoming.counters[k], 0));
       if (incoming.firstMet < state.firstMet) state.firstMet = incoming.firstMet;
+      const ids = new Set(state.trips.map((t) => t.id));
+      state.trips = state.trips.concat(incoming.trips.filter((t) => !ids.has(t.id))).sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0)).slice(-TRIP_LOG);
       save();
     }
 
     /** Transfer keys replace everything. */
     function replaceData(data) {
+      data = parsed(data);
       if (!isObj(data)) return;
       state = normalize({ ...data, days: state.days, gained: state.gained, lastSeen: state.lastSeen });
       save();

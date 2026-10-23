@@ -84,6 +84,7 @@
     });
     $('#transfer-key').addEventListener('keydown', (e) => e.stopPropagation()); // Enter shouldn't advance the wizard
     $('#transfer-apply').addEventListener('click', importKey);
+    $('#moving-open').addEventListener('click', moveIn);
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && step < STEPS.length - 1) next();
       if (e.key === 'Enter' && step === STEPS.length - 1) call('finish', names());
@@ -100,15 +101,40 @@
     setInterval(poll, 1500);
   }
 
+  /** Opens a moving-homes file: the first click previews it, the second moves in. */
+  let movingPath = null;
+  async function moveIn() {
+    const note = $('#transfer-note');
+    note.className = 'transfer-note';
+    if (!movingPath) {
+      const p = await call('moving-open');
+      if (!p || (!p.ok && !p.error)) return;
+      if (!p.ok) { note.className = 'transfer-note error'; note.textContent = p.error; return; }
+      movingPath = p.path;
+      note.textContent = `Found ${p.summary}.`;
+      $('#moving-open').textContent = '🏠 Move in';
+      return;
+    }
+    note.textContent = 'Unpacking…';
+    const r = await call('moving-apply', { path: movingPath });
+    movingPath = null;
+    $('#moving-open').textContent = '🏠 Open a moving-homes file…';
+    await moved(r, "Couldn't open that file");
+  }
+
   /** Moves everything over from another device, then skips to the end. */
   async function importKey() {
     const note = $('#transfer-note');
     note.className = 'transfer-note';
     note.textContent = 'Importing…';
-    const r = await call('transfer-import', { key: $('#transfer-key').value });
+    await moved(await call('transfer-import', { key: $('#transfer-key').value }), "Couldn't read that key");
+  }
+
+  async function moved(r, failure) {
+    const note = $('#transfer-note');
     if (!r || !r.ok) {
       note.className = 'transfer-note error';
-      note.textContent = (r && r.error) || "Couldn't read that key";
+      note.textContent = (r && r.error) || failure;
       return;
     }
     state = await call('state');

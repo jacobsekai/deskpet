@@ -277,6 +277,11 @@ function looksLikePack(dir) {
   return files.some((f) => /^idle([_-]?\d+)?\.(png|gif|webp|jpe?g)$/i.test(f) || /^sheet\./i.test(f)) || !!(options.sheet || options.sheets);
 }
 
+/** Runs a tool; `missing` is set when it isn't installed. */
+function run(cmd, args, options = {}) {
+  return new Promise((resolve) => execFile(cmd, args, options, (e) => resolve({ code: e ? (typeof e.code === 'number' ? e.code : 1) : 0, missing: !!e && e.code === 'ENOENT' })));
+}
+
 async function importPack(items, currentPack) {
   const zip = items.find((p) => /\.zip$/i.test(p));
   let dir;
@@ -285,7 +290,10 @@ async function importPack(items, currentPack) {
     fs.mkdirSync(dir, { recursive: true });
     const result = isWindows
       ? await runPowerShell(`Expand-Archive -Force -Path ${psQuote(zip)} -DestinationPath ${psQuote(dir)}`)
-      : await new Promise((r) => execFile('/usr/bin/ditto', ['-x', '-k', zip, dir], (e) => r({ code: e ? 1 : 0 })));
+      : process.platform === 'darwin'
+        ? await run('/usr/bin/ditto', ['-x', '-k', zip, dir])
+        : await run('unzip', ['-o', '-q', zip, '-d', dir]);
+    if (result.missing) { fs.rmSync(dir, { recursive: true, force: true }); throw new Error("unzipping needs the 'unzip' command (install it with your package manager)"); }
     if (result.code !== 0) throw new Error("couldn't unzip that");
     flatten(dir);
   } else if (items.length === 1 && fs.statSync(items[0]).isDirectory()) {
@@ -315,7 +323,10 @@ async function exportPack(name, zip) {
   fs.rmSync(zip, { force: true });
   const result = isWindows
     ? await runPowerShell(`Compress-Archive -Path ${psQuote(dir)} -DestinationPath ${psQuote(zip)}`)
-    : await new Promise((r) => execFile('/usr/bin/ditto', ['-c', '-k', '--keepParent', dir, zip], (e) => r({ code: e ? 1 : 0 })));
+    : process.platform === 'darwin'
+      ? await run('/usr/bin/ditto', ['-c', '-k', '--keepParent', dir, zip])
+      : await run('zip', ['-r', '-q', zip, name], { cwd: path.dirname(dir) });
+  if (result.missing) throw new Error("zipping needs the 'zip' command (install it with your package manager)");
   if (result.code !== 0) throw new Error("couldn't create the zip");
 }
 
@@ -517,6 +528,43 @@ const transferKey = {
     const days = Object.keys((payload.stats && payload.stats.days) || {}).length;
     return `${(payload.config && payload.config.petName) || 'Mochi'} · ${rank}Lv ${level} (${xp} XP) · ${days} day${days === 1 ? '' : 's'} of stats`;
   },
+};
+
+/**
+ * A trip came home: add what the pet earned while away (the trip's stats minus the snapshot taken when it
+ * left), floored at zero. If it prestiged on the trip, keep that rank and the level progress it had.
+ * Returns the new level if this leveled up.
+ */
+const DAY_FIELDS = ['activeMinutes', 'agentMinutes', 'tasks', 'pets', 'throwsCount', 'focusSessions', 'openMinutes', 'playXP', 'blocked'];
+
+Stats.prototype.absorb = function absorb(trip, departure) {
+  trip = trip || {};
+  departure = departure || {};
+  const before = this.level;
+  const xpBefore = this.xp;
+  const gained = Math.max(0, (trip.xp || 0) - (departure.xp || 0));
+  this.data.xp += gained;
+  for (const [key, day] of Object.entries(trip.days || {})) {
+    const dep = (departure.days || {})[key] || {};
+    const local = { ...(this.data.days[key] || {}) };
+    let changed = false;
+    for (const f of DAY_FIELDS) {
+      const d = Math.max(0, (day[f] || 0) - (dep[f] || 0));
+      if (d) { local[f] = (local[f] || 0) + d; changed = true; }
+    }
+    if (day.greeted && !dep.greeted && !local.greeted) { local.greeted = true; changed = true; }
+    if (changed) this.data.days[key] = local;
+  }
+  if ((trip.prestige || 0) > this.prestige) {
+    const progress = Math.max(0, (trip.xp || 0) - (trip.prestigeBase || 0));
+    const base = xpBefore + gained - progress;
+    this.data.prestige = trip.prestige;
+    this.data.prestigeBase = this.data.xp - progress;
+    if (this.remote.prestige) this.remote.prestige = { rank: trip.prestige, base };
+  }
+  this.dirty = true;
+  this.saveIfNeeded();
+  return this.level > before ? this.level : null;
 };
 
 Stats.prototype.replace = function replace(data) {

@@ -70,7 +70,47 @@
     "game.words.start": ["Guess my word before the petals fall! 🌸"],
     "game.pong.start": ["First to 5 points wins! Move with your mouse or ↑ ↓ 🏓"],
     "focus.done": ["focus session done! take a break ☕"],
-    "focus.over": ["break's over! ready for another round? 💪"]
+    "focus.over": ["break's over! ready for another round? 💪"],
+    "trip.leave": ["A trip?! Yay! Take good care of me, {owner} 🧳", "Ooh, where are we going? I'll pack snacks 🎒", "Adventure time! Don't forget me in your bag 🧳✨"],
+    "trip.leave+close": ["Anywhere is fun as long as we go together 💕🧳"],
+    "trip.leave+upset": ["…fine. Let's go."],
+    "trip.back": ["I'm home! 🏠 Riding in your pocket all day was so cozy 💕", "We're back! 🏠 I missed my desktop… but I'd have missed you more", "Home sweet home! 🏠✨"],
+    "trip.back.visited": ["I'm home! 🏠 And I got to see {places}! 🌍", "We're back! 🏠 Visiting {places} was so fun ✨"],
+    "trip.back+upset": ["…I'm home."],
+    "trip.home.pocket": ["We were out for {time}! I couldn't see much from inside the drive, so you'll have to tell me everything 👀", "{time} away! I was snug in the drive the whole time, so… spill!"],
+    "trip.home.visited": ["{time} away, and I got to visit {places}! But I want to hear about YOUR day 💕", "I saw {places} today! A whole adventure in {time} ✨ Now tell me about you!"],
+    "trip.ask.day": ["How was your day, {owner}?", "So how did today go, {owner}?", "How are you feeling after today?"],
+    "trip.day.amazing": ["Yay!! I love that for you! 🎉", "That makes me so happy to hear! ✨"],
+    "trip.day.good": ["Good days are the best kind of days 😊", "I'm glad! A pretty good day is worth celebrating 🌤️"],
+    "trip.day.okay": ["Okay days count too. You got through it 💕", "That's alright! Not every day has to be special."],
+    "trip.day.tiring": ["Aww, you must be worn out. Rest is allowed, okay? 🛋️", "Tiring days deserve a cozy evening. Be gentle with yourself 💤"],
+    "trip.day.rough": ["Oh no… I'm sorry, {owner}. 🫂", "That sounds hard. I'm right here 💕"],
+    "trip.ask.rough": ["Do you want to tell me about it?"],
+    "trip.rough.listened": ["Thank you for telling me. That sounds really hard, and you still made it through. I'm proud of you 💕", "I hear you. Tomorrow's a fresh start, and I'll be right here 🫂"],
+    "trip.rough.okay": ["That's okay. We can just hang out quietly 💕", "No pressure at all. I'm just happy you're home 🏠"],
+    "trip.ask.what": ["What did we get up to?", "So what were we doing out there?"],
+    "trip.what.school": ["A school day! I hope classes were kind to you 📚", "School! Learn anything cool? You can teach me later 📚"],
+    "trip.what.work": ["A work day! You worked hard, so now you get to relax 💼✨", "Work, huh? You deserve a break now 💼"],
+    "trip.what.friends": ["Friends! I'm so glad you had people to hang out with 🧋", "A friend day! I hope you laughed a lot 😆"],
+    "trip.what.errands": ["Errands! Not glamorous, but you got stuff done ✅", "Look at you, being responsible 🛍️"],
+    "trip.what.travel": ["Travelling?! I'm such a well-travelled {pet} now ✈️", "A real journey! No wonder I felt so far from home ✈️"],
+    "trip.what.other": ["{value}? That sounds fun! I'm glad I came along 💕", "Ooh, {value}! I'll remember that 🧠"],
+    "trip.what.secret": ["A secret adventure? Okay, I won't pry 🤫"],
+    "trip.ask.moment": ["Tell me one thing that happened today!", "What was the best part of today?"],
+    "trip.moment.thanks": ["\"{value}\"… I'm keeping that one in my memory 💕", "I love that. Thank you for sharing it with me ✨"],
+    "trip.moment.skip": ["That's okay! Having you back is enough 💕"],
+    "trip.home.outro": ["Thanks for taking me with you, {owner}. Let's go somewhere again soon! 🧳", "Best. Trip. Ever. Okay, I'm going to go lie on the desktop now 🏠💕"],
+    "trip.arrive.first": ["Whoa, a new computer! So this is {host} ✨ Hi!", "Ooh, {host}! Thanks for bringing me along, {owner} 🧳"],
+    "trip.arrive": ["We're at {host} again! 👋", "Back at {host}! I remember this place ✨"],
+    "trip.calledHome": ["Oh! I'm home already? 🏠 My suitcase is still on the drive, so plug it in sometime and I'll unpack."],
+    "trip.luggage": ["Oh, my suitcase! 🧳 Unpacking the memories from our trip…", "Found my stuff from our trip! 🧳 Everything's back where it belongs."],
+    "trip.invite": ["A trip? Yes please! Pick a drive and I'll hop in 🧳"],
+    "trip.remember": ["I keep thinking about our last trip… \"{mem:tripMoment|we had such a good time}\" 💭", "Remember our trip? We went out for {mem:tripActivity|an adventure}. That was fun 🧳"],
+    "trip.wish.thanks": ["Ooh, {value}! Let's do it sometime 🧳✨"],
+    "moving.in": ["A new home! 🏠 Give me a sec to unpack… okay, I love it here ✨", "We moved! Everything made it in one piece, {owner} 📦✨"],
+    "moving.out": ["All packed! 📦 Open that file on the new computer and I'll be right there.", "My suitcase is ready! 📦 See you at the new place."],
+    "trip.home.outro.rough": ["Thanks for bringing me along today, {owner}. Get some rest, okay? I'll be right here 💕"],
+    "trip.goHome": ["See you at home, {owner}! Don't forget the drive 🏠🧳", "Bye, {host|everyone}! Time to go home 🏠"]
   },
   "words": ["sunshine", "rainbow", "coffee", "keyboard", "pillow", "blanket", "cookie", "pancake", "garden", "breeze", "thunder", "lantern", "puzzle", "teacup", "bubble", "comet", "galaxy", "planet", "rocket", "island", "ocean", "dolphin", "penguin", "hamster", "panda", "kitten", "puppy", "butterfly", "sunflower", "blossom", "picnic", "popcorn", "noodles", "strawberry", "melody", "guitar", "piano", "violin", "journey", "treasure", "castle", "dragon", "wizard", "marshmallow", "snowflake", "autumn", "winter", "spring", "summer", "midnight", "starlight", "friendship", "adventure", "computer", "monitor", "laptop", "window", "server", "project", "deadline", "weekend", "sandwich", "lemonade", "cupcake", "umbrella", "backpack", "notebook", "crayon", "camera"],
   "topics": [
@@ -563,6 +603,13 @@
       "steps": [{"say": "Have fun out there! Stay safe 🌸", "mood": "happy", "farewell": "out"}, {"action": "quit"}]
     },
     {
+      "id": "bye_trip", "category": "goodbye", "title": "🧳 Come with me! (take {pet} on a trip)", "affection": 0.5,
+      "steps": [
+        {"pool": "trip.invite", "mood": "excited"},
+        {"action": "trip"}
+      ]
+    },
+    {
       "id": "bye_later", "category": "goodbye", "title": "👋 See you later", "affection": 0.5,
       "steps": [{"say": "See you later, {owner}! 👋", "mood": "happy", "farewell": "later"}, {"action": "quit"}]
     },
@@ -658,6 +705,24 @@
         "Good ones, hard ones, late nights, early mornings…",
         {"say": "Whatever happens, I'll always be right here on your screen. We're inseparable now 💕", "mood": "love"},
         "Thank you for choosing me, every single day ✨"
+      ]
+    },
+    {
+      "id": "trip.home", "category": "trip", "title": "🧳 Our trip", "affection": 1.5,
+      "steps": [
+        {"when": {"flag": "visited"}, "pool": "trip.home.visited", "mood": "excited", "else": [{"pool": "trip.home.pocket", "mood": "happy"}]},
+        {"ask": "How was your day, {owner}?", "askPool": "trip.ask.day", "key": "tripDay", "label": "how our last trip went", "choices": [{"label": "🤩 Amazing!", "value": "amazing", "affection": 0.5, "steps": [{"pool": "trip.day.amazing", "mood": "excited"}]}, {"label": "🙂 Pretty good", "value": "pretty good", "steps": [{"pool": "trip.day.good", "mood": "happy"}]}, {"label": "😐 Just okay", "value": "okay", "steps": [{"pool": "trip.day.okay"}]}, {"label": "🥱 Tiring", "value": "tiring", "steps": [{"pool": "trip.day.tiring", "mood": "sleepy"}]}, {"label": "😢 Kind of rough", "value": "rough", "steps": [{"pool": "trip.day.rough", "mood": "worried"}, {"ask": "Do you want to tell me about it?", "askPool": "trip.ask.rough", "choices": [{"label": "Yeah…", "steps": [{"input": "I'm listening. What happened?", "max": 120, "placeholder": "as much or as little as you like", "key": "tripMoment", "label": "something hard from our last trip", "then": [{"pool": "trip.rough.listened", "mood": "love"}], "skip": [{"pool": "trip.rough.okay", "mood": "love"}]}]}, {"label": "Not really", "steps": [{"pool": "trip.rough.okay", "mood": "love"}]}]}]}]},
+        {"ask": "What did we get up to?", "askPool": "trip.ask.what", "key": "tripActivity", "label": "what we did on our last trip", "choices": [{"label": "🏫 School", "value": "school", "steps": [{"pool": "trip.what.school", "mood": "happy"}]}, {"label": "💼 Work", "value": "work", "steps": [{"pool": "trip.what.work", "mood": "proud"}]}, {"label": "🧋 Hung out with friends", "value": "hanging out with friends", "steps": [{"pool": "trip.what.friends", "mood": "happy"}]}, {"label": "🛍️ Errands and shopping", "value": "errands", "steps": [{"pool": "trip.what.errands"}]}, {"label": "✈️ Travelling", "value": "travelling", "steps": [{"pool": "trip.what.travel", "mood": "excited"}]}, {"label": "✏️ Something else", "value": null, "steps": [{"input": "Ooh, what did we do?", "max": 60, "placeholder": "a concert, the library, grandma's…", "key": "tripActivity", "label": "what we did on our last trip", "then": [{"pool": "trip.what.other", "mood": "happy"}], "skip": [{"pool": "trip.what.secret"}]}]}]},
+        {"when": {"noFreshMem": "tripMoment"}, "input": "Tell me one thing that happened today!", "inputPool": "trip.ask.moment", "max": 120, "placeholder": "a favorite moment, something funny… (or skip)", "key": "tripMoment", "label": "a moment from our last trip", "then": [{"pool": "trip.moment.thanks", "mood": "love"}], "skip": [{"pool": "trip.moment.skip", "mood": "happy"}]},
+        {"when": {"memIs": {"tripDay": "rough"}}, "pool": "trip.home.outro.rough", "mood": "love", "else": [{"pool": "trip.home.outro", "mood": "happy"}]},
+        {"action": "logTrip"}
+      ]
+    },
+    {
+      "id": "p_trip", "category": "pet", "title": "🧳 Our last trip", "random": true, "when": {"mem": "tripActivity"},
+      "steps": [
+        {"pool": "trip.remember", "mood": "happy"},
+        {"input": "Where should we go next time?", "max": 60, "placeholder": "the beach, a café, anywhere!", "key": "tripWish", "label": "where you want to take me next", "then": [{"pool": "trip.wish.thanks", "mood": "excited"}], "skip": [{"pool": "trip.moment.skip"}]}
       ]
     }
   ]

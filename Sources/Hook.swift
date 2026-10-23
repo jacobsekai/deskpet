@@ -2,8 +2,12 @@ import Foundation
 import Darwin
 
 enum DeskPetPaths {
-    static let root = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".deskpet")
-    static let sessions = root.appendingPathComponent("sessions")
+    /// The real ~/.deskpet on this computer.
+    static let home = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".deskpet")
+    /// ~/.deskpet, or a temporary folder while the pet is visiting from a trip drive.
+    static let root = Visitor.active ? Visitor.dataRoot : home
+    /// Agent hooks on this computer write here, so a visiting pet sees them too.
+    static let sessions = home.appendingPathComponent("sessions")
     static let config = root.appendingPathComponent("config.json")
 }
 

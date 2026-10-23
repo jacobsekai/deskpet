@@ -14,7 +14,12 @@ const { paths, Settings, loadConfig, saveConfig, hooksLive, readJSON, setSprites
 const { Sync } = require('./sync');
 const hooks = require('./hooks');
 const { createCompanion, personalityFor } = require('./companion-host');
+const trips = require('./trips');
 const { spawn } = require('child_process');
+
+// Visitor mode (a pet on a trip, docs/trips-and-moving.md) keeps Chromium's profile in the trip's temp folder,
+// which also gives it its own single-instance lock, separate from this computer's own DeskPet.
+if (paths.trip) app.setPath('userData', path.join(paths.root, 'electron'));
 
 const GROUND = 34;
 
@@ -117,6 +122,17 @@ class Pet {
     this.sync = new Sync(this.settings);
     this.lastSyncTick = 0;
     if (this.settings.get('syncPacks', false) && this.sync.enabled) setSpritesOverride(this.sync.spritesFolder);
+    // Trips. A visitor's own settings are temporary, so "this computer" is the id in the real ~/.deskpet.
+    this.visitor = !!paths.trip;
+    this.deviceID = this.visitor ? (readJSON(path.join(paths.realRoot, 'electron-settings.json'), {}) || {}).syncDeviceID || null : this.sync.deviceID;
+    this.visit = null;
+    this.drives = [];
+    this.drivesAt = 0;
+    this.lastTripWatch = 0;
+    this.tripChecked = false;
+    this.visitorsAtDoor = [];
+    this.announcedDoors = new Set();
+    this.letOut = new Set();
   }
 
   // MARK: Settings
@@ -151,7 +167,9 @@ class Pet {
 
   // MARK: Lifecycle
 
+  /** Returns false when DeskPet is quitting right away (a visitor that can't visit here). */
   start() {
+    if (this.visitor && !this.visitAllowed()) return false;
     fs.mkdirSync(paths.sprites, { recursive: true });
     this.createWindow();
     this.createTray();
@@ -160,20 +178,32 @@ class Pet {
     powerMonitor.on('resume', () => this.welcomeBack());
     powerMonitor.on('unlock-screen', () => this.welcomeBack());
     this.timer = setInterval(() => this.tick(), 1000 / 30);
-    if (this.settings.get('setupComplete', false)) this.applyCompanion(this.companion.event('launch'));
-    else this.openWizard();
-
     if (isWindows) app.setAppUserModelId('local.deskpet');
     this.platforms.start();
     this.createCard();
-    // Keep installed hook scripts current after updates.
-    if (process.platform !== 'darwin' && (hooks.installed() || this.kiroHooksOn)) {
-      try { hooks.installScripts(); } catch (_) { /* best effort */ }
+    if (this.visitor) {
+      // A guest: no setup, hooks, updates, or login items on someone else's computer.
+      this.startVisit();
+      this.updateTray();
+      return true;
     }
-    if (this.kiroHooksOn) kiroHooks.apply(true);
+    if (this.away) this.updateTray(); // the pet stays hidden until the trip comes home
+    else if (this.settings.get('setupComplete', false)) this.applyCompanion(this.companion.event('launch'));
+    else this.openWizard();
+
+    if (process.platform !== 'darwin') {
+      // Hooks that point at a moved AppImage or a missing Node get rewritten.
+      try { if (hooks.heal()) console.log('repaired Claude Code hooks'); } catch (_) { /* best effort */ }
+      // Keep installed hook scripts current after updates.
+      if (hooks.installed() || this.kiroHooksOn) {
+        try { hooks.installScripts(); } catch (_) { /* best effort */ }
+      }
+    }
+    if (this.kiroHooksOn) kiroHooks.apply(true); // also repoints Kiro hooks at the current command
     setTimeout(() => this.wearEarnedRewardsOnce(), 6000);
     if (this.autoUpdate) setTimeout(() => this.checkForUpdates(false), 20000);
     setInterval(() => { if (this.autoUpdate) this.checkForUpdates(false); }, 6 * 3600 * 1000);
+    return true;
   }
 
   createWindow() {
@@ -195,7 +225,7 @@ class Pet {
     this.win.setIgnoreMouseEvents(true);
     this.win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
     this.win.once('ready-to-show', () => {
-      this.win.showInactive();
+      if (!this.away) this.win.showInactive();
       this.loadSprites(false);
     });
     this.pos = { x, bottom: y + this.size.height };
@@ -213,6 +243,7 @@ class Pet {
   // MARK: Main loop
 
   tick() {
+    if (this.win.isDestroyed()) return clearInterval(this.timer); // quitting
     const t = now();
     const dt = Math.min(0.1, t - this.lastTick);
     this.lastTick = t;
@@ -281,6 +312,11 @@ class Pet {
       this.lastSyncTick = t;
       this.syncTick();
     }
+    if (t - this.lastTripWatch >= 3) {
+      this.lastTripWatch = t;
+      this.tripWatch();
+    }
+    if (t - this.lastMinute >= 60 && this.away) this.lastMinute = t; // no hanging-out XP while the pet is away
     if (t - this.lastMinute >= 60) {
       this.lastMinute = t;
       const busy = this.sessions.some((s) => s.activity !== 'idle' && s.activity !== 'done');
@@ -292,7 +328,7 @@ class Pet {
         if (busy) d.agentMinutes++;
       });
     }
-    if (!this.stats.today.greeted) {
+    if (!this.stats.today.greeted && !this.away) {
       this.gainXP(10, false, (d) => { d.greeted = true; });
     }
     if (t - this.lastStatsSave > 30) { this.lastStatsSave = t; this.stats.saveIfNeeded(); }
@@ -755,24 +791,38 @@ class Pet {
         click: () => this.jump(s.pid).then((ok) => { if (!ok) this.say("couldn't find that window 🤔", 2.5); }),
       }))
       : [{ label: 'No AI agents running', enabled: false }];
+    const pet = this.config.petName;
+    const away = this.tripState;
+    const tripItems = [];
+    if (this.visit) {
+      tripItems.push({ label: `🧳 ${pet} is visiting ${trips.deviceName()}`, enabled: false }, { label: '🏠 Go home', click: () => this.goHome() });
+    } else if (away) {
+      tripItems.push({ label: `🧳 ${pet} is out with you${away.volume ? ` (${away.volume})` : ''}`, enabled: false });
+      if (fs.existsSync(path.join(away.path, 'trip.json'))) tripItems.push({ label: `🏠 Welcome ${pet} home`, click: () => this.tripWelcome() });
+      tripItems.push({ label: `Call ${pet} home without the drive`, click: () => this.callHome() });
+    }
+    for (const d of this.doors()) tripItems.push({ label: `🧳 Let ${d.pet} out (visiting from ${d.homeName})`, click: () => this.letVisitorOut(d.path) });
     const template = [
-      { label: `${this.config.petName} · ${this.stats.rankTitle} — ${this.mood}`, enabled: false },
+      { label: `${pet} · ${this.stats.rankTitle} — ${away ? 'on a trip' : this.mood}`, enabled: false },
       { label: `Today: ${this.todaySummary()}`, enabled: false },
       ...(this.quiet ? [{ label: '🤫 Quiet: a mic or camera is in use', enabled: false }] : []),
-      ...(this.updater.available ? [{ label: `⬆️ Update to v${this.updater.available.version}`, click: () => this.installUpdate() }] : []),
+      ...(this.updater.available && !this.visitor ? [{ label: `⬆️ Update to v${this.updater.available.version}`, click: () => this.installUpdate() }] : []),
+      ...(tripItems.length ? [{ type: 'separator' }, ...tripItems] : []),
       { type: 'separator' },
       ...agentItems,
       { type: 'separator' },
-      { label: `💬 Talk to ${this.config.petName}…`, click: () => this.openTalk() },
+      ...(away ? [] : [{ label: `💬 Talk to ${pet}…`, click: () => this.openTalk() }]),
       { label: 'Open DeskPet…', accelerator: 'CmdOrCtrl+,', click: () => this.openPanel() },
       this.focus.phase === 'off'
         ? { label: '🍅 Focus for 25 minutes', click: () => this.startFocus(25) }
         : { label: `⏹ Stop focus (${this.focus.label})`, click: () => this.focus.stop() },
       { label: `Rewards (${this.stats.rankTitle})…`, click: () => this.openPanel('rewards') },
-      { label: `Bring ${this.config.petName} here`, click: () => this.bringHere() },
-      { label: this.win.isVisible() ? `Hide ${this.config.petName}` : `Show ${this.config.petName}`, click: () => this.toggleVisible() },
+      ...(away ? [] : [
+        { label: `Bring ${pet} here`, click: () => this.bringHere() },
+        { label: this.win.isVisible() ? `Hide ${pet}` : `Show ${pet}`, click: () => this.toggleVisible() },
+      ]),
       { type: 'separator' },
-      { label: 'Quit DeskPet', click: () => this.quit() },
+      { label: this.visitor ? `Quit (${pet} saves the trip first)` : 'Quit DeskPet', click: () => this.quit() },
     ];
     return Menu.buildFromTemplate(template);
   }
@@ -808,6 +858,8 @@ class Pet {
         case 'xp': this.gainXP(f.amount, !!f.play); break;
         case 'offer': this.transient = { mood: 'startled', until: now() + 0.8 }; this.playSound('needs-you'); break;
         case 'tier': if (!f.down) this.playSound('level-up'); break;
+        case 'openTalk': if (!this.away) this.openTalk(f.topic || null); break;
+        case 'trip': if (!this.visitor) this.openPanel('trips'); break;
         case 'quit':
           setTimeout(() => {
             if (this.talk && !this.talk.isDestroyed()) this.talk.close();
@@ -948,7 +1000,7 @@ class Pet {
       toggles: {
         wander: this.wander, gravity: this.gravity, walkOnWindows: this.walkOnWindows, quietInCalls: this.quietInCalls,
         notifications: this.notificationsOn, sounds: this.soundsOn, autoUpdate: this.autoUpdate,
-        startAtLogin: loginSupported && loginItem.get(app), startAtLoginSupported: loginSupported,
+        startAtLogin: loginSupported && !this.visitor && loginItem.get(app), startAtLoginSupported: loginSupported && !this.visitor,
         showPrestigeBadge: this.settings.get('showPrestigeBadge', true),
         walkOnWindowsSupported: process.platform !== 'linux',
       },
@@ -956,11 +1008,18 @@ class Pet {
       update: { available: this.updater.available ? this.updater.available.version : null },
       sync: this.syncState(),
       companion: this.companion.summary(),
+      trip: this.tripPanelState(),
       preview: (() => { const p = this.pose(t); return { hat: p.hat, trail: p.trail, aura: p.aura, companion: p.companion, golden: p.golden, prestige: p.prestige }; })(),
     };
   }
 
   async panelCall(action, payload) {
+    payload = payload || {};
+    // A visiting pet can't change this computer's setup.
+    const hostOnly = ['hooks', 'kiro', 'transferImport', 'syncEnable', 'syncPacks', 'checkUpdates', 'installUpdate', 'openWizard', 'tripTake', 'movingApply', 'tripLetOut'];
+    if (this.visitor && (hostOnly.includes(action) || (action === 'set' && payload.key === 'startAtLogin'))) {
+      return { ok: false, error: `${this.config.petName} is just visiting this computer` };
+    }
     switch (action) {
       case 'state': { const st = this.panelState(); this.panelPage = null; return st; }
       case 'set':
@@ -1025,6 +1084,19 @@ class Pet {
         this.applyCompanion(r.effects);
         return r.result;
       }
+      case 'tripDrives': return { drives: await this.refreshDrives() };
+      case 'tripChooseFolder': {
+        const r = await dialog.showOpenDialog(this.panel, { title: 'Choose a drive or folder for the trip', properties: ['openDirectory', 'createDirectory'] });
+        return r.canceled || !r.filePaths.length ? null : { path: r.filePaths[0] };
+      }
+      case 'tripTake': return this.takeTrip(payload.path, !!payload.copyApp);
+      case 'tripEject': return { ok: !!this.tripState && await trips.eject(this.tripState.path) };
+      case 'tripCallHome': return { ok: this.callHome() };
+      case 'tripWelcome': return this.tripWelcome();
+      case 'tripLetOut': return { ok: this.letVisitorOut(payload.path) };
+      case 'movingPack': return this.movingPackDialog(this.panel);
+      case 'movingOpen': return this.movingOpenDialog(this.panel);
+      case 'movingApply': return this.movingApply(payload.path);
       case 'close': if (this.panel && !this.panel.isDestroyed()) this.panel.close(); return { ok: true };
       case 'log': console.error('panel:', payload.message); return { ok: true };
       default: return null;
@@ -1043,7 +1115,7 @@ class Pet {
   }
 
   notify(title, body, pid) {
-    if (!this.notificationsOn || !Notification.isSupported()) return;
+    if (this.visitor || !this.notificationsOn || !Notification.isSupported()) return;
     const n = new Notification({ title, body, silent: true, icon: path.join(__dirname, '..', 'assets', 'icon.png') });
     if (pid) n.on('click', () => this.jump(pid));
     n.show();
@@ -1289,6 +1361,8 @@ class Pet {
   // MARK: Sprite pack files
 
   async onDropFiles(files) {
+    const home = (files || []).find((f) => /\.deskpet$/i.test(f));
+    if (home) return this.openMovingFile(home);
     try {
       const name = await importPack(files, this.spritePackName);
       this.chooseSprites(name);
@@ -1454,8 +1528,8 @@ class Pet {
     };
   }
 
-  /** Applies an imported key; returns a note about anything that didn't come along. */
-  applyTransfer(payload) {
+  /** Applies an imported key; returns a note about anything that didn't come along. `quiet` skips the welcome line. */
+  applyTransfer(payload, { quiet = false } = {}) {
     const c = payload.config || {};
     const ownerName = c.ownerName || this.config.ownerName, petName = c.petName || this.config.petName;
     saveConfig({ ownerName, petName });
@@ -1473,7 +1547,7 @@ class Pet {
     }
     this.loadSprites(false);
     this.transient = { mood: 'done', until: now() + 3 };
-    this.say(note || `welcome home, ${ownerName}! everything's here ✨`, 5);
+    if (!quiet || note) this.say(note || `welcome home, ${ownerName}! everything's here ✨`, 5);
     return note;
   }
 
@@ -1538,6 +1612,7 @@ class Pet {
   }
 
   bringHere() {
+    if (this.away) return;
     const display = screen.getDisplayNearestPoint(this.cursor);
     const wa = display.workArea;
     this.walkTarget = null;
@@ -1550,6 +1625,7 @@ class Pet {
   }
 
   toggleVisible() {
+    if (this.away) return;
     if (this.win.isVisible()) this.win.hide(); else this.win.showInactive();
   }
 
@@ -1703,6 +1779,8 @@ class Pet {
           const note = this.applyTransfer(p);
           return { ok: true, summary: transferKey.summary(p), note };
         } catch (e) { return { ok: false, error: e.message }; }
+      case 'moving-open': return this.movingOpenDialog(this.wizard);
+      case 'moving-apply': return this.movingApply(payload.path);
       case 'kiro': {
         const changed = this.setKiroHooks(!!payload.install);
         return { ok: !payload.install || changed > 0 || kiroHooks.installed(), changed };
@@ -1720,6 +1798,276 @@ class Pet {
       default:
         return null;
     }
+  }
+
+  // MARK: Trips (docs/trips-and-moving.md)
+
+  /** `{ id, path, volume, leftAt, sawGone }` while this computer's pet is away on a trip. */
+  get tripState() { return this.visitor ? null : this.settings.get('trip', null); }
+  get away() { return !!this.tripState; }
+
+  tripHome() { return { device: this.deviceID, name: trips.deviceName(), os: trips.OS_NAME }; }
+
+  async refreshDrives() {
+    this.drivesAt = Date.now();
+    try { this.drives = await trips.listDrives(); } catch (_) { this.drives = []; }
+    return this.drives;
+  }
+
+  /** Someone else's pets waiting on a plugged-in drive (not yet let out). */
+  doors() { return this.visitor ? [] : this.visitorsAtDoor.filter((d) => !this.letOut.has(d.id)); }
+
+  updateTray() {
+    if (!this.tray) return;
+    const pet = this.config.petName;
+    const tip = this.visitor ? `DeskPet · 🧳 ${pet} is visiting` : this.away ? `DeskPet · 🧳 ${pet} is out with you` : 'DeskPet';
+    this.tray.setToolTip(tip);
+    if (process.platform === 'darwin') this.tray.setTitle(this.visitor || this.away ? '🧳' : '');
+  }
+
+  hidePet() {
+    this.walkTarget = null;
+    this.velocity = null;
+    this.hideCard();
+    if (this.talk && !this.talk.isDestroyed()) this.talk.close();
+    if (!this.win.isDestroyed()) this.win.hide();
+  }
+
+  showPet() {
+    if (!this.win.isDestroyed()) this.win.showInactive();
+    this.transient = { mood: 'done', until: now() + 3 };
+    this.updateTray();
+  }
+
+  /** Every ~3 s: the trip coming home, luggage from an earlier trip, or someone else's pet at the door. */
+  tripWatch() {
+    if (this.visitor) {
+      // The drive went away under us: nothing left to save to.
+      if (this.visit && !fs.existsSync(path.join(this.visit.folder, 'trip.json'))) { this.visit.gone = true; quitApp(); }
+      return;
+    }
+    const state = this.tripState;
+    const first = !this.tripChecked;
+    this.tripChecked = true;
+    const found = trips.findTrips(state ? [state.path] : []);
+    const decision = trips.watchDecision({ state, found, deviceID: this.deviceID, first });
+    if (decision.sawGone) this.settings.set('trip', { ...state, sawGone: true });
+    if (decision.comeHome) this.returnHome(decision.comeHome.folder, decision.comeHome.trip);
+    for (const f of decision.luggage) this.absorbLuggage(f.folder, f.trip);
+    const doors = decision.doors;
+    this.visitorsAtDoor = doors;
+    for (const d of doors) {
+      if (this.announcedDoors.has(d.id)) continue;
+      this.announcedDoors.add(d.id);
+      if (!this.away) this.say(`🧳 ${d.pet} is visiting from ${d.homeName}! let them out from the menu`, 6);
+      this.notify(`${d.pet} is visiting! 🧳`, `${d.pet} came along from ${d.homeName}. Choose "Let ${d.pet} out" in the DeskPet menu.`, 0);
+    }
+  }
+
+  /** Brings back what the pet did on a trip: XP and stats, memories and affection, any new names. */
+  absorbTrip(folder, trip) {
+    const profile = trip.profile || {};
+    const level = this.stats.absorb(profile.stats, (trip.departure || {}).stats);
+    if (profile.companion) this.companion.mergeData(profile.companion);
+    const c = profile.config || {};
+    if ((c.petName && c.petName !== this.config.petName) || (c.ownerName && c.ownerName !== this.config.ownerName)) {
+      const petName = c.petName || this.config.petName, ownerName = c.ownerName || this.config.ownerName;
+      saveConfig({ petName, ownerName });
+      this.config = { ...this.config, petName, ownerName };
+      this.companion.setNames(ownerName, petName);
+    }
+    try { trips.markHome(folder, trip); } catch (_) { /* read-only drive: it's absorbed here either way */ }
+    return level;
+  }
+
+  returnHome(folder, trip) {
+    const state = this.tripState;
+    const leftAt = state ? state.leftAt : Date.parse(trip.leftAt) || Date.now();
+    const level = this.absorbTrip(folder, trip);
+    this.settings.set('trip', null);
+    this.settings.flush();
+    this.showPet();
+    this.levelUp(level);
+    this.applyCompanion(this.companion.event('tripReturn', { minutes: Math.max(0, Math.round((Date.now() - leftAt) / 60000)), visits: (trip.visits || []).map((v) => v.device) }));
+  }
+
+  absorbLuggage(folder, trip) {
+    this.levelUp(this.absorbTrip(folder, trip));
+    this.applyCompanion(this.companion.event('tripLuggage'));
+  }
+
+  async takeTrip(base, copyApp) {
+    const pet = this.config.petName;
+    if (this.visitor) return { ok: false, error: `${pet} is just visiting: trips start from home` };
+    if (this.away) return { ok: false, error: `${pet} is already on a trip` };
+    if (!base) return { ok: false, error: 'choose a drive or a folder first' };
+    let folder;
+    try {
+      const pack = this.spritePackName;
+      const made = trips.createTrip({ base, profile: this.transferPayload(), home: this.tripHome(), pack, packDir: pack ? path.join(paths.sprites, pack) : null });
+      folder = made.folder;
+      if (copyApp) await trips.copyApp(trips.appCopyInfo({ packaged: app.isPackaged }), folder);
+      const drive = trips.driveOf(folder);
+      const known = drive && (this.drives || []).find((d) => path.resolve(d.path) === path.resolve(drive));
+      this.settings.set('trip', { id: made.trip.id, path: folder, volume: known ? known.name : path.basename(drive || base), leftAt: Date.now(), sawGone: false });
+      this.settings.flush();
+      this.applyCompanion(this.companion.event('tripLeave'));
+      setTimeout(() => { if (this.away) this.hidePet(); }, 3500);
+      this.updateTray();
+      return { ok: true, ejectable: !!drive };
+    } catch (e) {
+      // Don't leave a half-packed trip behind to be found later as "luggage".
+      if (folder && !this.away) fs.rmSync(path.join(folder, 'trip.json'), { force: true });
+      return { ok: false, error: e.code === 'ENOSPC' ? 'the drive is full' : e.message };
+    }
+  }
+
+  /** Comes home without the drive; whatever happened on the trip comes back later as luggage. */
+  callHome() {
+    if (!this.away) return false;
+    this.settings.set('trip', null);
+    this.showPet();
+    this.applyCompanion(this.companion.event('tripCalledHome'));
+    return true;
+  }
+
+  tripWelcome() {
+    const state = this.tripState;
+    if (!state) return { ok: false, error: 'no one is away' };
+    const mine = trips.findTrips([state.path]).find((f) => f.trip.id === state.id && f.trip.status === 'away');
+    if (!mine) return { ok: false, error: `can't find ${this.config.petName}'s trip folder: plug the drive in first` };
+    this.returnHome(mine.folder, mine.trip);
+    return { ok: true };
+  }
+
+  /** Starts a second DeskPet for a visiting pet (its own temp profile; this computer's pet stays as it is). */
+  letVisitorOut(folder) {
+    const trip = folder && trips.readTrip(folder);
+    if (this.visitor || !trip || trip.status !== 'away' || (trip.home && trip.home.device === this.deviceID)) return false;
+    const exe = process.env.APPIMAGE || process.execPath;
+    const args = app.isPackaged ? ['--trip', folder] : [app.getAppPath(), '--trip', folder];
+    const env = { ...process.env };
+    delete env.ELECTRON_RUN_AS_NODE;
+    try { spawn(exe, args, { detached: true, stdio: 'ignore', env }).unref(); } catch (e) { this.say(`couldn't let ${trip.pet} out: ${e.message}`, 4); return false; }
+    this.letOut.add(trip.id);
+    if (!this.away) this.say(`come on in, ${trip.pet}! 👋`, 3);
+    return true;
+  }
+
+  // Visitor side
+
+  visitAllowed() {
+    const msg = trips.visitCheck(trips.readTrip(paths.trip.folder), this.deviceID);
+    if (!msg) return true;
+    console.log(`visitor: ${msg}`);
+    if (!process.argv.includes('--self-test')) dialog.showMessageBoxSync({ type: 'info', message: 'DeskPet', detail: msg, buttons: ['OK'] });
+    quitApp();
+    return false;
+  }
+
+  startVisit() {
+    const folder = paths.trip.folder;
+    const trip = trips.readTrip(folder);
+    this.applyTransfer(trip.profile || {}, { quiet: true });
+    trip.visits = trip.visits || [];
+    trip.visits.push({ device: trips.deviceName(), os: trips.OS_NAME, at: new Date().toISOString(), minutes: 0 });
+    this.visit = { folder, id: trip.id, homeName: (trip.home && trip.home.name) || 'home', index: trip.visits.length - 1, arrivedAt: Date.now() };
+    try { trips.writeTrip(folder, trip); } catch (_) { /* read-only drive: progress stays here until quit */ }
+    try {
+      fs.mkdirSync(paths.visitors, { recursive: true });
+      fs.writeFileSync(path.join(paths.visitors, String(process.pid)), trip.id);
+    } catch (_) { /* marker is only a hint for the macOS app */ }
+    this.applyCompanion(this.companion.event('tripArrive', { host: trips.deviceName(), homeName: this.visit.homeName, first: trip.visits.length === 1 }));
+    setInterval(() => this.saveVisit(), 20000);
+  }
+
+  /** Writes the visitor's progress back to the drive. */
+  saveVisit() {
+    if (!this.visit || this.visit.gone) return false;
+    const trip = trips.readTrip(this.visit.folder);
+    if (!trip || trip.id !== this.visit.id) return false;
+    trip.profile = this.transferPayload();
+    const v = (trip.visits || [])[this.visit.index];
+    if (v) v.minutes = Math.round((Date.now() - this.visit.arrivedAt) / 60000);
+    try { trips.writeTrip(this.visit.folder, trip); return true; } catch (_) { return false; }
+  }
+
+  goHome() {
+    this.say(this.companion.line('trip.goHome', 'see you at home! 🏠'), 2);
+    this.saveVisit();
+    setTimeout(() => this.quit(), 1600);
+  }
+
+  // MARK: Moving homes (<Pet>.deskpet files)
+
+  movingSummary(obj) {
+    return transferKey.summary(obj.profile) + (obj.pack && obj.pack.name ? ` · brings the ${obj.pack.name} look` : '');
+  }
+
+  async movingPackDialog(parent) {
+    const r = await dialog.showSaveDialog(parent && !parent.isDestroyed() ? parent : undefined, {
+      title: `Pack up ${this.config.petName}`, defaultPath: `${this.config.petName}.deskpet`, filters: [{ name: 'DeskPet moving-homes file', extensions: ['deskpet'] }],
+    });
+    if (r.canceled || !r.filePath) return { ok: false };
+    try {
+      const pack = this.spritePackName;
+      const { json, note } = trips.packMovingFile({ profile: this.transferPayload(), packName: pack, packDir: pack ? path.join(paths.sprites, pack) : null });
+      fs.writeFileSync(r.filePath, json);
+      const fx = this.companion.event('movingOut');
+      this.applyCompanion(fx);
+      if (!fx.some((f) => f.type === 'say')) this.say('all packed! 📦', 3);
+      return { ok: true, path: r.filePath, note };
+    } catch (e) { return { ok: false, error: e.message }; }
+  }
+
+  async movingOpenDialog(parent) {
+    const r = await dialog.showOpenDialog(parent && !parent.isDestroyed() ? parent : undefined, {
+      title: 'Move in from a file', properties: ['openFile'], filters: [{ name: 'DeskPet moving-homes file', extensions: ['deskpet'] }],
+    });
+    if (r.canceled || !r.filePaths.length) return { ok: false };
+    try { return { ok: true, path: r.filePaths[0], summary: this.movingSummary(trips.readMovingFile(r.filePaths[0])) }; } catch (e) { return { ok: false, error: e.message }; }
+  }
+
+  movingApply(file) {
+    if (this.visitor) return { ok: false, error: `${this.config.petName} is just visiting this computer` };
+    try {
+      const obj = trips.readMovingFile(file);
+      trips.unpackMovingPack(obj, paths.sprites);
+      const note = this.applyTransfer(obj.profile, { quiet: true });
+      const fx = this.companion.event('movedIn');
+      this.applyCompanion(fx);
+      if (!note && !fx.some((f) => f.type === 'say')) this.say(`new home! everything's here, ${this.config.ownerName} ✨`, 5);
+      return { ok: true, note };
+    } catch (e) { return { ok: false, error: e.message }; }
+  }
+
+  /** Opened from a drop, the command line, or the OS: preview, confirm, move in. */
+  async openMovingFile(file) {
+    if (this.visitor) { this.say("I'm just visiting! move in at home 🧳", 3); return; }
+    let obj;
+    try { obj = trips.readMovingFile(file); } catch (e) { this.say(`hmm: ${e.message}`, 4); return; }
+    const { response } = await dialog.showMessageBox({
+      type: 'question', buttons: ['Move in', 'Cancel'], defaultId: 0, cancelId: 1,
+      message: `Move ${this.movingSummary(obj)} in?`,
+      detail: 'This replaces the names, level, stats, and settings on this computer (a backup of the stats is kept).',
+    });
+    if (response !== 0) return;
+    const r = this.movingApply(file);
+    if (!r.ok) this.say(`hmm: ${r.error}`, 4);
+  }
+
+  tripPanelState() {
+    const state = this.tripState;
+    if (!this.visitor && Date.now() - this.drivesAt > 5000) this.refreshDrives();
+    const copy = trips.appCopyInfo({ packaged: app.isPackaged });
+    return {
+      mode: this.visitor ? 'visiting' : state ? 'away' : 'home',
+      drives: this.drives || [],
+      away: state ? { volume: state.volume, leftAt: state.leftAt, minutes: Math.round((Date.now() - state.leftAt) / 60000), present: fs.existsSync(path.join(state.path, 'trip.json')) } : null,
+      visiting: this.visit ? { host: trips.deviceName(), homeName: this.visit.homeName } : null,
+      visitors: this.doors().map(({ path: p, pet, homeName }) => ({ path: p, pet, homeName })),
+      appCopy: { possible: copy.possible, size: copy.size },
+    };
   }
 
   toggleHooks(install) {
@@ -1815,7 +2163,25 @@ if (process.argv.includes('--snapshot')) {
   app.quit();
 } else {
   if (process.platform === 'darwin') app.dock.hide();
+  if (paths.trip) {
+    // A fresh profile for every visit: it's filled from trip.json, and the drive keeps the real copy.
+    fs.rmSync(paths.root, { recursive: true, force: true });
+    fs.mkdirSync(paths.root, { recursive: true });
+  }
   let pet;
+  // A .deskpet file passed on the command line (Windows "Open with", Linux file managers) or by macOS.
+  const movingArg = (argv) => (argv || []).find((a) => /\.deskpet$/i.test(a) && fs.existsSync(a));
+  let pendingMoving = movingArg(process.argv);
+  app.on('open-file', (e, file) => {
+    e.preventDefault();
+    if (!/\.deskpet$/i.test(file)) return;
+    if (pet && pet.win) pet.openMovingFile(file); else pendingMoving = file;
+  });
+  app.on('second-instance', (_e, argv) => {
+    const file = movingArg(argv);
+    if (pet && file) pet.openMovingFile(file);
+    else if (pet) pet.openPanel();
+  });
   const selfTest = process.argv.includes('--self-test');
   if (selfTest) {
     // Make startup failures visible (and fatal) when testing.
@@ -1842,7 +2208,8 @@ if (process.argv.includes('--snapshot')) {
     ipcMain.on('drag-hover', () => { pet.transient = { mood: 'startled', until: now() + 1 }; pet.say("ooh, what's that? 👀", 1.5); });
     ipcMain.on('card-size', (_e, size) => { pet.cardSize = size; if (pet.card.isVisible()) pet.positionCard(); });
     ipcMain.on('card-jump', (_e, pid) => pet.jump(pid));
-    pet.start();
+    if (!pet.start()) return;
+    if (pendingMoving) setTimeout(() => pet.openMovingFile(pendingMoving), 1500);
     // `--wizard-snapshot`: screenshot every setup step to test-output/, then quit.
     if (process.argv.includes('--wizard-snapshot')) {
       pet.openWizard();
@@ -1871,7 +2238,7 @@ if (process.argv.includes('--snapshot')) {
         fs.mkdirSync(out, { recursive: true });
         const wait = (ms) => new Promise((r) => setTimeout(r, ms));
         await wait(1500);
-        for (const page of ['home', 'companion', 'rewards', 'look', 'focus', 'agents', 'behavior', 'account', 'about']) {
+        for (const page of ['home', 'companion', 'rewards', 'look', 'focus', 'agents', 'behavior', 'trips', 'account', 'about']) {
           await pet.panel.webContents.executeJavaScript(`window.__panelShow('${page}')`);
           await wait(page === 'look' || page === 'rewards' ? 1800 : 900);
           fs.writeFileSync(path.join(out, `panel-${page}.png`), (await pet.panel.webContents.capturePage()).toPNG());
@@ -1927,6 +2294,7 @@ if (process.argv.includes('--snapshot')) {
           sessions: pet.sessions.map((s) => `${s.name}: ${s.detail} [${s.precise ? 'hooks' : 'cpu'}]`),
           scans: pet.agents.scanCount, pack: pet.pack && pet.pack.name, menuItems: pet.buildMenu().items.length,
           windowsToStandOn: pet.platforms.platforms.length, inCall: pet.agents.inCall, version: app.getVersion(),
+          trip: pet.tripPanelState(), visitorSaved: pet.visitor ? pet.saveVisit() : undefined, root: paths.root,
         }, null, 2));
         quitApp();
       }, 7000);
@@ -1935,6 +2303,10 @@ if (process.argv.includes('--snapshot')) {
   app.on('window-all-closed', (e) => e.preventDefault());
   app.on('before-quit', () => {
     if (!pet) return;
+    if (pet.visitor) {
+      pet.saveVisit();
+      try { fs.rmSync(path.join(paths.visitors, String(process.pid)), { force: true }); } catch (_) { /* gone already */ }
+    }
     pet.agents.stop();
     pet.platforms.stop();
     pet.stats.saveIfNeeded();

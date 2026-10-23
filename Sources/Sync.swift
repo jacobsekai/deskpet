@@ -20,7 +20,7 @@ final class Sync {
         var newerProfile: [String: Any]?
     }
 
-    private let defaults = UserDefaults.standard
+    private let defaults = appDefaults
     private(set) var devices: [Device] = []
     private(set) var lastSync: Date?
     private(set) var error: String?
@@ -31,12 +31,15 @@ final class Sync {
     let deviceName = Host.current().localizedName ?? "Mac"
 
     init() {
-        if let id = UserDefaults.standard.string(forKey: "syncDeviceID") {
-            deviceID = id
-        } else {
-            deviceID = UUID().uuidString.lowercased()
-            UserDefaults.standard.set(deviceID, forKey: "syncDeviceID")
-        }
+        deviceID = Self.thisDeviceID()
+    }
+
+    /// Identifies this computer for sync and trips (a visitor reads the home app's settings, so it gets the host's id).
+    static func thisDeviceID() -> String {
+        if let id = UserDefaults.standard.string(forKey: "syncDeviceID") { return id }
+        let id = UUID().uuidString.lowercased()
+        UserDefaults.standard.set(id, forKey: "syncDeviceID")
+        return id
     }
 
     var folder: URL? {

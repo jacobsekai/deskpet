@@ -26,9 +26,9 @@ jobs:
           node-version: 22
       - run: npm ci
       - name: Desktop tools the app uses when present
-        run: sudo apt-get update && sudo apt-get install -y xvfb x11-utils wmctrl pulseaudio-utils
+        run: sudo apt-get update && sudo apt-get install -y xvfb x11-utils wmctrl pulseaudio-utils zip unzip
 
-      - name: Companion engine (every conversation, reputation, reminders, sync)
+      - name: Companion engine and trips (conversations, reputation, sync, trips, moving files, hook repair, zips)
         run: npm test
 
       - name: Hook writes session state
@@ -42,6 +42,14 @@ jobs:
 
       - name: Smoke test (starts, scans processes, quits)
         run: xvfb-run -a npx electron . --self-test --no-sandbox | tee self-test.txt && grep -q '"version"' self-test.txt
+
+      - name: Trip visitor (--trip on a folder standing in for a USB drive)
+        run: |
+          mkdir -p /tmp/FakeUSB
+          node -e "require('./src/trips').createTrip({ base: '/tmp/FakeUSB', profile: { app: 'deskpet', v: 1, config: { petName: 'Minori', ownerName: 'CI' }, settings: {}, stats: { xp: 500, days: {} }, companion: {} }, home: { device: 'ci-home', name: 'CI-Home', os: 'macOS' } })"
+          xvfb-run -a npx electron . --trip "/tmp/FakeUSB/DeskPet Trip" --self-test --no-sandbox | tee visit.txt
+          grep -q '"mode": "visiting"' visit.txt
+          node -e "const t=require('/tmp/FakeUSB/DeskPet Trip/trip.json'); console.log('visits', t.visits.length, 'xp', t.profile.stats.xp); if (t.visits.length !== 1) process.exit(1)"
 
       - name: Screenshots (pet, control center, talk window)
         timeout-minutes: 5
