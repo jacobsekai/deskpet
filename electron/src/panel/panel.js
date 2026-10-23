@@ -41,10 +41,11 @@
   const packs = new Map();
   const renderers = new Map();
   const THEMES = [null, '#FF8FB1', '#FF6B6B', '#FFB347', '#7BD389', '#4FC3F7', '#9C88FF', '#2B2D42'];
-  const ICONS = { wander: '🚶', gravity: '🪂', walkOnWindows: '🪟', quietInCalls: '🤫', notifications: '🔔', sounds: '🔊', autoUpdate: '⬆️', startAtLogin: '🚀' };
+  const ICONS = { typeAlong: '⌨️', wander: '🚶', gravity: '🪂', walkOnWindows: '🪟', quietInCalls: '🤫', notifications: '🔔', sounds: '🔊', autoUpdate: '⬆️', startAtLogin: '🚀' };
   const TOGGLES = [
     ['notifications', 'Notifications', 'When agents finish, need you, or error'],
     ['sounds', 'Sounds', 'Purrs, pops, and chimes'],
+    ['typeAlong', 'Type along with me', 'Types on a laptop while you type'],
     ['walkOnWindows', 'Walk on windows', 'Lands on and rides your windows'],
     ['wander', 'Wander around', 'Takes little walks'],
     ['gravity', 'Gravity', 'Falls when dropped. Throw me!'],

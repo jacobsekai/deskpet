@@ -167,6 +167,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     private var notificationsOn: Bool { get { flag("notifications", true) } set { defaults.set(newValue, forKey: "notifications") } }
     private var soundsOn: Bool { get { flag("sounds", true) } set { defaults.set(newValue, forKey: "sounds"); sounds.enabled = newValue } }
     private var walkOnWindows: Bool { get { flag("walkOnWindows", true) } set { defaults.set(newValue, forKey: "walkOnWindows") } }
+    /// While you type, the pet types on its laptop too (otherwise it just bobs along).
+    private var typeAlong: Bool { get { flag("typeAlong", true) } set { defaults.set(newValue, forKey: "typeAlong") } }
+    /// Keeps the typing pose up through short pauses, so the laptop doesn't flicker in and out.
+    private var typingAlongUntil = 0.0
     private var quietInCalls: Bool { get { flag("quietInCalls", true) } set { defaults.set(newValue, forKey: "quietInCalls") } }
     private var autoUpdate: Bool { get { flag("autoUpdate", true) } set { defaults.set(newValue, forKey: "autoUpdate") } }
     private var kiroHooksOn: Bool { get { flag("kiroHooks", false) } set { defaults.set(newValue, forKey: "kiroHooks") } }
@@ -440,7 +444,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         if idle > 240 { return .sleeping }
         if idle > 75 { return .sleepy }
         if walkTarget != nil { return .walking }
-        if sinceKey < 1.2 { return .userTyping }
+        if sinceKey < 1.2 { typingAlongUntil = now + 2 }
+        if now < typingAlongUntil { return typeAlong ? .typing : .userTyping }
         return .idle
     }
 
@@ -2067,7 +2072,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             "blocklist": blocklist, "blockDuringFocus": blockDuringFocus, "strictBlock": strictBlock,
             "look": ["packs": SpritePack.available(), "spritePack": spritePackName, "themeColor": themeHex,
                      "thoughtBubble": thoughtBubble.rawValue, "scale": Double(petView.scale)],
-            "toggles": ["wander": wander, "gravity": gravity, "walkOnWindows": walkOnWindows, "quietInCalls": quietInCalls,
+            "toggles": ["wander": wander, "gravity": gravity, "walkOnWindows": walkOnWindows, "quietInCalls": quietInCalls, "typeAlong": typeAlong,
                         "notifications": notificationsOn, "sounds": soundsOn, "autoUpdate": autoUpdate,
                         "startAtLogin": SMAppService.mainApp.status == .enabled, "startAtLoginSupported": true,
                         "showPrestigeBadge": showPrestigeBadge],
@@ -2434,6 +2439,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             case "walkOnWindows": walkOnWindows = value as? Bool ?? true
             case "quietInCalls": quietInCalls = value as? Bool ?? true
             case "autoUpdate": autoUpdate = value as? Bool ?? true
+            case "typeAlong": typeAlong = value as? Bool ?? true
             default:
                 break
             }

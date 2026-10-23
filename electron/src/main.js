@@ -152,6 +152,8 @@ class Pet {
   get soundsOn() { return this.settings.get('sounds', true); }
   get walkOnWindows() { return this.settings.get('walkOnWindows', true); }
   get quietInCalls() { return this.settings.get('quietInCalls', true); }
+  /** While you type, the pet types on its laptop too (otherwise it just bobs along). */
+  get typeAlong() { return this.settings.get('typeAlong', true); }
   get autoUpdate() { return this.settings.get('autoUpdate', true); }
   get kiroHooksOn() { return this.settings.get('kiroHooks', false); }
   get blocklist() { return this.settings.get('blocklist', BLOCK_DEFAULTS); }
@@ -353,7 +355,9 @@ class Pet {
     if (idle > 240) return 'sleeping';
     if (idle > 75) return 'sleepy';
     if (this.walkTarget !== null) return 'walking';
-    if (sinceKey < 1.2) return 'userTyping';
+    // The pose stays up through short pauses, so the laptop doesn't flicker in and out.
+    if (sinceKey < 1.2) this.typingAlongUntil = t + 2;
+    if (t < (this.typingAlongUntil || 0)) return this.typeAlong ? 'typing' : 'userTyping';
     return 'idle';
   }
 
@@ -1021,7 +1025,7 @@ class Pet {
       blocklist: this.blocklist, blockDuringFocus: this.blockDuringFocus, strictBlock: this.strictBlock,
       look: { packs: listPacks(), spritePack: this.spritePackName, themeColor: this.themeHex, thoughtBubble: this.thoughtBubble, scale: this.scale },
       toggles: {
-        wander: this.wander, gravity: this.gravity, walkOnWindows: this.walkOnWindows, quietInCalls: this.quietInCalls,
+        wander: this.wander, gravity: this.gravity, walkOnWindows: this.walkOnWindows, quietInCalls: this.quietInCalls, typeAlong: this.typeAlong,
         notifications: this.notificationsOn, sounds: this.soundsOn, autoUpdate: this.autoUpdate,
         startAtLogin: loginSupported && !this.visitor && loginItem.get(app), startAtLoginSupported: loginSupported && !this.visitor,
         showPrestigeBadge: this.settings.get('showPrestigeBadge', true),
