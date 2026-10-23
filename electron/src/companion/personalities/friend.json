@@ -113,7 +113,9 @@
     "trip.goHome": ["See you at home, {owner}! Don't forget the drive 🏠🧳", "Bye, {host|everyone}! Time to go home 🏠"],
     "thrown.playful": ["wheee! 🎾", "again! again!", "I'm flying! ✈️", "catch me! 😆"],
     "playtime.start": ["Playtime! Throw me as much as you like 🎾", "Yay, playtime! I promise I won't get dizzy… much 😆"],
-    "playtime.end": ["Phew! That was so fun 😆", "Okay, I'm all played out. Thanks, {owner}! 💕"]
+    "playtime.end": ["Phew! That was so fun 😆", "Okay, I'm all played out. Thanks, {owner}! 💕"],
+    "together.milestone": ["We've spent {time} together now, {owner}! Thank you for keeping me around 💕", "Guess what? That's {time} together! 🎉"],
+    "together.milestone+close": ["{time} together… and I'd happily do a thousand more 💕"]
   },
   "words": ["sunshine", "rainbow", "coffee", "keyboard", "pillow", "blanket", "cookie", "pancake", "garden", "breeze", "thunder", "lantern", "puzzle", "teacup", "bubble", "comet", "galaxy", "planet", "rocket", "island", "ocean", "dolphin", "penguin", "hamster", "panda", "kitten", "puppy", "butterfly", "sunflower", "blossom", "picnic", "popcorn", "noodles", "strawberry", "melody", "guitar", "piano", "violin", "journey", "treasure", "castle", "dragon", "wizard", "marshmallow", "snowflake", "autumn", "winter", "spring", "summer", "midnight", "starlight", "friendship", "adventure", "computer", "monitor", "laptop", "window", "server", "project", "deadline", "weekend", "sandwich", "lemonade", "cupcake", "umbrella", "backpack", "notebook", "crayon", "camera"],
   "topics": [

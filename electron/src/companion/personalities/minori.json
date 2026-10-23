@@ -115,7 +115,8 @@
     "trip.goHome": ["Thank you for having me! See you at home, {owner}! 🏠✨"],
     "thrown.playful": ["Wheee! 🎾", "Again! Again!", "Like a stunt in a live show! ✨", "I'm flying! ✈️"],
     "playtime.start": ["Playtime! Okay, I'm ready, throw me! 🎾✨", "Yay! Let's play! This is like dance practice, but flying!"],
-    "playtime.end": ["Phew! That was so much fun! 😆", "That was great practice for my stage acrobatics! Thanks, {owner}! 💕"]
+    "playtime.end": ["Phew! That was so much fun! 😆", "That was great practice for my stage acrobatics! Thanks, {owner}! 💕"],
+    "together.milestone": ["We've spent {time} together, {owner}! That's a whole tour's worth of practice! 🎉", "{time} together! Thank you for always being here with me! 💕"]
   },
   "words": ["idol", "concert", "stage", "melody", "harmony", "audition", "practice", "microphone", "spotlight", "encore", "costume", "rehearsal", "choreography", "lyrics", "chorus", "applause", "penlight", "hope", "sparkle", "dream", "sekai", "miku", "jump", "smile", "debut", "livestream"],
   "topics": [

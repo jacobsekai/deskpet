@@ -864,6 +864,7 @@ class Pet {
       speaking: !!(this.speech && this.speech.until > t), talking: this.talkOpen,
       attention: !!(top && ['needsYou', 'error'].includes(top.activity)) || !this.win.isVisible(),
       activeMinutes: today.activeMinutes || 0, tasks: today.tasks || 0, focusSessions: today.focusSessions || 0,
+      togetherMinutes: this.stats.togetherMinutes,
     }));
     // Browser tabs change without the app changing, so the title is checked on every tick too.
     if (this.agents.foreground) this.applyCompanion(this.companion.event('app', { name: this.agents.foreground, title: this.agents.foregroundTitle }));
@@ -1014,6 +1015,7 @@ class Pet {
       slots: SLOTS.map((x) => ({ id: x.id, title: x.title })),
       rewards: REWARDS.map((r) => ({ id: r.id, title: r.title, level: r.level, slot: r.slot, value: r.value, unlocked: this.isUnlocked(r), worn: this.isUnlocked(r) && this.wearing(r) })),
       today: this.stats.today,
+      togetherMinutes: this.stats.togetherMinutes,
       sessions: card.rows.map((r, i) => ({ ...r, name: r.title.split(' · ')[0], project: r.title.split(' · ')[1] || '', precise: !r.detail.endsWith('(guessed)'), detail: r.detail.replace(' (guessed)', ''), id: i })),
       focus: { phase: this.focus.phase, label: this.focus.label, remaining: this.focus.remaining, total: (this.focus.phase === 'rest' ? Math.max(5, Math.round(this.focus.minutes / 5)) : this.focus.minutes) * 60, minutes: this.focus.minutes },
       blocklist: this.blocklist, blockDuringFocus: this.blockDuringFocus, strictBlock: this.strictBlock,
@@ -1306,6 +1308,7 @@ class Pet {
     return {
       petName: this.config.petName, level: this.stats.level, progress: this.stats.progress, xpToNext: this.stats.xpToNext,
       today: this.todaySummary(), focus: this.focus.phase === 'off' ? '' : this.focus.label, quiet: this.quiet,
+      together: (() => { const m = this.stats.togetherMinutes; return `⏱ ${m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`} together`; })(),
       rank: this.stats.rankTitle, atMax: this.stats.atMax,
       nextReward: this.stats.canPrestige ? '⭐ Ready to prestige! (tray menu → Rewards)'
         : this.stats.prestige ? '' : (() => { const n = REWARDS.find((r) => r.level > this.stats.level); return n ? `Next reward: ${n.title} at Lv ${n.level}` : ''; })(),

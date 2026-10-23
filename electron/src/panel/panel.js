@@ -179,6 +179,7 @@
     $('#hero-name').textContent = state.names.petName;
     xpBar('#hero-xp-fill', '#hero-xp-text');
     $('#hero-next').textContent = state.nextReward || '';
+    $('#hero-together').textContent = togetherText();
     $('#home-focus').textContent = state.focus.phase === 'off' ? '🍅 Focus 25 min' : `⏹ ${state.focus.label}`;
     const t = state.today;
     const tiles = [
@@ -187,6 +188,16 @@
     ];
     $('#today').innerHTML = tiles.map(([n, l]) => `<div class="tile"><div class="num">${esc(n)}</div><div class="lbl">${esc(l)}</div></div>`).join('');
     sessionRows(state.sessions, $('#home-sessions'));
+  }
+
+  /** "⏱ 42h 10m together since Oct 15" */
+  function togetherText() {
+    const m = state.togetherMinutes || 0;
+    const time = m >= 60000 ? `${Math.round(m / 60).toLocaleString()} hours` : hm(m);
+    const since = state.companion && state.companion.firstMet;
+    const d = since ? new Date(`${since}T12:00:00`) : null;
+    const when = d && !isNaN(d) ? d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: d.getFullYear() === new Date().getFullYear() ? undefined : 'numeric' }) : '';
+    return `⏱ ${time} together${when ? ` since ${when}` : ''}`;
   }
 
   // MARK: Companion
@@ -227,7 +238,7 @@
   function renderCompanion() {
     const c = state.companion;
     if (!c) return;
-    const key = JSON.stringify(c);
+    const key = JSON.stringify([c, state.togetherMinutes]);
     if (key === lastCompanion) return;
     lastCompanion = key;
     const a = c.affection;
@@ -241,7 +252,7 @@
       ? `${state.names.petName} is upset. Kind words, an apology (Talk → Tell…), and time together help.`
       : `Your bond grows when you talk, play, pet, and say goodbye before quitting (up to ${a.todayLeft} more today). Unkindness, too much throwing, and long absences make it shrink.`;
     const n = c.counters || {};
-    $('#cp-stats').innerHTML = `${n.talks || 0} conversations · ${n.games || 0} games (${n.wins || 0} won)<br>${c.topics.seen} of ${c.topics.total} topics heard`;
+    $('#cp-stats').innerHTML = `${esc(togetherText())}<br>${n.talks || 0} conversations · ${n.games || 0} games (${n.wins || 0} won)<br>${c.topics.seen} of ${c.topics.total} topics heard`;
     $('#cp-pet-name').textContent = state.names.petName;
     const tierIndex = c.tiers.findIndex((t) => t.name === a.tier);
     $('#cp-ladder').innerHTML = c.tiers.map((t, i) => `<div class="rung${t.reached ? ' reached' : ''}${i === tierIndex ? ' current' : ''}"><div class="h">${i === 0 ? '🤝' : '♥'.repeat(i)}</div>${esc(t.name)}</div>`).join('');

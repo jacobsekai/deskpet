@@ -63,6 +63,7 @@ final class HoverModel: ObservableObject {
     @Published var progress = 0.0
     @Published var xpToNext = 0
     @Published var today = ""
+    @Published var together = ""
     @Published var focus = ""
     @Published var quiet = false
     @Published var nextReward = ""
@@ -88,6 +89,7 @@ private struct HoverCardView: View {
             }
             ProgressView(value: model.progress).tint(model.accent)
             Text(model.today).font(.system(size: 11)).foregroundColor(.secondary)
+            if !model.together.isEmpty { Text(model.together).font(.system(size: 11)).foregroundColor(.secondary) }
             if !model.nextReward.isEmpty { Text(model.nextReward).font(.system(size: 10.5)).foregroundColor(.secondary) }
             if !model.focus.isEmpty { Text(model.focus).font(.system(size: 11.5, weight: .semibold)) }
             if model.quiet { Text("🤫 Quiet mode: you're on a call").font(.system(size: 11)).foregroundColor(.secondary) }

@@ -65,6 +65,14 @@ class Stats {
   get xpToNext() { return this.atMax ? 0 : Stats.xpNeeded(this.level + 1) - this.levelXP; }
   get rankTitle() { return this.prestige ? `${PRESTIGE.title(this.prestige)} · Lv ${this.level}` : `Lv ${this.level}`; }
 
+  /** Lifetime minutes you've been active with the pet open, on every synced device (pruned days included). */
+  get togetherMinutes() {
+    let m = this.data.archivedMinutes || 0;
+    for (const d of Object.values(this.data.days)) m += d.activeMinutes || 0;
+    for (const d of Object.values(this.remote.days)) m += d.activeMinutes || 0;
+    return m;
+  }
+
   /** This device's contribution, for its sync file. */
   get deviceExport() { return { xp: this.data.xp, days: this.data.days }; }
 
@@ -73,7 +81,7 @@ class Stats {
     const days = { ...this.data.days };
     const { addDays } = require('./sync');
     for (const [k, d] of Object.entries(this.remote.days)) days[k] = addDays(days[k], d);
-    return { xp: this.xp, days, prestige: this.prestige, prestigeBase: this.prestigeBase };
+    return { xp: this.xp, days, prestige: this.prestige, prestigeBase: this.prestigeBase, archivedMinutes: this.data.archivedMinutes || 0 };
   }
 
   /** "Use synced progress": this device starts from zero (a backup is kept) and adds onto the others. */
@@ -137,7 +145,11 @@ class Stats {
     if (!this.dirty) return;
     this.dirty = false;
     const keys = Object.keys(this.data.days).sort();
-    for (const k of keys.slice(0, Math.max(0, keys.length - 400))) delete this.data.days[k];
+    // About a year of history; older days still count toward the time-together total.
+    for (const k of keys.slice(0, Math.max(0, keys.length - 400))) {
+      this.data.archivedMinutes = (this.data.archivedMinutes || 0) + (this.data.days[k].activeMinutes || 0);
+      delete this.data.days[k];
+    }
     fs.mkdirSync(paths.root, { recursive: true });
     fs.writeFileSync(this.file, JSON.stringify(this.data));
   }
@@ -544,6 +556,7 @@ Stats.prototype.absorb = function absorb(trip, departure) {
   const xpBefore = this.xp;
   const gained = Math.max(0, (trip.xp || 0) - (departure.xp || 0));
   this.data.xp += gained;
+  this.data.archivedMinutes = (this.data.archivedMinutes || 0) + Math.max(0, (trip.archivedMinutes || 0) - (departure.archivedMinutes || 0));
   for (const [key, day] of Object.entries(trip.days || {})) {
     const dep = (departure.days || {})[key] || {};
     const local = { ...(this.data.days[key] || {}) };
@@ -569,7 +582,7 @@ Stats.prototype.absorb = function absorb(trip, departure) {
 
 Stats.prototype.replace = function replace(data) {
   if (fs.existsSync(this.file)) fs.copyFileSync(this.file, `${this.file}.bak`);
-  this.data = { xp: data.xp || 0, days: data.days || {}, prestige: data.prestige || 0, prestigeBase: data.prestigeBase || 0 };
+  this.data = { xp: data.xp || 0, days: data.days || {}, prestige: data.prestige || 0, prestigeBase: data.prestigeBase || 0, archivedMinutes: data.archivedMinutes || 0 };
   this.dirty = true;
   this.saveIfNeeded();
 };

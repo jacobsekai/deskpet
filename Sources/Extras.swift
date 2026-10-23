@@ -151,6 +151,8 @@ final class Stats {
         var prestige = 0
         /// Lifetime XP at the last prestige; levels count from here.
         var prestigeBase = 0
+        /// Active minutes from days dropped out of the history, so time together never shrinks.
+        var archivedMinutes = 0
 
         init() {}
 
@@ -160,6 +162,7 @@ final class Stats {
             days = try c.decodeIfPresent([String: Day].self, forKey: .days) ?? [:]
             prestige = try c.decodeIfPresent(Int.self, forKey: .prestige) ?? 0
             prestigeBase = try c.decodeIfPresent(Int.self, forKey: .prestigeBase) ?? 0
+            archivedMinutes = try c.decodeIfPresent(Int.self, forKey: .archivedMinutes) ?? 0
         }
     }
 
@@ -192,6 +195,10 @@ final class Stats {
         guard !atMax else { return 1 }
         let lo = Self.xpNeeded(level), hi = Self.xpNeeded(level + 1)
         return Double(levelXP - lo) / Double(max(1, hi - lo))
+    }
+    /// Lifetime minutes you've been active with the pet open, on every synced device.
+    var togetherMinutes: Int {
+        file.archivedMinutes + file.days.values.reduce(0) { $0 + $1.activeMinutes } + remoteDays.values.reduce(0) { $0 + $1.activeMinutes }
     }
     var xpToNext: Int { atMax ? 0 : Self.xpNeeded(level + 1) - levelXP }
     /// "Lv 42", "Prestige 3 · Lv 42", "💎 Prestige Master · Lv 345"
@@ -324,6 +331,7 @@ final class Stats {
             file.days[key] = (file.days[key] ?? Day()) + delta
         }
         file.xp += gained
+        file.archivedMinutes += max(0, t.archivedMinutes - d.archivedMinutes)
         // Prestiged on the trip: keep the same progress into the new rank.
         if t.prestige > prestige {
             file.prestige = t.prestige
@@ -351,7 +359,10 @@ final class Stats {
         dirty = false
         // Keep about a year of history.
         if file.days.count > 400 {
-            for key in file.days.keys.sorted().prefix(file.days.count - 400) { file.days[key] = nil }
+            for key in file.days.keys.sorted().prefix(file.days.count - 400) {
+                file.archivedMinutes += file.days[key]?.activeMinutes ?? 0
+                file.days[key] = nil
+            }
         }
         if let data = try? JSONEncoder().encode(file) { try? data.write(to: url, options: .atomic) }
     }

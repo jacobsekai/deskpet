@@ -110,7 +110,8 @@
     "trip.goHome": ["*hops back into the drive* home time 🏠🐾"],
     "thrown.playful": ["mrrrow! 🎾", "*zoomies*", "again! *wiggles butt*", "nyoom ✈️"],
     "playtime.start": ["playtime?! *pupils go huge* throw me! 🎾", "*gets into pounce position* ready!"],
-    "playtime.end": ["*flops over* best playtime ever 😸", "*pant pant* okay… nap now 😴"]
+    "playtime.end": ["*flops over* best playtime ever 😸", "*pant pant* okay… nap now 😴"],
+    "together.milestone": ["{time} of lap time together! *proud purr* 😽", "*brings you an imaginary mouse* that's for {time} together 🐭💕"]
   },
   "words": ["whiskers", "catnip", "kitten", "purring", "sunbeam", "cardboard", "salmon", "tuna", "yarn", "mouse", "pounce", "meow", "zoomies", "napping", "scratch", "feather", "paws", "litter", "laser", "bird"],
   "topics": [

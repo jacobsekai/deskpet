@@ -55,6 +55,8 @@
   const OWN_ENTRY = ['you', 'feeling', 'tell', 'goodbye', 'special', 'milestone'];
   /** Topics that only come up on their own: holidays, birthdays, relationship milestones, and coming home from a trip. */
   const HIDDEN = ['special', 'milestone', 'trip'];
+  /** Hours of time together the pet celebrates. */
+  const TOGETHER_HOURS = [1, 10, 24, 50, 100, 250, 500, 1000, 2500, 5000];
   /** Trips kept in the log (control center → Trips). */
   const TRIP_LOG = 30;
 
@@ -750,6 +752,7 @@
       ctx = { idle: 0, ...(c || {}) };
       if (ctx.owner) names.owner = ctx.owner;
       if (ctx.pet) names.pet = ctx.pet;
+      if (typeof ctx.togetherMinutes === 'number') togetherMilestones(ctx.togetherMinutes);
       const t = now();
       const dt = Math.max(0, Math.min(MINUTE, t - lastTick));
       lastTick = t;
@@ -813,6 +816,20 @@
 
       if (dirty && t - lastSave > 5000) save();
       return drain();
+    }
+
+    /** "We've spent 100 hours together!" Time from before this feature counts as already celebrated. */
+    function togetherMilestones(minutes) {
+      const reached = TOGETHER_HOURS.filter((h) => minutes >= h * 60).length;
+      if (typeof state.counters.together !== 'number') { state.counters.together = reached; dirty = true; return; }
+      if (reached <= state.counters.together) return;
+      state.counters.together = reached;
+      const hours = TOGETHER_HOURS[reached - 1];
+      changeAffection(1);
+      effects.push({ type: 'mood', mood: 'done', seconds: 4 });
+      const time = hours === 1 ? '1 hour' : `${hours.toLocaleString('en-US')} hours`;
+      later(0, { type: 'say', text: line('together.milestone', "We've spent {time} together! 💕", { time, hours }), seconds: 7 });
+      dirty = true;
     }
 
     function appChanged(name, title) {

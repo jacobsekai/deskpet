@@ -298,4 +298,17 @@ for (const id of Object.keys(personalities)) {
   }
 }
 
+{
+  // Time-together milestones: existing time doesn't trigger a burst; each new milestone is celebrated once.
+  for (const id of Object.keys(personalities)) {
+    const { e } = make(id);
+    e.tick({ togetherMinutes: 700, idle: 999 });
+    assert.strictEqual(e._state().counters.together, 2, `${id}: existing hours count as celebrated`);
+    const said = e.tick({ togetherMinutes: 1500, idle: 999 }).concat(e.tick({ togetherMinutes: 1500, idle: 999 })).concat(e.tick({ togetherMinutes: 1500, idle: 999 })).filter((f) => f.type === 'say');
+    assert(said.length === 1 && /24 hours/.test(said[0].text), `${id}: 24 hours milestone: ${said.map((f) => f.text)}`);
+    assert.strictEqual(e._state().counters.together, 3);
+    checks++;
+  }
+}
+
 console.log(`companion: ${checks} checks passed`);

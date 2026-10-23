@@ -15,6 +15,7 @@ window.deskpetCard.onModel((m) => {
       <span class="next">${m.atMax ? 'max level' : `${m.xpToNext} XP to Lv ${m.level + 1}`}</span></div>
     <div class="bar"><div style="width:${Math.round(m.progress * 100)}%;background:${m.accent}"></div></div>
     <div class="muted">${esc(m.today)}</div>
+    ${m.together ? `<div class="muted">${esc(m.together)}</div>` : ''}
     ${m.nextReward ? `<div class="muted">${esc(m.nextReward)}</div>` : ''}
     ${m.focus ? `<div class="focus">${esc(m.focus)}</div>` : ''}
     ${m.quiet ? '<div class="muted">🤫 Quiet mode: you\'re on a call</div>' : ''}

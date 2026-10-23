@@ -171,3 +171,4 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 details.text-key { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
 details.text-key summary { cursor: pointer; font-weight: 600; font-size: 13px; color: var(--muted); }
 details.text-key[open] summary { margin-bottom: 8px; }
+.hero-together { font-size: 13px; font-weight: 600; color: var(--muted); margin-top: 4px; }

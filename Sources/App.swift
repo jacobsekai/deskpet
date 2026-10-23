@@ -821,6 +821,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             "quiet": quiet, "speaking": (speech?.until ?? 0) > now, "talking": talkOpen,
             "attention": top.map { [.needsYou, .error].contains($0.activity) } ?? false || !panel.isVisible,
             "activeMinutes": today.activeMinutes, "tasks": today.tasks, "focusSessions": today.focusSessions,
+            "togetherMinutes": stats.togetherMinutes,
         ]
         apply(companion.tick(ctx))
     }
@@ -1175,6 +1176,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         model.progress = stats.progress
         model.xpToNext = stats.xpToNext
         model.today = todaySummary()
+        let together = stats.togetherMinutes
+        model.together = "⏱ \(together >= 60 ? "\(together / 60)h \(together % 60)m" : "\(together)m") together"
         model.focus = focus.phase == .off ? "" : focus.label
         model.quiet = quiet
         model.nextReward = stats.canPrestige ? "⭐ Ready to prestige! (🐾 → Rewards)"
@@ -2054,6 +2057,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
                 ["id": r.rawValue, "title": r.title, "level": r.level, "slot": r.slot.rawValue, "value": r.value,
                  "unlocked": isUnlocked(r), "worn": isUnlocked(r) && wearing(r)] as [String: Any]
             },
+            "togetherMinutes": stats.togetherMinutes,
             "today": ["activeMinutes": d.activeMinutes, "agentMinutes": d.agentMinutes, "tasks": d.tasks, "pets": d.pets,
                       "focusSessions": d.focusSessions, "blocked": d.blocked],
             "sessions": rows,
