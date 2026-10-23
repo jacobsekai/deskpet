@@ -6,7 +6,7 @@ cd "$(dirname "$0")"
 mkdir -p build
 # Universal binary: Apple Silicon and Intel.
 for arch in arm64 x86_64; do
-    swiftc -O -swift-version 5 -target "$arch-apple-macos13.0" -framework AppKit -framework WebKit -framework ServiceManagement -framework SwiftUI -framework UserNotifications -framework CoreAudio -framework CoreMediaIO \
+    swiftc -O -swift-version 5 -target "$arch-apple-macos13.0" -framework AppKit -framework WebKit -framework ServiceManagement -framework SwiftUI -framework UserNotifications -framework CoreAudio -framework CoreMediaIO -framework Carbon \
         -o "build/DeskPet-$arch" Sources/*.swift
 done
 lipo -create -output build/DeskPet build/DeskPet-arm64 build/DeskPet-x86_64

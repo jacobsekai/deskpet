@@ -173,3 +173,6 @@ details.text-key summary { cursor: pointer; font-weight: 600; font-size: 13px; c
 details.text-key[open] summary { margin-bottom: 8px; }
 .hero-together { font-size: 13px; font-weight: 600; color: var(--muted); margin-top: 4px; }
 .water-log { margin: -2px 0 8px; }
+.toggle.panic-row { grid-column: 1 / -1; cursor: default; }
+.toggle.panic-row .segmented button { padding: 6px 10px; font-size: 12px; }
+.toggle.panic-row .warn { color: #d63b2f; }

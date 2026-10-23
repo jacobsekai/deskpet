@@ -190,7 +190,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         set { defaults.set(newValue, forKey: "blocklist") }
     }
     /// On a call: no sounds and no chatty remarks.
-    private var quiet: Bool { quietInCalls && inCall }
+    private var quiet: Bool { (quietInCalls && inCall) || panicHidden }
+
+    // Emergency hide: one shortcut hides the pet and everything it shows, and silences it, until pressed again.
+    private var panicHidden = false
+    private lazy var panicKey = PanicKey { [weak self] in self?.togglePanic() }
+    private var panicKeyID: String {
+        get { defaults.string(forKey: "panicKey") ?? PanicKey.defaultID }
+        set { defaults.set(newValue, forKey: "panicKey") }
+    }
+    private var panicKeyOK = true
+    private var panicKeyLabel: String? { PanicKey.choices.first { $0.id == panicKeyID }?.label }
 
     private var topSession: AgentSession? { sessions.max { $0.activity.rawValue < $1.activity.rawValue } }
 
@@ -270,6 +280,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         RunLoop.main.add(timer, forMode: .common)
 
         sounds.enabled = soundsOn
+        panicKeyOK = panicKey.register(panicKeyID)
         notifier.onClick = { [weak self] pid in self?.jump(to: pid) }
         if notificationsOn && defaults.bool(forKey: "setupComplete") && !Visitor.active { notifier.requestPermission() }
         hoverCard.model.onSelect = { [weak self] pid in self?.jump(to: pid) }
@@ -372,7 +383,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         let hour = Calendar.current.component(.hour, from: Date())
         night = hour >= 23 || hour < 6
         // Greetings, reminders (water, breaks, bedtime), remarks about your day, and conversations it starts.
-        if now - lastCompanionTick >= 5 && !petAway {
+        if now - lastCompanionTick >= 5 && !petAway && !panicHidden {
             lastCompanionTick = now
             tickCompanion(now, idle: idle)
         }
@@ -983,7 +994,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     }
 
     private func post(_ title: String, _ body: String, pid: pid_t) {
-        guard notificationsOn else { return }
+        guard notificationsOn, !panicHidden else { return }
         notifier.post(title: title, body: body, pid: pid)
     }
 
@@ -1615,7 +1626,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             menu.addItem(disabled("\(config.petName) · \(stats.rankTitle) — \(String(describing: mood))"))
         }
         menu.addItem(disabled("Today: \(todaySummary())"))
-        if quiet { menu.addItem(disabled("🤫 Quiet: a mic or camera is in use")) }
+        if panicHidden {
+            menu.addItem(item("🙈 Hidden: show \(config.petName) again\(panicKeyLabel.map { " (\($0))" } ?? "")", #selector(togglePanic)))
+        } else if quiet {
+            menu.addItem(disabled("🤫 Quiet: a mic or camera is in use"))
+        }
         if let update = updater.available { menu.addItem(item("⬆️ Update to v\(update.version)", #selector(installUpdate))) }
         menu.addItem(.separator())
         if sessions.isEmpty {
@@ -1656,6 +1671,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         menu.addItem(item("Rewards (\(stats.rankTitle))…", #selector(openRewardsPage)))
         if !Visitor.active { menu.addItem(item("🧳 Take \(config.petName) on a trip…", #selector(openTripsPage))) }
         menu.addItem(item("Bring \(config.petName) here", #selector(bringHere)))
+        if !panicHidden { menu.addItem(item("🙈 Hide everything now\(panicKeyLabel.map { " (\($0))" } ?? "")", #selector(togglePanic))) }
         menu.addItem(item(panel.isVisible ? "Hide \(config.petName)" : "Show \(config.petName)", #selector(toggleVisible)))
         menu.addItem(.separator())
         menu.addItem(Visitor.active ? item("🏠 Go home (quit)", #selector(quit), key: "q") : item("Quit DeskPet", #selector(quit), key: "q"))
@@ -2072,6 +2088,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             "blocklist": blocklist, "blockDuringFocus": blockDuringFocus, "strictBlock": strictBlock,
             "look": ["packs": SpritePack.available(), "spritePack": spritePackName, "themeColor": themeHex,
                      "thoughtBubble": thoughtBubble.rawValue, "scale": Double(petView.scale)],
+            "panicKey": ["id": panicKeyID, "ok": panicKeyOK, "options": [["id": "off", "label": "Off"]] + PanicKey.choices.map { ["id": $0.id, "label": $0.label] }],
             "toggles": ["wander": wander, "gravity": gravity, "walkOnWindows": walkOnWindows, "quietInCalls": quietInCalls, "typeAlong": typeAlong,
                         "notifications": notificationsOn, "sounds": soundsOn, "autoUpdate": autoUpdate,
                         "startAtLogin": SMAppService.mainApp.status == .enabled, "startAtLoginSupported": true,
@@ -2440,6 +2457,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             case "quietInCalls": quietInCalls = value as? Bool ?? true
             case "autoUpdate": autoUpdate = value as? Bool ?? true
             case "typeAlong": typeAlong = value as? Bool ?? true
+            case "panicKey":
+                panicKeyID = value as? String ?? PanicKey.defaultID
+                panicKeyOK = panicKey.register(panicKeyID)
+                return ["value": panicKeyID, "ok": panicKeyOK]
             default:
                 break
             }
@@ -2550,10 +2571,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     }
 
     @objc private func toggleVisible() {
-        if panel.isVisible { panel.orderOut(nil) } else { panel.orderFrontRegardless() }
+        if panicHidden { return togglePanic() }
+        if panel.isVisible { panel.orderOut(nil) } else if !petAway { panel.orderFrontRegardless() }
+    }
+
+    @objc private func togglePanic() {
+        panicHidden.toggle()
+        sounds.muted = quiet
+        if panicHidden {
+            panel.orderOut(nil)
+            talk?.close()
+            hoverCard.hide()
+            controlCenter?.close()
+            wizard?.close()
+            speech = nil
+            statusItem.button?.title = "🙈"
+        } else {
+            if !petAway { panel.orderFrontRegardless() }
+            statusItem.button?.title = Visitor.active || petAway ? "🧳" : "🐾"
+        }
     }
 
     @objc private func bringHere() {
+        if panicHidden { togglePanic() }
         let m = NSEvent.mouseLocation
         let screen = NSScreen.screens.first { $0.frame.contains(m) } ?? NSScreen.main!
         let origin = NSPoint(x: m.x - size.width / 2, y: screen.visibleFrame.minY)

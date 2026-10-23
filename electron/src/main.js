@@ -2,7 +2,15 @@
 //
 // The main process owns all behavior: agent detection, moods, walking, throwing, resizing, and menus.
 // The renderer only draws the pose it's sent and reports where the pet is for hit testing.
-const { app, BrowserWindow, Tray, Menu, nativeImage, screen, powerMonitor, ipcMain, shell, dialog, Notification, clipboard } = require('electron');
+const { app, BrowserWindow, Tray, Menu, nativeImage, screen, powerMonitor, ipcMain, shell, dialog, Notification, clipboard, globalShortcut } = require('electron');
+
+/** Emergency-hide shortcuts (same choices as PanicKey.swift). */
+const PANIC_KEYS = [
+  { id: 'ctrl-alt-h', label: 'Ctrl+Alt+H', accelerator: 'Control+Alt+H' },
+  { id: 'ctrl-alt-p', label: 'Ctrl+Alt+P', accelerator: 'Control+Alt+P' },
+  { id: 'ctrl-shift-space', label: 'Ctrl+Shift+Space', accelerator: 'Control+Shift+Space' },
+  { id: 'ctrl-alt-shift-h', label: 'Ctrl+Alt+Shift+H', accelerator: 'Control+Alt+Shift+H' },
+];
 const fs = require('fs');
 const path = require('path');
 const { AgentMonitor, PRIORITY, TranscriptTokens, codexState } = require('./agents');
@@ -161,7 +169,35 @@ class Pet {
   get strictBlock() { return this.settings.get('strictBlock', false); }
   toggle(key, fallback) { this.settings.set(key, !this.settings.get(key, fallback)); }
   /** On a call: no sounds and no chatty remarks. */
-  get quiet() { return this.quietInCalls && this.agents.inCall; }
+  get quiet() { return (this.quietInCalls && this.agents.inCall) || this.panicHidden; }
+
+  // Emergency hide: one global shortcut hides the pet and everything it shows, and silences it, until pressed again.
+  get panicKeyID() { return this.settings.get('panicKey', 'ctrl-alt-h'); }
+  get panicKeyLabel() { const k = PANIC_KEYS.find((x) => x.id === this.panicKeyID); return k ? k.label : null; }
+
+  /** Registers the chosen shortcut ("off" turns it off). False if another app already owns it (or on Wayland). */
+  registerPanicKey() {
+    if (this.panicAccelerator) globalShortcut.unregister(this.panicAccelerator);
+    this.panicAccelerator = null;
+    const k = PANIC_KEYS.find((x) => x.id === this.panicKeyID);
+    if (!k) return (this.panicKeyOK = this.panicKeyID === 'off');
+    try { this.panicKeyOK = globalShortcut.register(k.accelerator, () => this.togglePanic()); } catch (_) { this.panicKeyOK = false; }
+    if (this.panicKeyOK) this.panicAccelerator = k.accelerator;
+    return this.panicKeyOK;
+  }
+
+  togglePanic() {
+    this.panicHidden = !this.panicHidden;
+    if (this.panicHidden) {
+      this.win.hide();
+      this.hideCard();
+      for (const w of [this.talk, this.panel, this.wizard]) if (w && !w.isDestroyed()) w.close();
+      this.speech = null;
+    } else if (!this.away) {
+      this.win.showInactive();
+    }
+    this.updateTray();
+  }
 
   get topSession() {
     return this.sessions.reduce((best, s) => (!best || PRIORITY.indexOf(s.activity) > PRIORITY.indexOf(best.activity) ? s : best), null);
@@ -290,7 +326,7 @@ class Pet {
     const hour = new Date().getHours();
     this.night = hour >= 23 || hour < 6;
     // Greetings, reminders (water, breaks, bedtime), remarks about your day, and conversations it starts.
-    if (t - this.lastCompanionTick >= 5) {
+    if (t - this.lastCompanionTick >= 5 && !this.panicHidden) {
       this.lastCompanionTick = t;
       this.tickCompanion(t, idle);
     }
@@ -843,6 +879,7 @@ class Pet {
       { label: `Rewards (${this.stats.rankTitle})…`, click: () => this.openPanel('rewards') },
       ...(away ? [] : [
         { label: `Bring ${pet} here`, click: () => this.bringHere() },
+        ...(this.panicHidden ? [] : [{ label: `🙈 Hide everything now${this.panicKeyLabel ? ` (${this.panicKeyLabel})` : ''}`, click: () => this.togglePanic() }]),
         { label: this.win.isVisible() ? `Hide ${pet}` : `Show ${pet}`, click: () => this.toggleVisible() },
       ]),
       { type: 'separator' },
@@ -1024,6 +1061,7 @@ class Pet {
       focus: { phase: this.focus.phase, label: this.focus.label, remaining: this.focus.remaining, total: (this.focus.phase === 'rest' ? Math.max(5, Math.round(this.focus.minutes / 5)) : this.focus.minutes) * 60, minutes: this.focus.minutes },
       blocklist: this.blocklist, blockDuringFocus: this.blockDuringFocus, strictBlock: this.strictBlock,
       look: { packs: listPacks(), spritePack: this.spritePackName, themeColor: this.themeHex, thoughtBubble: this.thoughtBubble, scale: this.scale },
+      panicKey: { id: this.panicKeyID, ok: this.panicKeyOK !== false, options: [{ id: 'off', label: 'Off' }, ...PANIC_KEYS.map((k) => ({ id: k.id, label: k.label }))] },
       toggles: {
         wander: this.wander, gravity: this.gravity, walkOnWindows: this.walkOnWindows, quietInCalls: this.quietInCalls, typeAlong: this.typeAlong,
         notifications: this.notificationsOn, sounds: this.soundsOn, autoUpdate: this.autoUpdate,
@@ -1055,6 +1093,9 @@ class Pet {
           case 'blocklist': this.settings.set('blocklist', payload.value ? parseBlocklist(payload.value.join('\n')) : BLOCK_DEFAULTS); break;
           case 'spritePack': this.chooseSprites(payload.value || ''); break;
           case 'startAtLogin': loginItem.set(app, !!payload.value); break;
+          case 'panicKey':
+            this.settings.set('panicKey', String(payload.value || 'ctrl-alt-h'));
+            return { value: this.panicKeyID, ok: this.registerPanicKey() };
           default:
             this.settings.set(payload.key, payload.value);
             if (payload.key === 'sounds' && payload.value) this.playSound('pet');
@@ -1142,7 +1183,7 @@ class Pet {
   }
 
   notify(title, body, pid) {
-    if (this.visitor || !this.notificationsOn || !Notification.isSupported()) return;
+    if (this.visitor || this.panicHidden || !this.notificationsOn || !Notification.isSupported()) return;
     const n = new Notification({ title, body, silent: true, icon: path.join(__dirname, '..', 'assets', 'icon.png') });
     if (pid) n.on('click', () => this.jump(pid));
     n.show();
@@ -1640,6 +1681,7 @@ class Pet {
   }
 
   bringHere() {
+    if (this.panicHidden) this.togglePanic();
     if (this.away) return;
     const display = screen.getDisplayNearestPoint(this.cursor);
     const wa = display.workArea;
@@ -1653,6 +1695,7 @@ class Pet {
   }
 
   toggleVisible() {
+    if (this.panicHidden) return this.togglePanic();
     if (this.away) return;
     if (this.win.isVisible()) this.win.hide(); else this.win.showInactive();
   }
@@ -1848,7 +1891,8 @@ class Pet {
   updateTray() {
     if (!this.tray) return;
     const pet = this.config.petName;
-    const tip = this.visitor ? `DeskPet · 🧳 ${pet} is visiting` : this.away ? `DeskPet · 🧳 ${pet} is out with you` : 'DeskPet';
+    const tip = this.panicHidden ? `DeskPet · 🙈 hidden${this.panicKeyLabel ? ` (${this.panicKeyLabel} to show)` : ''}`
+      : this.visitor ? `DeskPet · 🧳 ${pet} is visiting` : this.away ? `DeskPet · 🧳 ${pet} is out with you` : 'DeskPet';
     this.tray.setToolTip(tip);
     if (process.platform === 'darwin') this.tray.setTitle(this.visitor || this.away ? '🧳' : '');
   }
@@ -2220,6 +2264,8 @@ if (process.argv.includes('--snapshot')) {
   }
   app.whenReady().then(() => {
     pet = new Pet();
+    pet.registerPanicKey();
+    app.on('will-quit', () => globalShortcut.unregisterAll());
     ipcMain.on('press', () => pet.onPress());
     ipcMain.on('release', () => pet.onRelease());
     ipcMain.on('resize-start', () => pet.onResizeStart());

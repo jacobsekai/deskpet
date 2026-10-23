@@ -114,7 +114,7 @@
     renderFocus();
     renderAgents();
     // These only change on user action; rebuilding them every second would steal focus and clicks.
-    const staticKey = JSON.stringify([state.look, state.toggles, state.blocklist, state.blockDuringFocus, state.strictBlock, state.names]);
+    const staticKey = JSON.stringify([state.look, state.toggles, state.panicKey, state.blocklist, state.blockDuringFocus, state.strictBlock, state.names]);
     if (staticKey !== lastStatic) {
       lastStatic = staticKey;
       renderLook();
@@ -522,6 +522,22 @@
       row.appendChild(el('div', '', `<div class="title">${esc(title)}</div><div class="desc">${esc(desc)}</div>`));
       row.appendChild(el('div', 'switch'));
       row.addEventListener('click', () => set(key, !state.toggles[key]));
+      box.appendChild(row);
+    }
+    // Emergency hide: a system-wide shortcut that hides the pet and everything it shows until pressed again.
+    const p = state.panicKey;
+    if (p) {
+      const row = el('div', 'toggle panic-row');
+      row.appendChild(el('div', 'icon', '🙈'));
+      row.appendChild(el('div', '', `<div class="title">Emergency hide</div><div class="desc">${p.ok ? 'Press it anywhere to hide the pet, bubbles, and windows; press again to bring them back'
+        : '<span class="warn">That shortcut is taken by another app, so pick another one</span>'}</div>`));
+      const seg = el('div', 'segmented');
+      for (const o of p.options) {
+        const b = el('button', o.id === p.id ? 'on' : '', esc(o.label));
+        b.addEventListener('click', (e) => { e.stopPropagation(); set('panicKey', o.id); });
+        seg.appendChild(b);
+      }
+      row.appendChild(seg);
       box.appendChild(row);
     }
   }

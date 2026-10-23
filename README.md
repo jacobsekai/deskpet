@@ -165,6 +165,9 @@ Control center → **Trips** (or 🐾 → 🧳 Take … on a trip, or Talk → G
 ### Moving homes
 Account → **Moving homes** → **Pack up for moving…** saves one `<Pet>.chr` file with your names, level, prestige, stats, bond, memories, settings, and the sprite pack. On the new computer (macOS, Windows, or Linux), open the file (double-click on macOS), drop it onto the pet, use **Move in from a file…**, or pick it in setup. Text keys (`DESKPET-1:…`) still work under **Use a text key instead**, for everything except the sprite pack.
 
+### Emergency hide
+Press **⌃⌥H** (Mac) or **Ctrl+Alt+H** (Windows/Linux) anywhere to hide the pet, its bubbles, the talk window, the hover card, and the control center at once. Sounds and notifications stay quiet until you press it again (or choose Show from the 🐾/tray menu). Pick a different shortcut, or turn it off, under Behavior → Emergency hide.
+
 ### Updates
 DeskPet checks GitHub Releases every 6 hours (🐾 → Check for updates…) and can update itself in place. On macOS, move the app to Applications first.
 
