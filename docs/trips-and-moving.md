@@ -2,7 +2,7 @@
 
 Both apps (Sources/ for macOS, electron/ for Windows/Linux) implement this identically so files move between them.
 
-## Moving-homes file: `<Pet>.deskpet`
+## Moving-homes file: `<Pet>.chr`
 
 UTF-8 JSON:
 
@@ -14,7 +14,7 @@ UTF-8 JSON:
 
 - `pack` is the active sprite pack: every regular file under it, recursively, skipping `sliced/` and dotfiles. Omitted (null, with a note) above 40 MB.
 - Import: check `app == "deskpet" && kind == "home"`. Preview = transfer summary + " · brings the <name> look". Applying writes the pack to `sprites/<name>/` (overwriting same-named files), then applies `profile` exactly like a transfer key, then `companion.event('movedIn')`.
-- Opening: drag the file onto the pet, the control center's Move in button, the wizard, and opening the file (macOS document type; Windows/Linux: a `.deskpet` path in argv or the second-instance argv).
+- Opening: drag the file onto the pet, the control center's Move in button, the wizard, and opening the file (macOS document type; Windows/Linux: a `.chr` path in argv or the second-instance argv).
 - Text keys (`DESKPET-1:`) still import everywhere.
 
 ## Trip folder: `<drive>/DeskPet Trip/`

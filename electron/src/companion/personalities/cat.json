@@ -107,7 +107,10 @@
     "moving.in": ["*sniffs every corner of the new desktop* …approved. new home! 🏠😸"],
     "moving.out": ["all packed! 📦 *sits in the box* open the file on the new computer and I'll come out"],
     "trip.home.outro.rough": ["*curls up on your desktop next to you* rest now, {owner}. I'll guard the screen 💕"],
-    "trip.goHome": ["*hops back into the drive* home time 🏠🐾"]
+    "trip.goHome": ["*hops back into the drive* home time 🏠🐾"],
+    "thrown.playful": ["mrrrow! 🎾", "*zoomies*", "again! *wiggles butt*", "nyoom ✈️"],
+    "playtime.start": ["playtime?! *pupils go huge* throw me! 🎾", "*gets into pounce position* ready!"],
+    "playtime.end": ["*flops over* best playtime ever 😸", "*pant pant* okay… nap now 😴"]
   },
   "words": ["whiskers", "catnip", "kitten", "purring", "sunbeam", "cardboard", "salmon", "tuna", "yarn", "mouse", "pounce", "meow", "zoomies", "napping", "scratch", "feather", "paws", "litter", "laser", "bird"],
   "topics": [

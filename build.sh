@@ -56,7 +56,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
         <dict>
             <key>CFBundleTypeName</key><string>DeskPet moving-homes file</string>
             <key>CFBundleTypeRole</key><string>Editor</string>
-            <key>LSHandlerRank</key><string>Owner</string>
+            <key>LSHandlerRank</key><string>Default</string>
             <key>LSItemContentTypes</key><array><string>local.deskpet.moving</string></array>
         </dict>
     </array>
@@ -66,7 +66,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
             <key>UTTypeIdentifier</key><string>local.deskpet.moving</string>
             <key>UTTypeDescription</key><string>DeskPet moving-homes file</string>
             <key>UTTypeConformsTo</key><array><string>public.json</string></array>
-            <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>deskpet</string></array></dict>
+            <key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>chr</string><string>deskpet</string></array></dict>
         </dict>
     </array>
 </dict>

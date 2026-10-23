@@ -226,7 +226,7 @@ async function copyApp(info, folder) {
   return true;
 }
 
-// MARK: Moving-homes files (<Pet>.deskpet)
+// MARK: Moving-homes files (<Pet>.chr, like Monika After Story's monika.chr; older builds wrote .deskpet)
 
 function packFiles(dir) {
   const out = {};

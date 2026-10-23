@@ -163,7 +163,7 @@ Control center → **Trips** (or 🐾 → 🧳 Take … on a trip, or Talk → G
 - **Forgot the drive?** **Call … home without the drive** brings the pet back now; the trip's progress is unpacked the next time that drive is plugged in.
 
 ### Moving homes
-Account → **Moving homes** → **Pack up for moving…** saves one `<Pet>.deskpet` file with your names, level, prestige, stats, bond, memories, settings, and the sprite pack. On the new computer (macOS, Windows, or Linux), open the file (double-click on macOS), drop it onto the pet, use **Move in from a file…**, or pick it in setup. Text keys (`DESKPET-1:…`) still work under **Use a text key instead**, for everything except the sprite pack.
+Account → **Moving homes** → **Pack up for moving…** saves one `<Pet>.chr` file with your names, level, prestige, stats, bond, memories, settings, and the sprite pack. On the new computer (macOS, Windows, or Linux), open the file (double-click on macOS), drop it onto the pet, use **Move in from a file…**, or pick it in setup. Text keys (`DESKPET-1:…`) still work under **Use a text key instead**, for everything except the sprite pack.
 
 ### Updates
 DeskPet checks GitHub Releases every 6 hours (🐾 → Check for updates…) and can update itself in place. On macOS, move the app to Applications first.

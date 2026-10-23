@@ -615,7 +615,11 @@
           items: persona.topics.filter((t) => t.category === 'milestone' && state.seen[t.id]).map((t) => ({ id: `replay:${t.id}`, label: fill(t.title || t.id), badge: state.milestones[t.tier] || null })),
         };
       }
-      if (id === 'games') return { back: 'main', items: GAMES.map((g) => ({ id: `game:${g.id}`, label: `${g.icon} ${g.title}` })) };
+      if (id === 'games') {
+        const items = GAMES.map((g) => ({ id: `game:${g.id}`, label: `${g.icon} ${g.title}` }));
+        items.push({ id: 'playtime', label: '🎾 Throw me around! (playtime)', hint: "10 minutes of throws that don't hurt our bond" });
+        return { back: 'main', items };
+      }
       if (id.startsWith('cat:')) {
         const cat = id.slice(4);
         const all = inCat(cat);
@@ -662,6 +666,11 @@
 
     function selectMenu(id) {
       if (id === 'random') return startTopic(pickTopic());
+      if (id === 'playtime') {
+        convo = null;
+        effects.push({ type: 'playtime', minutes: 10 });
+        return node('end', null, null, { close: true });
+      }
       if (id === 'recall') { convo = { topic: null, queue: recallSteps(), pending: null }; return advance(); }
       if (id.startsWith('replay:')) return startTopic(persona.topics.find((t) => t.id === id.slice(7) && t.category === 'milestone' && state.seen[t.id]));
       if (id.startsWith('topic:')) return startTopic(persona.topics.find((t) => t.id === id.slice(6) && available(t)));
@@ -826,6 +835,14 @@
         case 'wake': say(line('wake', 'oh! hi! 😳'), 3); break;
         case 'thrown': {
           const day = dayFlags();
+          // Playtime: throwing is a game, so it never counts as rough handling (and is a little fun).
+          if (data.playful) {
+            day.playThrows = (day.playThrows || 0) + 1;
+            changeAffection(0.1);
+            if (Math.random() < 0.35) say(line('thrown.playful', 'wheee! again! 🎾'), 2.2);
+            dirty = true;
+            break;
+          }
           day.throws = (day.throws || 0) + 1;
           if (day.throws > THROW_LIMIT) {
             changeAffection(-0.3);
@@ -847,6 +864,11 @@
           break;
         }
         case 'app': return appChanged(data.name, data.title);
+        case 'playtimeStart':
+          effects.push({ type: 'mood', mood: 'done', seconds: 2.5 });
+          say(line('playtime.start', 'playtime! throw me as much as you like 🎾'), 4);
+          break;
+        case 'playtimeEnd': say(line('playtime.end', 'phew! that was fun 😆'), 3.5); break;
         case 'tripLeave':
           state.cleanExit = true;
           state.lastSeen = now();

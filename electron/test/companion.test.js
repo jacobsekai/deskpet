@@ -281,4 +281,21 @@ for (const id of Object.keys(personalities)) {
   checks++;
 }
 
+{
+  // Playtime throws never hurt the bond; rough throws past the limit do. The games menu starts playtime.
+  for (const id of Object.keys(personalities)) {
+    const { e } = make(id, { affection: 20 });
+    for (let i = 0; i < 40; i++) e.event('thrown', { playful: true });
+    assert(e.summary().affection.value >= 20, `${id}: playful throws keep affection`);
+    for (let i = 0; i < 20; i++) e.event('thrown');
+    assert(e.summary().affection.value < 24, `${id}: rough throws still count`);
+    assert(e._state().days[Object.keys(e._state().days)[0]].throws === 20, `${id}: playtime throws aren't counted as rough`);
+    e.ui('open', {});
+    const r = e.ui('menu', { id: 'playtime' });
+    assert(r.result.kind === 'end' && r.effects.some((f) => f.type === 'playtime' && f.minutes === 10), `${id}: playtime from the games menu`);
+    for (const ev of ['playtimeStart', 'playtimeEnd']) assert(e.event(ev).some((f) => f.type === 'say'), `${id}: ${ev} line`);
+    checks++;
+  }
+}
+
 console.log(`companion: ${checks} checks passed`);

@@ -189,8 +189,10 @@ enum TripFiles {
 
 // MARK: - Moving-homes files
 
-/// `<Pet>.deskpet`: the transfer-key payload plus the sprite pack, in one JSON file.
+/// `<Pet>.chr` (like Monika After Story's monika.chr): the transfer-key payload plus the sprite pack, in one JSON file.
 enum MovingFile {
+    /// `.deskpet` is what the first builds wrote.
+    static let extensions: Set<String> = ["chr", "deskpet"]
     static let maxPackBytes = 40 * 1024 * 1024
 
     /// Builds the file. The note says if the sprite pack had to stay behind.

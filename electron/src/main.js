@@ -293,6 +293,7 @@ class Pet {
       this.tickCompanion(t, idle);
     }
 
+    if (this.playUntil && this.playUntil <= Date.now()) this.endPlaytime();
     const finished = this.focus.tick();
     if (finished === 'focus') {
       this.transient = { mood: 'done', until: t + 3 };
@@ -406,6 +407,11 @@ class Pet {
     if (!p.caption && this.focus.phase !== 'off') {
       p.caption = this.focus.label;
       p.captionColor = this.focus.phase === 'focus' ? '#FF3B30' : '#A2845E';
+    }
+    if (!p.caption && this.playing) {
+      const left = Math.round((this.playUntil - Date.now()) / 1000);
+      p.caption = `🎾 playtime ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+      p.captionColor = '#34C759';
     }
     if (this.speech && this.speech.until > t) p.bubble = this.speech.text;
     if (this.xpPopup && t - this.xpPopup.at < 1.4) { p.xpText = `+${this.xpPopup.amount} XP`; p.xpAge = t - this.xpPopup.at; }
@@ -713,8 +719,21 @@ class Pet {
     if (speed > 1200) this.say('yeeeet! 🚀', 1.2);
     if (speed > 400) {
       this.gainXP(3, true, (d) => { d.throwsCount++; });
-      this.applyCompanion(this.companion.event('thrown'));
+      this.applyCompanion(this.companion.event('thrown', { playful: this.playing }));
     }
+  }
+
+  /** Playtime: until it ends, throws are a game and never hurt the bond. */
+  get playing() { return (this.playUntil || 0) > Date.now(); }
+
+  startPlaytime(minutes = 10) {
+    this.playUntil = Date.now() + minutes * 60000;
+    this.applyCompanion(this.companion.event('playtimeStart'));
+  }
+
+  endPlaytime() {
+    this.playUntil = 0;
+    this.applyCompanion(this.companion.event('playtimeEnd'));
   }
 
   // MARK: Size & sprites
@@ -816,6 +835,7 @@ class Pet {
       this.focus.phase === 'off'
         ? { label: '🍅 Focus for 25 minutes', click: () => this.startFocus(25) }
         : { label: `⏹ Stop focus (${this.focus.label})`, click: () => this.focus.stop() },
+      { label: this.playing ? '⏹ Stop playtime' : `🎾 Playtime: throw ${this.config.petName} around (10 min)`, click: () => (this.playing ? this.endPlaytime() : this.startPlaytime(10)) },
       { label: `Rewards (${this.stats.rankTitle})…`, click: () => this.openPanel('rewards') },
       ...(away ? [] : [
         { label: `Bring ${pet} here`, click: () => this.bringHere() },
@@ -860,6 +880,7 @@ class Pet {
         case 'tier': if (!f.down) this.playSound('level-up'); break;
         case 'openTalk': if (!this.away) this.openTalk(f.topic || null); break;
         case 'trip': if (!this.visitor) this.openPanel('trips'); break;
+        case 'playtime': this.startPlaytime(f.minutes || 10); break;
         case 'quit':
           setTimeout(() => {
             if (this.talk && !this.talk.isDestroyed()) this.talk.close();
@@ -1361,7 +1382,7 @@ class Pet {
   // MARK: Sprite pack files
 
   async onDropFiles(files) {
-    const home = (files || []).find((f) => /\.deskpet$/i.test(f));
+    const home = (files || []).find((f) => /\.(chr|deskpet)$/i.test(f));
     if (home) return this.openMovingFile(home);
     try {
       const name = await importPack(files, this.spritePackName);
@@ -1998,7 +2019,7 @@ class Pet {
     setTimeout(() => this.quit(), 1600);
   }
 
-  // MARK: Moving homes (<Pet>.deskpet files)
+  // MARK: Moving homes (<Pet>.chr files)
 
   movingSummary(obj) {
     return transferKey.summary(obj.profile) + (obj.pack && obj.pack.name ? ` · brings the ${obj.pack.name} look` : '');
@@ -2006,7 +2027,7 @@ class Pet {
 
   async movingPackDialog(parent) {
     const r = await dialog.showSaveDialog(parent && !parent.isDestroyed() ? parent : undefined, {
-      title: `Pack up ${this.config.petName}`, defaultPath: `${this.config.petName}.deskpet`, filters: [{ name: 'DeskPet moving-homes file', extensions: ['deskpet'] }],
+      title: `Pack up ${this.config.petName}`, defaultPath: `${this.config.petName}.chr`, filters: [{ name: 'DeskPet moving-homes file', extensions: ['chr'] }],
     });
     if (r.canceled || !r.filePath) return { ok: false };
     try {
@@ -2022,7 +2043,7 @@ class Pet {
 
   async movingOpenDialog(parent) {
     const r = await dialog.showOpenDialog(parent && !parent.isDestroyed() ? parent : undefined, {
-      title: 'Move in from a file', properties: ['openFile'], filters: [{ name: 'DeskPet moving-homes file', extensions: ['deskpet'] }],
+      title: 'Move in from a file', properties: ['openFile'], filters: [{ name: 'DeskPet moving-homes file', extensions: ['chr', 'deskpet'] }],
     });
     if (r.canceled || !r.filePaths.length) return { ok: false };
     try { return { ok: true, path: r.filePaths[0], summary: this.movingSummary(trips.readMovingFile(r.filePaths[0])) }; } catch (e) { return { ok: false, error: e.message }; }
@@ -2169,12 +2190,12 @@ if (process.argv.includes('--snapshot')) {
     fs.mkdirSync(paths.root, { recursive: true });
   }
   let pet;
-  // A .deskpet file passed on the command line (Windows "Open with", Linux file managers) or by macOS.
-  const movingArg = (argv) => (argv || []).find((a) => /\.deskpet$/i.test(a) && fs.existsSync(a));
+  // A .chr moving-homes file passed on the command line (Windows "Open with", Linux file managers) or by macOS.
+  const movingArg = (argv) => (argv || []).find((a) => /\.(chr|deskpet)$/i.test(a) && fs.existsSync(a));
   let pendingMoving = movingArg(process.argv);
   app.on('open-file', (e, file) => {
     e.preventDefault();
-    if (!/\.deskpet$/i.test(file)) return;
+    if (!/\.(chr|deskpet)$/i.test(file)) return;
     if (pet && pet.win) pet.openMovingFile(file); else pendingMoving = file;
   });
   app.on('second-instance', (_e, argv) => {

@@ -121,6 +121,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         set { defaults.set(newValue, forKey: "trip") }
     }
     private var petAway: Bool { tripState != nil }
+    /// Playtime: until then, throws are a game and never hurt the bond.
+    private var playUntil: Date?
+    private var playing: Bool { (playUntil ?? .distantPast) > Date() }
     private var lastTripWatch = 0.0
     private var tripLaunchCheck = true
     /// Other people's pets on drives plugged in here, by trip folder path.
@@ -199,7 +202,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
 
     /// Opening a moving-homes file (double-click, or dragging it onto the app icon).
     func application(_ application: NSApplication, open urls: [URL]) {
-        if let url = urls.first(where: { $0.pathExtension.lowercased() == "deskpet" }) {
+        if let url = urls.first(where: { MovingFile.extensions.contains($0.pathExtension.lowercased()) }) {
             DispatchQueue.main.async { self.confirmMoveIn(url) }
         }
     }
@@ -379,6 +382,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             inCall = CallDetector.inCall()
             sounds.muted = quiet
         }
+        if let until = playUntil, until <= Date() { endPlaytime() }
         if let finished = focus.tick() {
             if finished == .focus {
                 transient = (.done, now + 3)
@@ -512,6 +516,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         if p.caption == nil && focus.phase != .off {
             p.caption = focus.label
             p.captionColor = focus.phase == .focus ? .systemRed : .systemBrown
+        }
+        if p.caption == nil, let until = playUntil, until > Date() {
+            let left = Int(until.timeIntervalSinceNow)
+            p.caption = String(format: "🎾 playtime %d:%02d", left / 60, left % 60)
+            p.captionColor = .systemGreen
         }
         if let s = speech, s.until > now { p.bubble = s.text }
         if let popup = xpPopup, now - popup.at < 1.4 { p.xpText = "+\(popup.amount) XP"; p.xpAge = now - popup.at }
@@ -831,6 +840,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
                 sounds.play(.needsYou)
             case "tier":
                 if f["down"] as? Bool != true { sounds.play(.levelUp) }
+            case "playtime":
+                startPlaytime(minutes: f["minutes"] as? Double ?? 10)
             case "openTalk":
                 openTalk(topic: f["topic"] as? String)
             case "trip":
@@ -939,8 +950,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         if speed > 1200 { say("yeeeet! 🚀", for: 1.2) }
         if speed > 400 {
             gainXP(3, play: true) { $0.throwsCount += 1 }
-            apply(companion.event("thrown"))
+            apply(companion.event("thrown", ["playful": playing]))
         }
+    }
+
+    @objc private func togglePlaytime() {
+        if playing { endPlaytime() } else { startPlaytime(minutes: 10) }
+    }
+
+    private func startPlaytime(minutes: Double) {
+        playUntil = Date().addingTimeInterval(minutes * 60)
+        apply(companion.event("playtimeStart"))
+    }
+
+    private func endPlaytime() {
+        playUntil = nil
+        apply(companion.event("playtimeEnd"))
     }
 
     // MARK: - Attention, stats, and the hover card
@@ -1205,7 +1230,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     }
 
     func petReceivedFiles(_ urls: [URL]) {
-        if let url = urls.first(where: { $0.pathExtension.lowercased() == "deskpet" }) { return confirmMoveIn(url) }
+        if let url = urls.first(where: { MovingFile.extensions.contains($0.pathExtension.lowercased()) }) { return confirmMoveIn(url) }
         do {
             let name = try PackArchive.importItems(urls, currentPack: spritePackName)
             spritePackName = name
@@ -1619,6 +1644,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         } else {
             menu.addItem(item("⏹ Stop focus (\(focus.label))", #selector(stopFocus)))
         }
+        menu.addItem(item(playing ? "⏹ Stop playtime" : "🎾 Playtime: throw \(config.petName) around (10 min)", #selector(togglePlaytime)))
         menu.addItem(item("Rewards (\(stats.rankTitle))…", #selector(openRewardsPage)))
         if !Visitor.active { menu.addItem(item("🧳 Take \(config.petName) on a trip…", #selector(openTripsPage))) }
         menu.addItem(item("Bring \(config.petName) here", #selector(bringHere)))
@@ -1911,11 +1937,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
 
     // MARK: - Moving homes
 
-    private static let movingType = UTType(filenameExtension: "deskpet") ?? .data
+    private static let movingType = UTType(filenameExtension: "chr") ?? .data
 
     private func packForMoving() -> [String: Any] {
         let save = NSSavePanel()
-        save.nameFieldStringValue = "\(config.petName).deskpet"
+        save.nameFieldStringValue = "\(config.petName).chr"
         save.allowedContentTypes = [Self.movingType]
         NSApp.activate(ignoringOtherApps: true)
         guard save.runModal() == .OK, let url = save.url else { return ["ok": false] }
@@ -1931,7 +1957,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
 
     private func openMovingFile() -> [String: Any] {
         let open = NSOpenPanel()
-        open.allowedContentTypes = [Self.movingType, .json]
+        open.allowedContentTypes = [Self.movingType, UTType(filenameExtension: "deskpet") ?? .data, .json]
         NSApp.activate(ignoringOtherApps: true)
         guard open.runModal() == .OK, let url = open.url else { return ["ok": false] }
         do {
