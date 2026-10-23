@@ -16,7 +16,7 @@ const MOODS = new Set(['happy', 'love', 'excited', 'proud', 'thinking', 'sleepy'
 
 function lint(steps, where) {
   for (const s of [].concat(steps || [])) {
-    if (typeof s === 'string') { assert(!/\{(?!owner|pet|name|mem:|timeOfDay|weekday|tier|value|hours|tasks|focus|time|places|count|host|home|sips|sipsText|today|todayText|breaks|other|title|emoji|unit|valueText|minutes)[^}]*\}/.test(s), `${where}: unknown placeholder in "${s}"`); continue; }
+    if (typeof s === 'string') { assert(!/\{(?!owner|pet|name|mem:|timeOfDay|weekday|tier|value|hours|tasks|focus|time|places|count|host|home|sips|sipsText|today|todayText|breaks|other|title|emoji|unit|valueText|minutes|gift|need)[^}]*\}/.test(s), `${where}: unknown placeholder in "${s}"`); continue; }
     if (Array.isArray(s)) { lint(s, where); continue; }
     for (const k of Object.keys(s)) assert(STEP_KEYS.has(k), `${where}: unknown step key "${k}"`);
     if (s.mood) assert(MOODS.has(s.mood), `${where}: unknown mood ${s.mood}`);
@@ -426,6 +426,42 @@ for (const id of Object.keys(personalities)) {
     for (const ev of [['playdate', { other: 'Biscuit', first: true }], ['eventStart', { id: 'halloween', title: 'Halloween' }], ['eventEarned', { id: 'halloween', title: 'Witch hat' }], ['meetingSoon', { title: 'Standup', minutes: 5 }], ['meetingNow', { title: 'Standup' }]]) {
       const out = e.event(ev[0], ev[1]).filter((f) => f.type === 'say');
       assert(out.length && !/\{[a-z]+\}/i.test(out[0].text), `${id}: ${ev[0]}: ${out.map((f) => f.text)}`);
+    }
+    checks++;
+  }
+}
+
+{
+  // Gifts: locked until Friends; every personality gift plays; aliases and file names normalize; too-soon gifts aren't consumed.
+  for (const id of Object.keys(personalities)) {
+    const locked = make(id).e;
+    locked.ui('open', {});
+    const l = locked.ui('menu', { id: 'gift' });
+    assert(l.result.kind !== 'pickGift' && /\S/.test(l.result.text || ''), `${id}: gifts locked for new friends`);
+    const { e } = make(id, { affection: 600 });
+    const gifts = e._persona().gifts;
+    assert(Object.keys(gifts).length >= 8, `${id}: has gifts`);
+    e.ui('open', {});
+    assert.strictEqual(e.ui('menu', { id: 'gift' }).result.kind, 'pickGift');
+    for (const [gid, g] of Object.entries(gifts)) {
+      lint(g.steps, `${id}/gift ${gid}`);
+      const file = `${(g.aliases && g.aliases[0]) || gid}.gift`.replace(/_/g, ' ').toUpperCase();
+      const r = e.ui('gift', { file });
+      assert(r.effects.some((f) => f.type === 'consumeGift' && f.id === gid), `${id}: ${file} → ${gid} consumed`);
+      let n = r.result;
+      for (let i = 0; i < 10 && n.kind !== 'menu'; i++) { assert(!/\{[a-z]+\}/i.test(n.text || ''), `${id}: ${n.text}`); n = e.ui('next').result; }
+    }
+    const again = e.ui('gift', { file: Object.keys(gifts)[0] });
+    assert(again.effects.some((f) => f.type === 'consumeGift') && /\S/.test(again.result.text), `${id}: regift`);
+    const unknown = e.ui('gift', { file: 'Mystery Rock.gift' });
+    assert(/mystery rock/i.test(unknown.result.text), `${id}: unknown gift named: ${unknown.result.text}`);
+    assert(e.summary().gifts.received.some((x) => x.id === 'mystery_rock'), `${id}: received list`);
+    const special = Object.entries(gifts).find(([, g]) => g.tier);
+    if (special) {
+      const mid = make(id, { affection: 20 }).e;
+      const r = mid.ui('gift', { file: special[0] });
+      assert(!r.effects.some((f) => f.type === 'consumeGift'), `${id}: ${special[0]} too soon, kept`);
+      assert(!/\{[a-z]+\}/i.test(r.result.text), `${id}: ${r.result.text}`);
     }
     checks++;
   }

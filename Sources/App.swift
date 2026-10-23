@@ -121,6 +121,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         set { defaults.set(newValue, forKey: "trip") }
     }
     private var petAway: Bool { tripState != nil }
+    /// The .gift file being given (picked in the talk window or dropped on the pet).
+    private var pendingGift: URL?
     /// Playtime: until then, throws are a game and never hurt the bond.
     private var playUntil: Date?
     private var playing: Bool { (playUntil ?? .distantPast) > Date() }
@@ -930,6 +932,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
                 if f["down"] as? Bool != true { sounds.play(.levelUp) }
             case "playtime":
                 startPlaytime(minutes: f["minutes"] as? Double ?? 10)
+            case "consumeGift":
+                if let gift = pendingGift { GiftFiles.consume(gift) }
+                pendingGift = nil
             case "openTalk":
                 openTalk(topic: f["topic"] as? String)
             case "trip":
@@ -990,6 +995,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         case "log":
             NSLog("DeskPet talk: \(payload["message"] as? String ?? "")")
             return ["ok": true]
+        case "pickGift":
+            let open = NSOpenPanel()
+            open.directoryURL = GiftFiles.ensureFolder()
+            open.allowedContentTypes = [UTType(filenameExtension: "gift") ?? .data]
+            open.prompt = "Give"
+            open.message = "Choose a .gift file"
+            NSApp.activate(ignoringOtherApps: true)
+            guard open.runModal() == .OK, let url = open.url else { return ["ok": false] }
+            pendingGift = url
+            return ["ok": true, "file": url.lastPathComponent]
         default:
             let r = companion.ui(action, payload)
             apply(r.effects)
@@ -1335,6 +1350,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     }
 
     func petReceivedFiles(_ urls: [URL]) {
+        // A .gift file dropped on the pet: open the talk and give it.
+        if let gift = urls.first(where: { $0.pathExtension.lowercased() == "gift" }) {
+            pendingGift = gift
+            return openTalk(topic: "gift:\(GiftFiles.topicID(gift))")
+        }
         if let url = urls.first(where: { MovingFile.extensions.contains($0.pathExtension.lowercased()) }) { return confirmMoveIn(url) }
         do {
             let name = try PackArchive.importItems(urls, currentPack: spritePackName)
@@ -2399,6 +2419,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
                 }
             }
             return later
+        case "giftsFolder":
+            NSWorkspace.shared.open(GiftFiles.ensureFolder())
+            return ["ok": true]
+        case "giftMake":
+            guard let url = GiftFiles.make(payload["name"] as? String ?? "") else { return ["ok": false, "error": "type a gift name"] }
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+            return ["ok": true, "file": url.lastPathComponent]
         case "tripDrives":
             return ["drives": TripFiles.drives().map { ["path": $0.url.path, "name": $0.name] }]
         case "tripChooseFolder":

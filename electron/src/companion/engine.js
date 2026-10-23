@@ -45,6 +45,11 @@
     { id: 'strawberry', emoji: '🍓', title: 'Strawberry', cost: 8, energy: 20, fun: 20 },
     { id: 'toy', emoji: '🧸', title: 'Toy', cost: 10, energy: 0, fun: 40 },
   ];
+  /** Gifts (MAS-style .gift files) unlock at this tier; single gifts can ask for a closer one. */
+  const GIFT_TIER = 'friends';
+  /** "Haruka Merch.gift", "haruka-merch", "HARUKA_MERCH" → "haruka_merch" */
+  const giftId = (s) => String(s || '').replace(/\.gift$/i, '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40);
+  const giftLabel = (id) => id.replace(/_/g, ' ');
   /** Days of per-day flags kept (Insights shows two weeks). */
   const DAY_HISTORY = 35;
   /** Minutes of activity between conversations the pet starts. */
@@ -156,6 +161,8 @@
       firstMet: typeof s.firstMet === 'string' ? s.firstMet : dayKey(),
       trips: Array.isArray(s.trips) ? s.trips.filter((t) => isObj(t) && t.id).slice(-TRIP_LOG) : [],
       checkins: normalizeCheckins(s.checkins),
+      gifts: Object.fromEntries(Object.entries(isObj(s.gifts) ? s.gifts : {}).filter(([k, v]) => isObj(v) && giftId(k) === k)
+        .map(([k, v]) => [k, { name: clean(v.name, 40) || giftLabel(k), count: Math.max(1, Math.floor(num(v.count, 1))), first: String(v.first || dayKey()) }])),
       journal: normalizeJournal(s.journal),
       needs: {
         energy: clamp(num(isObj(s.needs) && s.needs.energy, 80)), fun: clamp(num(isObj(s.needs) && s.needs.fun, 80)),
@@ -285,13 +292,14 @@
         pools,
         topics: [...topics.values()],
         categories: { ...(base ? base.categories : {}), ...(p.categories || {}) },
+        gifts: p.replaceGifts ? { ...(p.gifts || {}) } : { ...(base ? base.gifts : {}), ...(p.gifts || {}) },
       tierNames: { ...(base ? base.tierNames : {}), ...(p.tierNames || {}) },
         words: [...new Set([...(p.replaceWords || !base ? [] : base.words), ...(p.words || [])])],
       };
     }
 
     function setPersonality(p, source) {
-      const resolved = resolve(p, 0) || resolve('friend', 0) || { id: 'none', name: 'None', pools: {}, topics: [], categories: {}, words: [] };
+      const resolved = resolve(p, 0) || resolve('friend', 0) || { id: 'none', name: 'None', pools: {}, topics: [], categories: {}, words: [], gifts: {} };
       persona = resolved;
       personaInfo = { id: resolved.id, name: resolved.name, source: source || 'built-in' };
       if (convo) convo = null;
@@ -652,6 +660,65 @@
       dirty = true;
     }
 
+    // MARK: Gifts
+
+    /** Personality gift entry for a file name, by id or alias. */
+    function findGift(id) {
+      const gifts = persona.gifts || {};
+      if (gifts[id]) return { id, gift: gifts[id] };
+      for (const [gid, g] of Object.entries(gifts)) if ((g.aliases || []).some((a) => giftId(a) === id)) return { id: gid, gift: g };
+      return null;
+    }
+
+    function giftAsk() {
+      const need = TIERS.findIndex((t) => t.id === GIFT_TIER);
+      if (tierIndex() < need) {
+        convo = { topic: null, queue: [{ pool: 'gift.locked', mood: 'nervous' }], pending: null, vars: { need: tierName(need) } };
+        return advance();
+      }
+      convo = null;
+      // The talk window asks the host for a .gift file, then calls ui('gift', { file }) (or 'giftCancel').
+      return node('pickGift', line('gift.ask', 'A gift? For me?! 🎁 Which one?'), 'excited');
+    }
+
+    /** Gives the gift named by a .gift file. Consumed (effect) unless it's too soon for this one. */
+    function giveGift(file) {
+      const raw = giftId(file);
+      if (!raw) return menuNode('main');
+      const found = findGift(raw);
+      const id = found ? found.id : raw;
+      const g = found ? found.gift : null;
+      const name = (g && g.name) || giftLabel(raw);
+      const vars = { gift: name };
+      const need = TIERS.findIndex((t) => t.id === ((g && g.tier) || GIFT_TIER));
+      if (tierIndex() < need) {
+        const reply = g && g.tooSoon ? { say: g.tooSoon, mood: 'nervous' } : { pool: 'gift.tooSoon', mood: 'nervous' };
+        convo = { topic: null, queue: [reply], pending: null, vars: { ...vars, need: tierName(need) } };
+        return advance();
+      }
+      effects.push({ type: 'consumeGift', id });
+      const prev = state.gifts[id];
+      state.gifts[id] = { name, count: (prev ? prev.count : 0) + 1, first: prev ? prev.first : dayKey() };
+      dirty = true;
+      if (prev) {
+        changeAffection(0.5);
+        convo = { topic: null, queue: [{ pool: 'gift.again', mood: 'happy' }], pending: null, vars };
+        return advance();
+      }
+      changeAffection(g ? (g.affection != null ? g.affection : 3) : 2);
+      needsBoost(10, 15);
+      return startTopic({ id: `gift_${id}`, category: 'gift', affection: 0, confetti: true, steps: g ? g.steps || [{ pool: 'gift.known' }] : [{ pool: 'gift.unknown', mood: 'happy' }] }, vars);
+    }
+
+    function giftSummary() {
+      const need = TIERS.findIndex((t) => t.id === GIFT_TIER);
+      const ideas = Object.entries(persona.gifts || {}).filter(([id, g]) => !state.gifts[id] && !g.secret).map(([, g]) => g.name).slice(0, 4);
+      return {
+        unlocked: tierIndex() >= need, tier: tierName(need), ideas,
+        received: Object.entries(state.gifts).map(([id, g]) => ({ id, name: g.name, count: g.count, first: g.first })).sort((a, b) => (a.first < b.first ? 1 : -1)),
+      };
+    }
+
     // MARK: Check-ins
 
     const checkinById = (id) => state.checkins.find((c) => c.id === id);
@@ -833,6 +900,8 @@
         if (inCat('feeling').length) items.push({ id: 'cat:feeling', label: "💭 I'm feeling…" });
         if (inCat('tell').length) items.push({ id: 'cat:tell', label: `💌 Tell ${names.pet}…` });
         items.push({ id: 'games', label: '🎮 Play a game' });
+        const giftsOpen = tierIndex() >= TIERS.findIndex((t) => t.id === GIFT_TIER);
+        items.push({ id: 'gift', label: "🎁 I'd like to give you a gift", hint: giftsOpen ? null : `🔒 once we're ${tierName(TIERS.findIndex((t) => t.id === GIFT_TIER))}` });
         items.push({ id: 'recall', label: '🧠 What do you know about me?' });
         if (persona.topics.some((t) => t.category === 'milestone' && state.seen[t.id])) items.push({ id: 'memories', label: '📔 Our special moments' });
         if (inCat('goodbye').length) items.push({ id: 'cat:goodbye', label: '👋 Goodbye…' });
@@ -909,6 +978,8 @@
 
     function selectMenu(id) {
       if (id === 'random') return startTopic(pickTopic());
+      if (id === 'gift') return giftAsk();
+      if (id.startsWith('gift:')) return giveGift(id.slice(5));
       if (id.startsWith('checkin:')) {
         const c = checkinById(id.slice(8));
         if (c) { const { topic, vars } = checkinTopic(c); return startTopic(topic, vars); }
@@ -1293,6 +1364,11 @@
           result = summary();
           break;
         case 'buyTreat': buyTreat(String(payload.id || '')); result = summary(); break;
+        case 'gift': result = giveGift(String(payload.file || payload.id || '')); break;
+        case 'giftCancel':
+          convo = { topic: null, queue: [{ pool: 'gift.cancel' }], pending: null };
+          result = advance();
+          break;
         case 'setting': result = setSetting(payload.key, payload.value); break;
         case 'forget': forget(String(payload.key || '')); result = summary(); break;
         case 'remember': {
@@ -1335,6 +1411,7 @@
         firstMet: state.firstMet,
         offer: !!offer,
         trips: state.trips.slice(-10).reverse(),
+        gifts: giftSummary(),
         checkins: checkinSummary(),
         checkinEvery: CHECKIN_EVERY,
         needs: needsSummary(),
@@ -1353,7 +1430,7 @@
 
     /** What travels in sync profiles and transfer keys (no timers or per-day flags). */
     function exportData() {
-      return { affection: state.affection, memory: state.memory, seen: state.seen, milestones: state.milestones, settings: state.settings, counters: state.counters, firstMet: state.firstMet, trips: state.trips, checkins: state.checkins, journal: state.journal, needs: state.needs };
+      return { affection: state.affection, memory: state.memory, seen: state.seen, milestones: state.milestones, settings: state.settings, counters: state.counters, firstMet: state.firstMet, trips: state.trips, checkins: state.checkins, journal: state.journal, needs: state.needs, gifts: state.gifts };
     }
 
     /** Sync: keeps the higher affection, the newer of each memory, and every topic either device has seen. */
@@ -1369,6 +1446,7 @@
       for (const k of Object.keys(incoming.counters)) state.counters[k] = Math.max(state.counters[k] || 0, num(incoming.counters[k], 0));
       if (incoming.firstMet < state.firstMet) state.firstMet = incoming.firstMet;
       if (Array.isArray(data.checkins)) state.checkins = incoming.checkins;
+      for (const [k, v] of Object.entries(incoming.gifts)) if (!state.gifts[k] || state.gifts[k].count < v.count) state.gifts[k] = v;
       for (const [d, e] of Object.entries(incoming.journal)) if (!state.journal[d]) state.journal[d] = e;
       if (isObj(data.needs)) state.needs.coins = Math.max(state.needs.coins, incoming.needs.coins);
       const ids = new Set(state.trips.map((t) => t.id));

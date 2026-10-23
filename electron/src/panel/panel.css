@@ -238,3 +238,5 @@ details.text-key[open] summary { margin-bottom: 8px; }
 .gallery-card .meta { font-size: 11.5px; color: var(--muted); }
 .gallery-preview { width: 100%; height: 110px; object-fit: contain; }
 .session .summary { font-size: 11.5px; color: #1f8f4e; margin-top: 2px; }
+.gifts-received { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+#gift-name { min-width: 200px; }

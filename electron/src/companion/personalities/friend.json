@@ -165,9 +165,27 @@
     "event.valentine.start": ["Valentine's week! 💕 Spend an hour with me to earn the heart aura!"],
     "event.earned": ["You earned the {title} outfit! Do I look cute? ✨"],
     "calendar.soon": ["📅 {title} in {minutes} minutes!", "Heads up! 📅 {title} starts in {minutes} minutes"],
-    "calendar.now": ["📅 {title} is starting! Click me to join", "It's time! 📅 {title}"]
+    "calendar.now": ["📅 {title} is starting! Click me to join", "It's time! 📅 {title}"],
+    "gift.ask": ["A gift? For me?! 🎁 Which one?", "Ooh, a present? 🎁 Show me!"],
+    "gift.locked": ["Aww… I'd love that, but let's get to know each other a little more first! (Gifts unlock once we're {need}) 💕"],
+    "gift.tooSoon": ["Oh! {gift}? That's really sweet… but I think it's a bit soon for that 😳 Maybe once we're {need}?"],
+    "gift.again": ["Another {gift}? Hehe, I can never have too many 💕", "{gift} again! You know me so well ✨"],
+    "gift.unknown": ["{gift}? For me?! I don't even know what to say… thank you, {owner}! 💕", "A {gift}! I'll treasure it forever ✨"],
+    "gift.known": ["Thank you so much, {owner}! 💕"],
+    "gift.cancel": ["No gift? That's okay! Just you being here is enough 💕"]
   },
   "words": ["sunshine", "rainbow", "coffee", "keyboard", "pillow", "blanket", "cookie", "pancake", "garden", "breeze", "thunder", "lantern", "puzzle", "teacup", "bubble", "comet", "galaxy", "planet", "rocket", "island", "ocean", "dolphin", "penguin", "hamster", "panda", "kitten", "puppy", "butterfly", "sunflower", "blossom", "picnic", "popcorn", "noodles", "strawberry", "melody", "guitar", "piano", "violin", "journey", "treasure", "castle", "dragon", "wizard", "marshmallow", "snowflake", "autumn", "winter", "spring", "summer", "midnight", "starlight", "friendship", "adventure", "computer", "monitor", "laptop", "window", "server", "project", "deadline", "weekend", "sandwich", "lemonade", "cupcake", "umbrella", "backpack", "notebook", "crayon", "camera"],
+  "gifts": {
+    "flowers": {"name": "flowers", "aliases": ["bouquet", "roses", "flower", "tulips"], "affection": 3, "steps": [{"say": "Flowers?! They're beautiful, {owner}! 💐", "mood": "love"}, "I'm putting them right here on the desktop where I can see them 🌸"]},
+    "chocolate": {"name": "chocolate", "aliases": ["chocolates", "candy", "sweets"], "affection": 3, "steps": [{"say": "Chocolate! 🍫 My favorite kind of gift!", "mood": "excited"}, "I'll share some with you… maybe 😋"]},
+    "cookies": {"name": "cookies", "aliases": ["cookie", "biscuits"], "affection": 3, "steps": [{"say": "Cookies! 🍪 Did you bake these?", "mood": "happy"}, "They smell amazing. Thank you!"]},
+    "plushie": {"name": "plushie", "aliases": ["plush", "stuffed_animal", "teddy_bear", "teddy"], "affection": 3, "steps": [{"say": "A plushie! It's so soft! 🧸", "mood": "love"}, "I'm naming it after you. Is that weird? Hehe."]},
+    "coffee": {"name": "coffee", "aliases": ["latte", "cappuccino", "espresso"], "affection": 2, "steps": [{"say": "Coffee! ☕ Now we can both be productive", "mood": "happy"}]},
+    "tea": {"name": "tea", "aliases": ["matcha", "green_tea", "bubble_tea", "boba"], "affection": 2, "steps": [{"say": "Tea! 🍵 Let's take a cozy break together", "mood": "happy"}]},
+    "book": {"name": "book", "aliases": ["novel", "comic", "manga"], "affection": 3, "steps": [{"say": "A book! 📖 I'll read a page every time you take a break", "mood": "reading"}, "Thank you for thinking of me!"]},
+    "cake": {"name": "cake", "aliases": ["cupcake", "cheesecake", "birthday_cake"], "affection": 3, "steps": [{"say": "CAKE! 🎂 Is it a special day? Every day with you is special, so I'll allow it", "mood": "excited"}]},
+    "stickers": {"name": "stickers", "aliases": ["sticker"], "affection": 2, "steps": [{"say": "Stickers! ✨ I'm decorating your desktop with them. Just kidding! …Mostly.", "mood": "happy"}]}
+  },
   "topics": [
     {
       "id": "q_food", "category": "you", "title": "My favorite food", "random": true, "when": {"noMem": "favoriteFood"},

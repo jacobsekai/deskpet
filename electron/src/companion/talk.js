@@ -140,6 +140,16 @@
       n.choices.forEach((label, index) => box.appendChild(choice(label, null, null, () => send('choose', { index }))));
       return;
     }
+    if (n.kind === 'pickGift') {
+      // The host opens a file picker for .gift files (in ~/.deskpet/gifts); the engine reacts to the file's name.
+      box.classList.add('one');
+      box.appendChild(choice('🎁 Choose a gift file…', 'Any file named like salmon_bento.gift', null, async () => {
+        const r = await call('pickGift');
+        if (r && r.file) send('gift', { file: r.file });
+      }));
+      box.appendChild(choice('Never mind', null, null, () => send('giftCancel')));
+      return;
+    }
     if (n.kind === 'input') {
       const date = n.input.kind === 'date';
       $('#answer').hidden = false;

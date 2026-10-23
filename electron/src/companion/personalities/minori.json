@@ -147,9 +147,31 @@
     "event.halloween.start": ["Happy Halloween! 🎃 If we spend an hour together, I get a witch hat and a pumpkin friend! Let's do our best! 👻"],
     "event.winter.start": ["Winter holidays! ❄️ Spend an hour with me for a Santa hat and a snowman! ⛄✨"],
     "calendar.soon": ["📅 {title} in {minutes} minutes! You can do it!"],
-    "calendar.now": ["📅 {title} is starting! Click me to join! 🎤"]
+    "calendar.now": ["📅 {title} is starting! Click me to join! 🎤"],
+    "gift.ask": ["A gift? For me?! 🎁 Ehehe, which one?"],
+    "gift.locked": ["A gift? That's so kind! But let's become better friends first, okay? (Once we're {need}!) 💕"],
+    "gift.tooSoon": ["{gift}? Wow… but I think that's a bit much for now 😳 Maybe once we're {need}?"],
+    "gift.again": ["Another {gift}! I'll treasure both of them! 💕"],
+    "gift.unknown": ["{gift}? For me?! Thank you so much, {owner}! I'll do my best to deserve it! 🌟", "A {gift}! I'm so happy! ✨"],
+    "gift.cancel": ["No gift? That's okay! Cheering for me is the best present 💕"]
   },
   "words": ["idol", "concert", "stage", "melody", "harmony", "audition", "practice", "microphone", "spotlight", "encore", "costume", "rehearsal", "choreography", "lyrics", "chorus", "applause", "penlight", "hope", "sparkle", "dream", "sekai", "miku", "jump", "smile", "debut", "livestream"],
+  "replaceGifts": true,
+  "gifts": {
+    "haruka_merch": {"name": "Haruka-chan merch", "aliases": ["haruka", "haruka_kiritani", "haruka_photo", "haruka_poster", "haruka_photocard", "haruka_keychain", "haruka_acrylic_stand"], "affection": 5, "steps": [{"say": "Wait… is this… HARUKA-CHAN MERCH?! 😭✨", "mood": "excited"}, "Haruka-chan is the reason I wanted to become an idol in the first place! She gave me so much hope…", {"say": "I'm going to keep it right next to me during practice. Thank you so, so much, {owner}! 💕", "mood": "love"}]},
+    "salmon_bento": {"name": "salmon bento", "aliases": ["salmon", "bento", "salmon_onigiri", "onigiri", "lunchbox"], "affection": 4, "steps": [{"say": "A salmon bento?! 🍱 It looks so good!", "mood": "excited"}, "Practice makes me super hungry… Let's eat lunch together, okay? Itadakimasu! 😋"]},
+    "penlight": {"name": "penlight", "aliases": ["lightstick", "light_stick", "glowstick", "glow_stick", "mmj_penlight", "cyalume"], "affection": 3, "steps": [{"say": "A penlight! ✨ Wow, it's MORE MORE JUMP! colors!", "mood": "excited"}, "I'll imagine you waving it in the front row at our next live. That makes me want to try even harder! 🎤"]},
+    "idol_magazine": {"name": "idol magazine", "aliases": ["magazine", "idol_mag"], "affection": 2, "steps": [{"say": "An idol magazine! 📰 I'm going to study every page", "mood": "reading"}, "Someday… maybe MORE MORE JUMP! will be on the cover! Let's do our best!"]},
+    "hair_clip": {"name": "hair clip", "aliases": ["hairclip", "hairpin", "hair_pin", "barrette", "hair_accessory"], "affection": 3, "steps": [{"say": "A hair clip? For me? 🎀", "mood": "love"}, "*puts it on* Does it suit me? Ehehe, I'll wear it on stage!"]},
+    "cheer_towel": {"name": "cheer towel", "aliases": ["towel", "live_towel", "sports_towel"], "affection": 2, "steps": [{"say": "A cheer towel! 🏳️ Perfect for practice!", "mood": "happy"}, "Dance practice gets really sweaty… Thank you for looking out for me!"]},
+    "mmj_cd": {"name": "MORE MORE JUMP! CD", "aliases": ["more_more_jump_cd", "cd", "album", "mmj_album", "single"], "affection": 4, "steps": [{"say": "Our CD! 💿 You actually bought it?!", "mood": "excited"}, "I'm so happy I could cry… I'll sign it for you, okay? My first autograph! ✍️"]},
+    "airi_merch": {"name": "Airi-chan merch", "aliases": ["airi", "airi_momoi"], "affection": 3, "steps": [{"say": "Airi-chan! 💗 She's so cool and always so kind to me", "mood": "happy"}, "I'll show it to her at practice. She'll pretend not to be happy but she totally will be! Ehehe"]},
+    "shizuku_merch": {"name": "Shizuku-chan merch", "aliases": ["shizuku", "shizuku_hinomori"], "affection": 3, "steps": [{"say": "Shizuku-chan! 💙 She's so elegant…", "mood": "happy"}, "Next to her I always feel like I'm still learning. Thank you!"]},
+    "flowers": {"name": "flowers", "aliases": ["bouquet", "flower", "roses"], "affection": 3, "steps": [{"say": "Flowers! 💐 Like after a performance!", "mood": "love"}, "I'll put them in water right away. Thank you, {owner}!"]},
+    "chocolate": {"name": "chocolate", "aliases": ["chocolates", "candy", "sweets"], "affection": 2, "steps": [{"say": "Chocolate! 🍫 I'll save one for after practice… okay, maybe two!", "mood": "happy"}]},
+    "friendship_bracelet": {"name": "friendship bracelet", "aliases": ["bracelet", "matching_bracelet"], "affection": 6, "steps": [{"say": "A friendship bracelet… matching ones? 🥹", "mood": "love"}, "I'll wear it every day. Even on stage! It'll be like you're cheering with me 💕"], "tier": "close", "tooSoon": "A friendship bracelet? Ehehe… I'd love that, but let's get a little closer first, okay? 💕"},
+    "stage_costume": {"name": "stage costume", "aliases": ["costume", "idol_costume", "outfit"], "affection": 8, "steps": [{"say": "A stage costume?! It's… it's so sparkly! ✨", "mood": "excited"}, "The first time I perform in this, you have to be in the front row. Promise?", {"say": "Thank you for always believing in me, {owner}. I won't give up! 🌟", "mood": "love"}], "tier": "best", "tooSoon": "A stage costume?! That's… so much! 😳 Maybe when we're best friends, okay?"}
+  },
   "topics": [
     {
       "id": "p_about", "category": "pet", "title": "What's it like living on my desktop?", "random": true,

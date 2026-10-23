@@ -14,6 +14,7 @@ const PANIC_KEYS = [
 const fs = require('fs');
 const path = require('path');
 const { AgentMonitor, PRIORITY, TranscriptTokens, codexState } = require('./agents');
+const gifts = require('./gifts');
 const {
   REWARDS, SLOTS, PRESTIGE, Stats, FocusTimer, Updater, importPack, exportPack, kiroHooks, jumpTo, WindowPlatforms, loginItem,
   BLOCK_DEFAULTS, BROWSERS, TITLE_WORDS, parseBlocklist, matchTitle, closeBlockedTab, transferKey, TRANSFER_SETTINGS,
@@ -973,6 +974,10 @@ class Pet {
         case 'tier': if (!f.down) this.playSound('level-up'); break;
         case 'openTalk': if (!this.away) this.openTalk(f.topic || null); break;
         case 'trip': if (!this.visitor) this.openPanel('trips'); break;
+        case 'consumeGift':
+          if (this.pendingGift) gifts.consume(this.pendingGift);
+          this.pendingGift = null;
+          break;
         case 'playtime': this.startPlaytime(f.minutes || 10); break;
         case 'quit':
           setTimeout(() => {
@@ -1060,6 +1065,15 @@ class Pet {
         return { ok: true };
       }
       case 'log': console.error(payload.message); return { ok: true };
+      case 'pickGift': return (async () => {
+        const r = await dialog.showOpenDialog(this.talk && !this.talk.isDestroyed() ? this.talk : undefined, {
+          title: 'Give a gift', defaultPath: gifts.ensureFolder(), buttonLabel: 'Give', properties: ['openFile'],
+          filters: [{ name: 'Gifts', extensions: ['gift'] }],
+        });
+        if (r.canceled || !r.filePaths[0]) return { ok: false };
+        this.pendingGift = r.filePaths[0];
+        return { ok: true, file: path.basename(r.filePaths[0]) };
+      })();
       default: {
         const r = this.companion.ui(action, payload);
         this.applyCompanion(r.effects);
@@ -1219,6 +1233,13 @@ class Pet {
         const r = this.companion.ui(String(payload.op || 'summary'), payload);
         this.applyCompanion(r.effects);
         return r.result;
+      }
+      case 'giftsFolder': shell.openPath(gifts.ensureFolder()); return { ok: true };
+      case 'giftMake': {
+        const file = gifts.make(payload.name);
+        if (!file) return { ok: false, error: 'type a gift name' };
+        shell.showItemInFolder(file);
+        return { ok: true, file: path.basename(file) };
       }
       case 'tripDrives': return { drives: await this.refreshDrives() };
       case 'tripChooseFolder': {
@@ -1653,6 +1674,9 @@ class Pet {
   // MARK: Sprite pack files
 
   async onDropFiles(files) {
+    // A .gift file dropped on the pet: open the talk and give it.
+    const gift = (files || []).find((f) => /\.gift$/i.test(f));
+    if (gift) { this.pendingGift = gift; return this.openTalk(`gift:${gifts.topicID(gift)}`); }
     const home = (files || []).find((f) => /\.(chr|deskpet)$/i.test(f));
     if (home) return this.openMovingFile(home);
     try {
@@ -2577,6 +2601,8 @@ if (process.argv.includes('--snapshot') || process.argv.includes('--make-gallery
           await demo('menu', { id: 'cat:feeling' }); await wait(900); await shot('feelings');
           await demo('menu', { id: 'topic:water_log' }); await wait(900); await demo('next'); await wait(900); await shot('water');
           await demo('input', { value: '8' }); await wait(900); await shot('water-reply');
+          await demo('menu', { id: 'gift' }); await wait(1200); await shot('gift-ask');
+          await demo('gift', { file: 'Haruka Merch.gift' }); await wait(1400); await shot('gift-reply');
           for (const g of ['rps', 'ttt', 'words', 'pong']) { await demo('menu', { id: `game:${g}` }); await wait(1400); await shot(`game-${g}`); }
           console.log('talk screenshots written');
           pet.quit(); // the same path as Quit in the menu

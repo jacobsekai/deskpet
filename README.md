@@ -178,6 +178,12 @@ Control center → **Insights**: this week vs last week (time together, agent ti
 - **Calendar heads-up** (Behavior, opt-in): warnings 1–15 minutes before meetings from the macOS Calendar app, classic Outlook on Windows, or any ICS calendar link; click the pet at meeting time to open its Chime/Zoom/Meet/Teams link. Titles never leave your computer.
 - **Quiet hours** (Behavior): no remarks or sounds on a schedule, optionally still showing agent notifications.
 
+### Gifts
+Like Monika After Story: make a file named after the gift, ending in `.gift` (for example `salmon_bento.gift` or `Haruka Merch.gift`; an empty file is fine, and Companion → Gifts can make one), then Talk → **🎁 I'd like to give you a gift** and choose it, or drop it onto the pet. Given gifts move to `~/.deskpet/gifts/given/`.
+- Gifts unlock once you're **Friends**; a few special ones need a closer bond (the pet says it's too soon and you keep the file).
+- Each character has their own favorites with their own reactions: the cat loves salmon, tuna, catnip mice, yarn, cardboard boxes, laser pointers… (and has opinions about cucumbers). Minori loves Haruka-chan merch, salmon bento, MORE MORE JUMP! penlights and CDs, hair clips, idol magazines, Airi-chan and Shizuku-chan merch, and, once you're close, a friendship bracelet. Anything else still gets a sweet thank-you.
+- Sprite packs can add or replace gifts in their `dialogue.json` (`"gifts": { "id": { "name", "aliases", "tier", "affection", "steps" } }`, `"replaceGifts": true`).
+
 ### Playdates, events, and the gallery
 - **Playdates:** when a pet visits from a trip drive, the two walk over and play together.
 - **Seasonal events:** Halloween (Oct 24–Nov 1), winter (Dec 15–Jan 1), and Valentine's week, each with an outfit you earn by spending an hour together during the event (shown on Home). On your birthday the pet wears a party hat.

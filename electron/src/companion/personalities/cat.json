@@ -141,9 +141,28 @@
     "playdate": ["*chases {other}* 😼🐾"],
     "event.halloween.start": ["mrrow! halloween! 🎃 spend an hour with me and I'll wear a witch hat (and bring a pumpkin) 🧙"],
     "calendar.soon": ["*taps you* 📅 {title} in {minutes} minutes!"],
-    "calendar.now": ["📅 {title} is starting! click me to go 🐾"]
+    "calendar.now": ["📅 {title} is starting! click me to go 🐾"],
+    "gift.ask": ["a present?! *sniffs your hands* which one? 🎁"],
+    "gift.locked": ["*backs away suspiciously* …I don't take gifts from strangers. maybe once we're {need} 😼"],
+    "gift.tooSoon": ["{gift}? *sniffs* …not yet. we're not {need} yet 😼"],
+    "gift.again": ["another {gift}! *purrs* you may continue 😽"],
+    "gift.unknown": ["*sniffs the {gift}* …*knocks it off the desk* …*then sleeps on it* I love it 😽", "a {gift}? I have no idea what this is. thank you 🐾"],
+    "gift.cancel": ["no gift? *stares at you* …fine. pets will do 😼"]
   },
   "words": ["whiskers", "catnip", "kitten", "purring", "sunbeam", "cardboard", "salmon", "tuna", "yarn", "mouse", "pounce", "meow", "zoomies", "napping", "scratch", "feather", "paws", "litter", "laser", "bird"],
+  "replaceGifts": true,
+  "gifts": {
+    "salmon": {"name": "salmon", "aliases": ["fish", "salmon_fillet", "sashimi", "smoked_salmon"], "affection": 4, "steps": [{"say": "*eyes go huge* SALMON. 🐟", "mood": "excited"}, "*devours it in four seconds* mrrrow! best human ever 💕"]},
+    "tuna": {"name": "tuna", "aliases": ["tuna_can", "canned_tuna", "tuna_fish"], "affection": 3, "steps": [{"say": "*hears the can open from three rooms away* TUNA! 🥫", "mood": "excited"}, "*purrs while eating* you get me, {owner}"]},
+    "catnip_mouse": {"name": "catnip mouse", "aliases": ["catnip", "mouse", "toy_mouse", "catnip_toy"], "affection": 3, "steps": [{"say": "*sniff sniff* …catnip?! *rolls around on the desktop* 🌿", "mood": "dizzy"}, "*bats the mouse under your dock* I'm keeping this forever"]},
+    "yarn_ball": {"name": "yarn ball", "aliases": ["yarn", "ball_of_yarn", "wool"], "affection": 3, "steps": [{"say": "YARN! 🧶 *pounces*", "mood": "excited"}, "*gets completely tangled* …I meant to do that 😼"]},
+    "cardboard_box": {"name": "cardboard box", "aliases": ["box", "cardboard"], "affection": 4, "steps": [{"say": "*immediately sits in the box* 📦", "mood": "happy"}, "if I fits, I sits. this is the best gift anyone has ever given anyone"]},
+    "laser_pointer": {"name": "laser pointer", "aliases": ["laser", "red_dot"], "affection": 3, "steps": [{"say": "*sees the red dot* …*chases it for twenty minutes* 🔴", "mood": "excited"}, "I almost had it that time. one more round?"]},
+    "cushion": {"name": "cushion", "aliases": ["pillow", "cat_bed", "bed", "blanket"], "affection": 3, "steps": [{"say": "a cushion! *kneads it* *circles three times* *flops* 💤", "mood": "sleepy"}, "this is my nap spot now. thank you 😽"]},
+    "feather_toy": {"name": "feather toy", "aliases": ["feather", "feather_wand", "wand"], "affection": 2, "steps": [{"say": "*wiggles butt* *POUNCE* 🪶", "mood": "excited"}, "again! again!"]},
+    "bell_collar": {"name": "bell collar", "aliases": ["collar", "bell"], "affection": 5, "steps": [{"say": "a collar with a little bell… 🔔", "mood": "love"}, "*jingles proudly* now everyone knows I'm part of your family 😽"], "tier": "close", "tooSoon": "a collar? mrrp… let's get to know each other better first 😼"},
+    "cucumber": {"name": "cucumber", "aliases": ["cucumbers"], "affection": 1, "steps": [{"say": "*sees cucumber* *jumps three feet in the air* WHY 😾", "mood": "surprised"}, "…okay. okay. it's growing on me. but put it AWAY"], "secret": true}
+  },
   "topics": [
     {
       "id": "p_about", "category": "pet", "title": "What's it like being a desktop cat?", "random": true,

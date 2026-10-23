@@ -76,6 +76,7 @@
     wireAccount();
     wireTrips();
     wireCheckins();
+    wireGifts();
     wireGallery();
     wireAbout();
     render();
@@ -132,6 +133,7 @@
     renderTrips();
     renderInsights();
     renderCheckins();
+    renderGifts();
     renderNeeds();
     renderQuiet();
     renderCalendar();
@@ -737,6 +739,35 @@
     }
     $('#in-mood-legend').innerHTML = MOODS.map((m) => `<span><i style="background:${m.color}"></i>${m.emoji} ${m.label}</span>`).join('')
       + (Object.keys(journal).length ? '' : `<span class="muted">${esc(state.names.petName)} asks every evening.</span>`);
+  }
+
+  // MARK: Gifts
+
+  let lastGifts = '';
+  function wireGifts() {
+    const make = async () => {
+      const r = await call('giftMake', { name: $('#gift-name').value });
+      $('#gift-note').textContent = r && r.ok ? `Made ${r.file} 🎁 Now give it from the talk window.` : (r && r.error) || "Couldn't make that gift file";
+      if (r && r.ok) $('#gift-name').value = '';
+    };
+    $('#gift-make').addEventListener('click', make);
+    $('#gift-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') make(); });
+    $('#gift-folder').addEventListener('click', () => call('giftsFolder'));
+  }
+
+  function renderGifts() {
+    const g = state.companion && state.companion.gifts;
+    if (!g) return;
+    const key = JSON.stringify(g);
+    if (key === lastGifts) return;
+    lastGifts = key;
+    const box = $('#gift-list');
+    box.innerHTML = '';
+    if (!g.unlocked) box.appendChild(el('div', 'empty', `🔒 ${esc(state.names.petName)} accepts gifts once you're ${esc(g.tier)}.`));
+    else if (g.ideas.length) box.appendChild(el('div', 'empty', `Ideas: ${g.ideas.map(esc).join(', ')}…`));
+    for (const r of g.received) {
+      box.appendChild(el('div', 'memory', `<div><div class="k">${esc(dayLabel(r.first))}${r.count > 1 ? ` · ×${r.count}` : ''}</div><div class="v">🎁 ${esc(r.name)}</div></div>`));
+    }
   }
 
   // MARK: Check-ins and needs
