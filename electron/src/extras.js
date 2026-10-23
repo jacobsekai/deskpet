@@ -529,7 +529,7 @@ function closeBlockedTab(word) {
 const zlib = require('zlib');
 const TRANSFER_PREFIX = 'DESKPET-1:';
 const TRANSFER_SETTINGS = ['spritePack', 'themeColor', 'thoughtBubble', 'wander', 'gravity', 'walkOnWindows', 'quietInCalls', 'notifications', 'sounds', 'autoUpdate', 'blocklist', 'strictBlock',
-  'hat', 'trail', 'auraStyle', 'companion', 'goldenFur', 'showPrestigeBadge', 'blockDuringFocus', 'eventRewards', 'quietHours', 'typeAlong', 'panicKey', 'keptRewards'];
+  'hat', 'trail', 'auraStyle', 'companion', 'goldenFur', 'showPrestigeBadge', 'blockDuringFocus', 'eventRewards', 'quietHours', 'typeAlong', 'panicKey', 'keptRewards', 'stay'];
 
 const transferKey = {
   encode(payload) {

@@ -162,6 +162,19 @@ class Pet {
   // MARK: Settings
 
   get wander() { return this.settings.get('wander', true); }
+  /** Stay in one place: no wandering, falling, riding windows, or walking over to other pets. Dragging still moves it. */
+  get stay() { return this.settings.get('stay', false); }
+  stayStill() {
+    this.walkTarget = null;
+    this.perch = null;
+    this.velocity = null;
+    this.savePosition();
+  }
+  toggleStay() {
+    this.settings.set('stay', !this.stay);
+    if (this.stay) this.stayStill();
+    this.say(this.stay ? "okay, I'll stay right here 📌" : 'free to roam! 🐾', 2.5);
+  }
   set wander(v) { this.settings.set('wander', v); }
   get gravity() { return this.settings.get('gravity', true); }
   set gravity(v) { this.settings.set('gravity', v); }
@@ -415,7 +428,7 @@ class Pet {
       this.lastCalendarTick = t;
       this.calendarTick();
     }
-    if (this.mood === 'idle' && this.wander && this.win.isVisible() && t > this.nextWalkAt && !this.velocity && !this.resizing && !this.talkOpen && !this.playdate) this.startWalk(t);
+    if (this.mood === 'idle' && this.wander && !this.stay && this.win.isVisible() && t > this.nextWalkAt && !this.velocity && !this.resizing && !this.talkOpen && !this.playdate) this.startWalk(t);
   }
 
   resolveMood(t, idle, sinceKey) {
@@ -721,7 +734,7 @@ class Pet {
     if (!resting) return;
     this.velocity = null;
     this.spin = 0;
-    this.perch = landing && Math.abs(this.pos.bottom - floor) < 1 ? { id: landing.id, rect: landing.rect } : null;
+    this.perch = landing && !this.stay && Math.abs(this.pos.bottom - floor) < 1 ? { id: landing.id, rect: landing.rect } : null;
     this.savePosition();
     if (this.perch) this.gainXP(2, true);
     if (this.bounces >= 3) {
@@ -812,7 +825,8 @@ class Pet {
     const b = this.win.getBounds();
     const floor = this.display().workArea.y + this.display().workArea.height;
     this.pos = { x: b.x, bottom: b.y + b.height };
-    if (speed <= 60 && !(this.gravity && this.pos.bottom < floor - 2)) return this.savePosition();
+    // Staying put: it stays exactly where you drop it (no throw, no fall).
+    if (this.stay || (speed <= 60 && !(this.gravity && this.pos.bottom < floor - 2))) return this.savePosition();
     const limit = 4000;
     const k = speed > limit ? limit / speed : 1;
     this.velocity = { x: v.x * k, y: v.y * k };
@@ -941,6 +955,7 @@ class Pet {
       ...(away ? [] : [
         { label: `Bring ${pet} here`, click: () => this.bringHere() },
         ...(this.panicHidden ? [] : [{ label: `🙈 Hide everything now${this.panicKeyLabel ? ` (${this.panicKeyLabel})` : ''}`, click: () => this.togglePanic() }]),
+        { label: '📌 Stay in one place', type: 'checkbox', checked: this.stay, click: () => this.toggleStay() },
         { label: this.win.isVisible() ? `Hide ${pet}` : `Show ${pet}`, click: () => this.toggleVisible() },
       ]),
       { type: 'separator' },
@@ -1144,7 +1159,7 @@ class Pet {
       look: { packs: listPacks(), spritePack: this.spritePackName, themeColor: this.themeHex, thoughtBubble: this.thoughtBubble, scale: this.scale },
       panicKey: { id: this.panicKeyID, ok: this.panicKeyOK !== false, options: [{ id: 'off', label: 'Off' }, ...PANIC_KEYS.map((k) => ({ id: k.id, label: k.label }))] },
       toggles: {
-        wander: this.wander, gravity: this.gravity, walkOnWindows: this.walkOnWindows, quietInCalls: this.quietInCalls, typeAlong: this.typeAlong,
+        stay: this.stay, wander: this.wander, gravity: this.gravity, walkOnWindows: this.walkOnWindows, quietInCalls: this.quietInCalls, typeAlong: this.typeAlong,
         notifications: this.notificationsOn, sounds: this.soundsOn, autoUpdate: this.autoUpdate,
         startAtLogin: loginSupported && !this.visitor && loginItem.get(app), startAtLoginSupported: loginSupported && !this.visitor,
         showPrestigeBadge: this.settings.get('showPrestigeBadge', true),
@@ -1191,6 +1206,7 @@ class Pet {
             this.settings.set(payload.key, payload.value);
             if (payload.key === 'sounds' && payload.value) this.playSound('pet');
             if (payload.key === 'wander') this.walkTarget = null;
+            if (payload.key === 'stay' && payload.value) this.stayStill();
         }
         return { ok: true };
       case 'wear': {
@@ -1397,7 +1413,8 @@ class Pet {
       this.savePosition();
     } else if (step.action === 'giveUp') {
       this.nextPlaydateAt = t + 60;
-    } else if (step.action === 'walk') {
+    } else if (step.action === 'walk' && !this.stay) {
+      // A pet that stays put waits for the other one to come over.
       // Walk to a spot just beside the other pet (both walk, so they meet in the middle).
       const wa = this.display().workArea;
       this.walkTarget = Math.max(wa.x - 40, Math.min(wa.x + wa.width - this.size.width + 40, step.center - this.size.width / 2));

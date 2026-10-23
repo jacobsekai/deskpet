@@ -189,6 +189,9 @@ Like Monika After Story: make a file named after the gift, ending in `.gift` (fo
 - **Seasonal events:** Halloween (Oct 24–Nov 1), winter (Dec 15–Jan 1), and Valentine's week, each with an outfit you earn by spending an hour together during the event (shown on Home). On your birthday the pet wears a party hat.
 - **Gallery** (Look → Browse the gallery): install free original packs (Midnight, Snowball, Ginger) from `packs/` in this repo.
 
+### Stay in one place
+🐾 menu → **📌 Stay in one place** (or Behavior): the pet stops wandering, falling, riding windows, and walking over for playdates (a visiting pet still comes to it). Drag it anywhere and it stays exactly where you drop it.
+
 ### Emergency hide
 Press **⌃⌥H** (Mac) or **Ctrl+Alt+H** (Windows/Linux) anywhere to hide the pet, its bubbles, the talk window, the hover card, and the control center at once. Sounds and notifications stay quiet until you press it again (or choose Show from the 🐾/tray menu). Pick a different shortcut, or turn it off, under Behavior → Emergency hide.
 

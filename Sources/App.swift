@@ -170,6 +170,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     private var notificationsOn: Bool { get { flag("notifications", true) } set { defaults.set(newValue, forKey: "notifications") } }
     private var soundsOn: Bool { get { flag("sounds", true) } set { defaults.set(newValue, forKey: "sounds"); sounds.enabled = newValue } }
     private var walkOnWindows: Bool { get { flag("walkOnWindows", true) } set { defaults.set(newValue, forKey: "walkOnWindows") } }
+    /// Stay in one place: no wandering, falling, riding windows, or walking over to other pets. Dragging still moves it.
+    private var stayPut: Bool {
+        get { flag("stay", false) }
+        set {
+            defaults.set(newValue, forKey: "stay")
+            if newValue { walkTarget = nil; perch = nil; velocity = nil; playdate = nil; saveOrigin(panel.frame.origin) }
+        }
+    }
     /// While you type, the pet types on its laptop too (otherwise it just bobs along).
     private var typeAlong: Bool { get { flag("typeAlong", true) } set { defaults.set(newValue, forKey: "typeAlong") } }
     /// Keeps the typing pose up through short pauses, so the laptop doesn't flicker in and out.
@@ -345,7 +353,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         migrateLevelCurve()
         DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in self?.wearEarnedRewardsOnce() }
         // Last time it may have been standing on a window; drop onto whatever is there now.
-        if gravity && panel.frame.minY > petScreen().visibleFrame.minY + 2 { velocity = .zero }
+        if gravity && !stayPut && panel.frame.minY > petScreen().visibleFrame.minY + 2 { velocity = .zero }
         guard !Visitor.active else { return }
         if autoUpdate { DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in self?.checkForUpdates(manual: false) } }
         Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { [weak self] _ in
@@ -514,7 +522,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         }
 
         mood = resolveMood(now: now, idle: idle, sinceKey: sinceKey)
-        if mood == .idle && wander && !panel.isMiniaturized && now > nextWalkAt && velocity == nil && !petView.resizing && !talkOpen { startWalk(now) }
+        if mood == .idle && wander && !stayPut && !panel.isMiniaturized && now > nextWalkAt && velocity == nil && !petView.resizing && !talkOpen { startWalk(now) }
         if perch != nil && !walkOnWindows { dropFromPerch() }
     }
 
@@ -857,7 +865,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         }
         velocity = nil
         spin = 0
-        perch = (landing != nil && abs(o.y - floorY) < 1) ? (landing!.id, landing!.rect) : nil
+        perch = (landing != nil && abs(o.y - floorY) < 1 && !stayPut) ? (landing!.id, landing!.rect) : nil
         saveOrigin(o)
         if perch != nil { gainXP(2, play: true) }
         if bounces >= 3 {
@@ -1085,7 +1093,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         }
         let speed = hypot(v.dx, v.dy)
         let floor = petScreen().visibleFrame.minY
-        guard speed > 60 || (gravity && panel.frame.minY > floor + 2) else {
+        // Staying put: it stays exactly where you drop it (no throw, no fall).
+        guard !stayPut, speed > 60 || (gravity && panel.frame.minY > floor + 2) else {
             saveOrigin(panel.frame.origin)
             return
         }
@@ -1097,6 +1106,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             gainXP(3, play: true) { $0.throwsCount += 1 }
             apply(companion.event("thrown", ["playful": playing]))
         }
+    }
+
+    @objc private func toggleStay() {
+        stayPut.toggle()
+        say(stayPut ? "okay, I'll stay right here 📌" : "free to roam! 🐾", for: 2.5)
     }
 
     @objc private func togglePlaytime() {
@@ -1820,6 +1834,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         menu.addItem(item(playing ? "⏹ Stop playtime" : "🎾 Playtime: throw \(config.petName) around (10 min)", #selector(togglePlaytime)))
         menu.addItem(item("Rewards (\(stats.rankTitle))…", #selector(openRewardsPage)))
         if !Visitor.active { menu.addItem(item("🧳 Take \(config.petName) on a trip…", #selector(openTripsPage))) }
+        let stay = item("📌 Stay in one place", #selector(toggleStay))
+        stay.state = stayPut ? .on : .off
+        menu.addItem(stay)
         menu.addItem(item("Bring \(config.petName) here", #selector(bringHere)))
         if !panicHidden { menu.addItem(item("🙈 Hide everything now\(panicKeyLabel.map { " (\($0))" } ?? "")", #selector(togglePanic))) }
         menu.addItem(item(panel.isVisible ? "Hide \(config.petName)" : "Show \(config.petName)", #selector(toggleVisible)))
@@ -1866,7 +1883,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             } else if now - pd.started > 30 || petView.dragging || velocity != nil {
                 playdate = nil
                 lastPlaydate = now
-            } else {
+            } else if !stayPut {
+                // A pet that stays put waits for the other one to come over.
                 let vf = petScreen().visibleFrame
                 let target = panel.frame.minX + (desired - me.midX)
                 walkTarget = min(max(vf.minX - 40, target), vf.maxX - size.width + 40)
@@ -2389,7 +2407,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             "look": ["packs": SpritePack.available(), "spritePack": spritePackName, "themeColor": themeHex,
                      "thoughtBubble": thoughtBubble.rawValue, "scale": Double(petView.scale)],
             "panicKey": ["id": panicKeyID, "ok": panicKeyOK, "options": [["id": "off", "label": "Off"]] + PanicKey.choices.map { ["id": $0.id, "label": $0.label] }],
-            "toggles": ["wander": wander, "gravity": gravity, "walkOnWindows": walkOnWindows, "quietInCalls": quietInCalls, "typeAlong": typeAlong,
+            "toggles": ["stay": stayPut, "wander": wander, "gravity": gravity, "walkOnWindows": walkOnWindows, "quietInCalls": quietInCalls, "typeAlong": typeAlong,
                         "notifications": notificationsOn, "sounds": soundsOn, "autoUpdate": autoUpdate,
                         "startAtLogin": SMAppService.mainApp.status == .enabled, "startAtLoginSupported": true,
                         "showPrestigeBadge": showPrestigeBadge],
@@ -2811,6 +2829,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             case "quietInCalls": quietInCalls = value as? Bool ?? true
             case "autoUpdate": autoUpdate = value as? Bool ?? true
             case "typeAlong": typeAlong = value as? Bool ?? true
+            case "stay": stayPut = value as? Bool ?? false
             case "quietHours":
                 quietHours = QuietHours(value as? [String: Any])
                 quietHoursActive = quietHours.active()
