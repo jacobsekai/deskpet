@@ -147,7 +147,8 @@
     "gift.tooSoon": ["{gift}? *sniffs* …not yet. we're not {need} yet 😼"],
     "gift.again": ["another {gift}! *purrs* you may continue 😽"],
     "gift.unknown": ["*sniffs the {gift}* …*knocks it off the desk* …*then sleeps on it* I love it 😽", "a {gift}? I have no idea what this is. thank you 🐾"],
-    "gift.cancel": ["no gift? *stares at you* …fine. pets will do 😼"]
+    "gift.cancel": ["no gift? *stares at you* …fine. pets will do 😼"],
+    "needs.full": ["*lies on side* too… full… 😵 later"]
   },
   "words": ["whiskers", "catnip", "kitten", "purring", "sunbeam", "cardboard", "salmon", "tuna", "yarn", "mouse", "pounce", "meow", "zoomies", "napping", "scratch", "feather", "paws", "litter", "laser", "bird"],
   "replaceGifts": true,

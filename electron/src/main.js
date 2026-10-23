@@ -265,6 +265,7 @@ class Pet {
       }
     }
     if (this.kiroHooksOn) kiroHooks.apply(true); // also repoints Kiro hooks at the current command
+    this.migrateLevelCurve();
     setTimeout(() => this.wearEarnedRewardsOnce(), 6000);
     if (this.autoUpdate) setTimeout(() => this.checkForUpdates(false), 20000);
     setInterval(() => { if (this.autoUpdate) this.checkForUpdates(false); }, 6 * 3600 * 1000);
@@ -1488,7 +1489,21 @@ class Pet {
   /** Rewards stay unlocked forever once you've prestiged. */
   isUnlocked(r) {
     if (r.event) return this.settings.get('eventRewards', []).includes(r.id);
-    return this.stats.prestige > 0 || this.stats.level >= r.level;
+    // Rewards unlocked under the old, faster level curve stay unlocked.
+    return this.stats.prestige > 0 || this.stats.level >= r.level || this.settings.get('keptRewards', []).includes(r.id);
+  }
+
+  /** Levels got harder in 1.5.1: recalculate on the new curve, keeping everything already unlocked. */
+  migrateLevelCurve() {
+    if (this.settings.get('levelCurve', 0) >= 2) return;
+    this.settings.set('levelCurve', 2);
+    if (this.stats.prestige > 0) return;
+    const old = Stats.oldLevel(this.stats.levelXP);
+    if (old <= this.stats.level) return;
+    const kept = REWARDS.filter((r) => !r.event && r.level <= old && r.level > this.stats.level).map((r) => r.id);
+    this.settings.set('keptRewards', [...new Set([...this.settings.get('keptRewards', []), ...kept])].sort());
+    const level = this.stats.level;
+    setTimeout(() => this.say(`levels take longer to earn now! I'm Lv ${level} on the new scale, and everything I unlocked stays mine ✨`, 7), 9000);
   }
   wearing(r) { return r.slot === 'golden' ? this.settings.get(r.key, false) === true : this.settings.get(r.key, '') === r.value; }
   worn(slot) { return REWARDS.find((r) => r.slot === slot && this.isUnlocked(r) && this.wearing(r)); }
@@ -1604,7 +1619,7 @@ class Pet {
       quietHours: this.quietHoursOn ? `🌙 Quiet hours until ${this.quietHours.to}` : '',
       needs: (() => {
         const n = this.companion.summary().needs;
-        return n && n.enabled !== false && typeof n.energy === 'number' ? `⚡ ${Math.round(n.energy)} energy · 🎈 ${Math.round(n.fun)} fun · 🪙 ${n.coins || 0}` : '';
+        return n && n.enabled !== false && typeof n.energy === 'number' ? `⚡ ${Math.round(n.energy)} energy · 🎈 ${Math.round(n.fun)} fun` : '';
       })(),
       nextReward: this.stats.canPrestige ? '⭐ Ready to prestige! (tray menu → Rewards)'
         : this.stats.prestige ? '' : (() => { const n = REWARDS.find((r) => r.level > this.stats.level); return n ? `Next reward: ${n.title} at Lv ${n.level}` : ''; })(),

@@ -34,11 +34,13 @@ class Stats {
     this.dirty = false;
   }
 
-  /** Each level costs 30 + its number (level 100 ≈ 7,900 XP); Prestige Master levels past 100 cost 300. */
   static xpNeeded(level) {
+    // Level n → n+1 costs 100 + 15n, so level 100 takes about 84,000 XP; Prestige Master levels cost 2,000 each.
     const n = Math.min(level, 100) - 1;
-    return 30 * n + (n * (n + 1)) / 2 + Math.max(0, level - 100) * 300;
+    return 100 * n + (15 * n * (n + 1)) / 2 + Math.max(0, level - 100) * 2000;
   }
+  /** The 1.0–1.5 curve (level 100 at about 7,900 XP), only for moving people to the new one. */
+  static oldLevel(xp) { let n = 1; while (n < 100 && 30 * n + (n * (n + 1)) / 2 <= xp) n++; return n; }
   static levelFor(xp, cap = 100) { let n = 1; while (n < cap && Stats.xpNeeded(n + 1) <= xp) n++; return n; }
   static dayKey() {
     const d = new Date();
@@ -527,7 +529,7 @@ function closeBlockedTab(word) {
 const zlib = require('zlib');
 const TRANSFER_PREFIX = 'DESKPET-1:';
 const TRANSFER_SETTINGS = ['spritePack', 'themeColor', 'thoughtBubble', 'wander', 'gravity', 'walkOnWindows', 'quietInCalls', 'notifications', 'sounds', 'autoUpdate', 'blocklist', 'strictBlock',
-  'hat', 'trail', 'auraStyle', 'companion', 'goldenFur', 'showPrestigeBadge', 'blockDuringFocus', 'eventRewards', 'quietHours', 'typeAlong', 'panicKey'];
+  'hat', 'trail', 'auraStyle', 'companion', 'goldenFur', 'showPrestigeBadge', 'blockDuringFocus', 'eventRewards', 'quietHours', 'typeAlong', 'panicKey', 'keptRewards'];
 
 const transferKey = {
   encode(payload) {

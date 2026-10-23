@@ -172,7 +172,8 @@
     "gift.again": ["Another {gift}? Hehe, I can never have too many 💕", "{gift} again! You know me so well ✨"],
     "gift.unknown": ["{gift}? For me?! I don't even know what to say… thank you, {owner}! 💕", "A {gift}! I'll treasure it forever ✨"],
     "gift.known": ["Thank you so much, {owner}! 💕"],
-    "gift.cancel": ["No gift? That's okay! Just you being here is enough 💕"]
+    "gift.cancel": ["No gift? That's okay! Just you being here is enough 💕"],
+    "needs.full": ["I'm so full! 😵 Maybe later?", "*pats tummy* one more and I'll pop! 🎈"]
   },
   "words": ["sunshine", "rainbow", "coffee", "keyboard", "pillow", "blanket", "cookie", "pancake", "garden", "breeze", "thunder", "lantern", "puzzle", "teacup", "bubble", "comet", "galaxy", "planet", "rocket", "island", "ocean", "dolphin", "penguin", "hamster", "panda", "kitten", "puppy", "butterfly", "sunflower", "blossom", "picnic", "popcorn", "noodles", "strawberry", "melody", "guitar", "piano", "violin", "journey", "treasure", "castle", "dragon", "wizard", "marshmallow", "snowflake", "autumn", "winter", "spring", "summer", "midnight", "starlight", "friendship", "adventure", "computer", "monitor", "laptop", "window", "server", "project", "deadline", "weekend", "sandwich", "lemonade", "cupcake", "umbrella", "backpack", "notebook", "crayon", "camera"],
   "gifts": {

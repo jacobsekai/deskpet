@@ -73,7 +73,7 @@ enum TransferKey {
     static let settingKeys = ["spritePack", "themeColor", "thoughtBubble", "wander", "gravity", "walkOnWindows",
                               "quietInCalls", "notifications", "sounds", "autoUpdate", "blocklist", "strictBlock",
                               "hat", "trail", "auraStyle", "companion", "goldenFur", "showPrestigeBadge", "blockDuringFocus",
-                              "eventRewards", "quietHours", "typeAlong", "panicKey"]
+                              "eventRewards", "quietHours", "typeAlong", "panicKey", "keptRewards"]
 
     static func encode(_ payload: [String: Any]) throws -> String {
         let json = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])

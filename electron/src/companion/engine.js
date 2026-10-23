@@ -264,6 +264,7 @@
     let prevIdle = 0;
     let lastNeedHint = 0;
     let lastPlaydate = 0;
+    let treatTimes = [];
     let lastNight = 0;
     let lastCategory = '';
     const appCooldown = {};
@@ -820,21 +821,27 @@
       }
     }
 
+    /** Coins never run out, so treats are always there; the pet just gets full if you feed it too fast,
+     *  and only the first few treats each day count toward your bond. */
     function buyTreat(id) {
       const treat = TREATS.find((x) => x.id === id);
       if (!treat) return;
-      if (state.needs.coins < treat.cost) { say(line('needs.poor', 'Not enough coins yet! Coins come from XP 🪙'), 4); return; }
-      state.needs.coins -= treat.cost;
+      const t = now();
+      treatTimes = treatTimes.filter((x) => t - x < 15 * MINUTE);
+      if (treatTimes.length >= 3) { say(line('needs.full', "I'm so full! 😵 Maybe later?"), 4); return; }
+      treatTimes.push(t);
       state.needs.energy = clamp(state.needs.energy + treat.energy);
       state.needs.fun = clamp(state.needs.fun + treat.fun);
       effects.push({ type: 'mood', mood: 'petted', seconds: 3 });
       say(line(`needs.treat.${id}`, `${treat.emoji} yum! thank you! 💕`), 4);
-      changeAffection(0.5);
+      const day = dayFlags();
+      day.treats = (day.treats || 0) + 1;
+      if (day.treats <= 3) changeAffection(0.5);
       dirty = true;
     }
 
     function needsSummary() {
-      return { enabled: !!state.settings.needs, energy: Math.round(state.needs.energy), fun: Math.round(state.needs.fun), coins: state.needs.coins, treats: TREATS };
+      return { enabled: !!state.settings.needs, energy: Math.round(state.needs.energy), fun: Math.round(state.needs.fun), coins: null, unlimited: true, treats: TREATS };
     }
 
     // MARK: Trips

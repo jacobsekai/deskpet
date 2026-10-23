@@ -842,16 +842,15 @@
     const meter = (label, v) => `<div class="meter"><span>${label}</span><div class="meter-track"><div style="width:${v}%"></div></div><b>${v}</b></div>`;
     box.appendChild(el('div', 'meters', meter('⚡ Energy', n.energy) + meter('🎈 Fun', n.fun)));
     const shop = el('div', 'actions');
-    shop.appendChild(el('span', 'coins', `🪙 ${n.coins} coin${n.coins === 1 ? '' : 's'}`));
+    shop.appendChild(el('span', 'coins', '🪙 ∞'));
     for (const t of n.treats) {
-      const b = el('button', 'ghost-btn', `${t.emoji} ${esc(t.title)} · ${t.cost}🪙`);
-      b.disabled = n.coins < t.cost;
+      const b = el('button', 'ghost-btn', `${t.emoji} ${esc(t.title)}`);
       b.title = [t.energy && `+${t.energy} energy`, t.fun && `+${t.fun} fun`].filter(Boolean).join(', ');
       b.addEventListener('click', () => companion('buyTreat', { id: t.id }));
       shop.appendChild(b);
     }
     box.appendChild(shop);
-    box.appendChild(el('p', 'note', 'You get 1 coin for every 10 XP.'));
+    box.appendChild(el('p', 'note', "Coins never run out, so treats are always there. Your pet gets full if you feed it more than a few in a row."));
   }
 
   // MARK: Quiet hours and calendar

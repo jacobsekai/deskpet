@@ -129,7 +129,7 @@ The full format (steps, questions, remembered answers, conditions, moods, games,
   - *Agents:* +10 per finished task, +15 per focus session, +1 per minute agents are working.
 
   Today's stats are in the menu and hover card (`~/.deskpet/stats.json`).
-- **Levels and prestige:** levels run 1–100 (about 7,900 XP to level 100). At 100 you can **prestige** (🐾 → Rewards → Prestige): back to level 1 with a prestige badge (🥉 1–3, 🥈 4–6, 🥇 7–9) and every reward kept. Prestige 10 is **💎 Prestige Master**, which keeps leveling all the way to 1000.
+- **Levels and prestige:** levels run 1–100 (about 84,000 XP to level 100, a few months of daily use; each level costs a bit more than the last). At 100 you can **prestige** (🐾 → Rewards → Prestige): back to level 1 with a prestige badge (🥉 1–3, 🥈 4–6, 🥇 7–9) and every reward kept. Prestige 10 is **💎 Prestige Master**, which keeps leveling all the way to 1000.
 - **Rewards:** worn automatically when unlocked, mixed and matched in 🐾 → Rewards. All of them work on the built-in cat and on sprite packs (hats find the character's head in each frame):
 
   | Lv | Reward | Lv | Reward |
@@ -171,7 +171,7 @@ Control center → **Insights**: this week vs last week (time together, agent ti
 ### Check-ins and the mood journal
 - **Check-ins** (Companion page): turn on built-ins (20-20-20 eye break, posture, stand up, stretch, medication at a set time) or add your own, either "done / not yet" or a fill-in sentence with a goal ("I took __ deep breaths"). When one comes up, click the pet; or log it any time from Talk → Tell → Check in.
 - **Journal:** in the evening the pet asks how the day was (and if you want to note anything). After a rough or tiring day it checks on you the next morning.
-- **Energy and fun** (off by default): breaks restore energy and playing restores fun. Treats cost coins (1 coin per 10 XP), so buying one never lowers your level. Nothing bad happens when they run low.
+- **Energy and fun** (off by default): breaks restore energy and playing restores fun. Coins never run out, so treats are always there (your pet just gets full if you feed it more than a few in a row). Nothing bad happens when they run low.
 
 ### Agents, meetings, and quiet hours
 - When an agent finishes, the bubble and notification say what it did ("Claude: Fixed the login test ✓"), taken from the session's last reply.

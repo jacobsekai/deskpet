@@ -216,12 +216,20 @@ final class Stats {
     /// "Lv 42", "Prestige 3 · Lv 42", "💎 Prestige Master · Lv 345"
     var rankTitle: String { prestige == 0 ? "Lv \(level)" : "\(Prestige.title(prestige)) · Lv \(level)" }
 
-    /// XP needed (since the last prestige) to reach `level`. Each level costs 30 + its number,
-    /// so level 100 takes about 7,900 XP; Prestige Master levels past 100 cost 300 each.
+    /// XP needed (since the last prestige) to reach `level`.
     static func xpNeeded(_ level: Int) -> Int {
+        // Level n → n+1 costs 100 + 15n, so level 100 takes about 84,000 XP (a few months of daily use);
+        // Prestige Master levels past 100 cost 2,000 each. Same curve in the Windows/Linux app.
         let n = min(level, Prestige.levelCap) - 1
-        let base = 30 * n + n * (n + 1) / 2
-        return base + max(0, level - Prestige.levelCap) * 300
+        let base = 100 * n + 15 * n * (n + 1) / 2
+        return base + max(0, level - Prestige.levelCap) * 2000
+    }
+
+    /// The 1.0–1.5 curve (level 100 at about 7,900 XP), only for moving people to the new one.
+    static func oldLevel(for xp: Int) -> Int {
+        var n = 1
+        while n < Prestige.levelCap && 30 * n + n * (n + 1) / 2 <= xp { n += 1 }
+        return n
     }
 
     static func level(for xp: Int, cap: Int = Prestige.levelCap) -> Int {

@@ -412,17 +412,17 @@ for (const id of Object.keys(personalities)) {
     const { e } = make(id);
     assert.strictEqual(e.summary().needs.enabled, false);
     e.ui('setting', { key: 'needs', value: true });
+    assert.strictEqual(e.summary().needs.unlimited, true);
     e.event('xp', { amount: 57 });
-    assert.strictEqual(e.summary().needs.coins, 5);
-    e.event('xp', { amount: 3 });
-    assert.strictEqual(e.summary().needs.coins, 6);
     const before = e.summary().needs.energy;
     const r = e.ui('buyTreat', { id: 'cookie' });
-    assert.strictEqual(r.result.needs.coins, 1);
     assert(r.result.needs.energy >= Math.min(100, before + 29), `${id}: cookie energy`);
     assert(r.effects.some((f) => f.type === 'say'), `${id}: treat line`);
-    const poor = e.ui('buyTreat', { id: 'toy' });
-    assert(poor.result.needs.coins === 1 && poor.effects.some((f) => f.type === 'say'), `${id}: not enough coins`);
+    e.ui('buyTreat', { id: 'toy' });
+    e.ui('buyTreat', { id: 'strawberry' });
+    const fun = e.summary().needs.fun;
+    const full = e.ui('buyTreat', { id: 'toy' });
+    assert(full.result.needs.fun === fun && full.effects.some((f) => f.type === 'say'), `${id}: full after three in a row`);
     for (const ev of [['playdate', { other: 'Biscuit', first: true }], ['eventStart', { id: 'halloween', title: 'Halloween' }], ['eventEarned', { id: 'halloween', title: 'Witch hat' }], ['meetingSoon', { title: 'Standup', minutes: 5 }], ['meetingNow', { title: 'Standup' }]]) {
       const out = e.event(ev[0], ev[1]).filter((f) => f.type === 'say');
       assert(out.length && !/\{[a-z]+\}/i.test(out[0].text), `${id}: ${ev[0]}: ${out.map((f) => f.text)}`);

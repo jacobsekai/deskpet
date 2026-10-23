@@ -184,7 +184,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     /// Rewards stay unlocked forever once you've prestiged.
     private func isUnlocked(_ reward: Reward) -> Bool {
         if reward.event != nil { return earnedEventRewards.contains(reward.rawValue) }
-        return stats.prestige > 0 || stats.level >= reward.level
+        return stats.prestige > 0 || stats.level >= reward.level || keptRewards.contains(reward.rawValue)
+    }
+    /// Rewards unlocked under the old, faster level curve stay unlocked.
+    private var keptRewards: [String] { defaults.stringArray(forKey: "keptRewards") ?? [] }
+
+    /// Levels got harder in 1.5.1: recalculate on the new curve, keeping everything already unlocked.
+    private func migrateLevelCurve() {
+        guard defaults.integer(forKey: "levelCurve") < 2 else { return }
+        defaults.set(2, forKey: "levelCurve")
+        guard stats.prestige == 0 else { return }
+        let old = Stats.oldLevel(for: stats.levelXP)
+        guard old > stats.level else { return }
+        let kept = Reward.allCases.filter { $0.event == nil && $0.level <= old && $0.level > stats.level }.map(\.rawValue)
+        defaults.set(Array(Set(keptRewards + kept)).sorted(), forKey: "keptRewards")
+        let level = stats.level
+        DispatchQueue.main.asyncAfter(deadline: .now() + 9) { [weak self] in
+            self?.say("levels take longer to earn now! I'm Lv \(level) on the new scale, and everything I unlocked stays mine ✨", for: 7)
+        }
     }
     private func wearing(_ reward: Reward) -> Bool {
         reward.slot == .golden ? defaults.bool(forKey: reward.slot.key) : defaults.string(forKey: reward.slot.key) == reward.value
@@ -325,6 +342,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         if notificationsOn && defaults.bool(forKey: "setupComplete") && !Visitor.active { notifier.requestPermission() }
         hoverCard.model.onSelect = { [weak self] pid in self?.jump(to: pid) }
         if kiroHooksOn && !Visitor.active { KiroHooks.apply(true) }
+        migrateLevelCurve()
         DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in self?.wearEarnedRewardsOnce() }
         // Last time it may have been standing on a window; drop onto whatever is there now.
         if gravity && panel.frame.minY > petScreen().visibleFrame.minY + 2 { velocity = .zero }
@@ -1317,7 +1335,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         let needs = companion.summary()["needs"] as? [String: Any] ?? [:]
         if needs["enabled"] as? Bool == true {
             let n = { (k: String) in (needs[k] as? NSNumber)?.intValue ?? 0 }
-            model.needs = "⚡ \(n("energy")) energy · 🎈 \(n("fun")) fun · 🪙 \(n("coins"))"
+            model.needs = "⚡ \(n("energy")) energy · 🎈 \(n("fun")) fun"
         } else {
             model.needs = ""
         }

@@ -153,7 +153,8 @@
     "gift.tooSoon": ["{gift}? Wow… but I think that's a bit much for now 😳 Maybe once we're {need}?"],
     "gift.again": ["Another {gift}! I'll treasure both of them! 💕"],
     "gift.unknown": ["{gift}? For me?! Thank you so much, {owner}! I'll do my best to deserve it! 🌟", "A {gift}! I'm so happy! ✨"],
-    "gift.cancel": ["No gift? That's okay! Cheering for me is the best present 💕"]
+    "gift.cancel": ["No gift? That's okay! Cheering for me is the best present 💕"],
+    "needs.full": ["I'm so full! I can't dance like this! 😵 Maybe later?"]
   },
   "words": ["idol", "concert", "stage", "melody", "harmony", "audition", "practice", "microphone", "spotlight", "encore", "costume", "rehearsal", "choreography", "lyrics", "chorus", "applause", "penlight", "hope", "sparkle", "dream", "sekai", "miku", "jump", "smile", "debut", "livestream"],
   "replaceGifts": true,
