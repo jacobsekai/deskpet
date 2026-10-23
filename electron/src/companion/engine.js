@@ -140,6 +140,19 @@
     };
   }
 
+  const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve',
+    'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty'];
+  /** "12", "I took 12 sips", "twelve", "none" → 12 / 0; null if there's no number. */
+  function parseCount(raw) {
+    const s = String(raw == null ? '' : raw).toLowerCase();
+    const digits = /\d+/.exec(s);
+    if (digits) return Math.min(999, parseInt(digits[0], 10));
+    if (/\b(none|nothing|no sips?)\b/.test(s)) return 0;
+    const i = NUMBER_WORDS.findIndex((w) => new RegExp(`\\b${w}\\b`).test(s));
+    return i >= 0 ? i : null;
+  }
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
   /** "45 minutes", "3 hours", "2 days" */
   function duration(minutes) {
     const m = Math.max(1, Math.round(minutes));
@@ -445,7 +458,10 @@
       if (step.input) {
         convo.pending = { type: 'input', step };
         const text = step.inputPool ? line(step.inputPool, step.input) : fill(step.input);
-        return node('input', text, step.mood, { input: { placeholder: step.placeholder || '', kind: step.kind || 'text', max: step.max || 40 } });
+        return node('input', text, step.mood, { input: {
+          placeholder: step.placeholder || '', kind: step.kind || 'text', max: step.max || 40,
+          prefix: step.prefix ? fill(step.prefix) : null, suffix: step.suffix ? fill(step.suffix) : null,
+        } });
       }
       if (step.game) {
         convo.pending = { type: 'game', step };
@@ -500,6 +516,18 @@
       if (!convo || !convo.pending || convo.pending.type !== 'input') return menuNode('main', line('talk.menu', "What's up?"));
       const { step } = convo.pending;
       convo.pending = null;
+      if (step.kind === 'number') {
+        const n = parseCount(raw);
+        if (n == null) {
+          convo.queue.unshift(...[].concat(step.skip || [{ pool: 'input.skip' }]));
+          return advance();
+        }
+        convo.vars = { ...(convo.vars || {}), value: n, sips: n, sipsText: plural(n, 'sip', 'sips') };
+        if (step.log === 'sips') logSips(n);
+        const range = (step.ranges || []).find((r) => r.max == null || n <= r.max);
+        convo.queue.unshift(...[].concat(range ? range.steps || [] : [], step.then || []));
+        return advance();
+      }
       let value = clean(raw, step.max || 40);
       let display = null;
       if (step.kind === 'date') {
@@ -534,6 +562,26 @@
         { ask: line('game.again', 'Again?'), choices: [{ label: 'Again! 🔁', steps: [{ game }] }, { label: 'Something else', steps: [] }] },
       );
       return advance();
+    }
+
+    // MARK: Water breaks
+
+    /** "I took 6 sips": today's and lifetime totals, a little XP and bond for any sip at all. */
+    function logSips(n) {
+      const day = dayFlags();
+      day.sips = (day.sips || 0) + n;
+      day.waterBreaks = (day.waterBreaks || 0) + 1;
+      state.counters.sips = (state.counters.sips || 0) + n;
+      state.counters.waterBreaks = (state.counters.waterBreaks || 0) + 1;
+      convo.vars.today = day.sips;
+      convo.vars.todayText = plural(day.sips, 'sip', 'sips');
+      convo.vars.breaks = day.waterBreaks;
+      waterMs = 0;
+      if (n > 0) {
+        changeAffection(0.3);
+        effects.push({ type: 'xp', amount: 2, play: true });
+      }
+      dirty = true;
     }
 
     // MARK: Trips
@@ -788,6 +836,13 @@
         } else if (s.water && waterMs >= s.water * MINUTE) {
           waterMs = 0;
           say(line('water', 'Water break! 💧'), 6);
+          // Then click the pet and report how many sips you took.
+          const log = persona.topics.find((x) => x.id === 'water_log');
+          if (log && !offer) {
+            offer = { topic: log, until: t + 20 * MINUTE };
+            effects.push({ type: 'offer' });
+            later(6500, { type: 'say', text: line('water.ask', 'click me after your drink and tell me how many sips! 💧'), seconds: 6 });
+          }
         } else if (s.motivation && !day.motivation && activeMs > 2 * MINUTE && h >= 5) {
           day.motivation = true;
           dirty = true;
@@ -994,6 +1049,7 @@
         firstMet: state.firstMet,
         offer: !!offer,
         trips: state.trips.slice(-10).reverse(),
+        water: { today: dayFlags().sips || 0, breaksToday: dayFlags().waterBreaks || 0, total: state.counters.sips || 0, breaks: state.counters.waterBreaks || 0 },
       };
     }
 

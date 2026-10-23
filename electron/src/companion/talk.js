@@ -147,6 +147,16 @@
       $('#answer-date').hidden = !date;
       $('#answer-text').value = '';
       $('#answer-text').placeholder = n.input.placeholder || '';
+      // Fill-in-the-blank: "I took [ ] sips of water this water break".
+      const number = n.input.kind === 'number';
+      $('#answer').classList.toggle('fill-in', number || !!n.input.prefix);
+      $('#answer-text').classList.toggle('blank', number);
+      $('#answer-text').inputMode = number ? 'numeric' : 'text';
+      $('#answer-text').maxLength = n.input.max || 40;
+      for (const [id, text] of [['#answer-prefix', n.input.prefix], ['#answer-suffix', n.input.suffix]]) {
+        $(id).hidden = !text;
+        $(id).textContent = text || '';
+      }
       if (date) {
         const now = new Date();
         $('#answer-month').value = now.getMonth() + 1;
@@ -211,7 +221,7 @@
     requestAnimationFrame(() => {
       const header = $('#box').querySelector('header').offsetHeight;
       const game = $('#game').hidden ? 0 : $('#game').offsetHeight + 4;
-      const inner = $('#text').offsetHeight + 10 + ($('#choices').scrollHeight || 0) + ($('#answer').hidden ? 0 : 44) + ($('#continue').hidden ? 0 : 26);
+      const inner = $('#text').offsetHeight + 10 + ($('#choices').scrollHeight || 0) + ($('#answer').hidden ? 0 : $('#answer').offsetHeight + 8) + ($('#continue').hidden ? 0 : 26);
       const h = Math.round(Math.min(560, Math.max(160, header + game + inner + 24 + 20)));
       if (Math.abs(h - lastHeight) > 2) { lastHeight = h; call('resize', { height: h }); }
     });

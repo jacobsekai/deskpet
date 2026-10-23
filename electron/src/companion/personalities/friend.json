@@ -115,7 +115,17 @@
     "playtime.start": ["Playtime! Throw me as much as you like 🎾", "Yay, playtime! I promise I won't get dizzy… much 😆"],
     "playtime.end": ["Phew! That was so fun 😆", "Okay, I'm all played out. Thanks, {owner}! 💕"],
     "together.milestone": ["We've spent {time} together now, {owner}! Thank you for keeping me around 💕", "Guess what? That's {time} together! 🎉"],
-    "together.milestone+close": ["{time} together… and I'd happily do a thousand more 💕"]
+    "together.milestone+close": ["{time} together… and I'd happily do a thousand more 💕"],
+    "water.ask": ["Click me after your drink and tell me how many sips! 💧", "Go grab some water, then click me and report back! 💧"],
+    "water.intro": ["Hydration check! 💧", "Water report time! 💧"],
+    "water.askSips": ["How much did you drink?", "Okay, tell me honestly 👀"],
+    "water.sips.zero": ["Zero?! 😟 Please go have at least one sip for me!", "None? Your body is asking nicely, {owner}! 💧"],
+    "water.sips.few": ["{sipsText}! Every sip counts. Maybe one more? 😊", "A little is better than nothing! {sipsText} it is 💧"],
+    "water.sips.some": ["{sipsText}! Nice, that's a proper water break 💧", "Good job! {sipsText} down. That's {todayText} today 💧"],
+    "water.sips.good": ["{sipsText}! Look at you, hydration champion 🏆💧", "Wow, {sipsText}! Your body says thank you 💕 That's {todayText} today!"],
+    "water.sips.lots": ["{sipsText}?! That's a whole glass! Amazing 🥤✨", "{sipsText}! You're glowing with hydration ✨ {todayText} today!"],
+    "water.sips.fish": ["{sipsText}?! Are you secretly a fish? 🐟 Amazing, just don't overdo it!", "{sipsText}!! Okay, I'm impressed 😳💧"],
+    "water.sips.skip": ["That's okay! Just remember to drink something soon 💧"]
   },
   "words": ["sunshine", "rainbow", "coffee", "keyboard", "pillow", "blanket", "cookie", "pancake", "garden", "breeze", "thunder", "lantern", "puzzle", "teacup", "bubble", "comet", "galaxy", "planet", "rocket", "island", "ocean", "dolphin", "penguin", "hamster", "panda", "kitten", "puppy", "butterfly", "sunflower", "blossom", "picnic", "popcorn", "noodles", "strawberry", "melody", "guitar", "piano", "violin", "journey", "treasure", "castle", "dragon", "wizard", "marshmallow", "snowflake", "autumn", "winter", "spring", "summer", "midnight", "starlight", "friendship", "adventure", "computer", "monitor", "laptop", "window", "server", "project", "deadline", "weekend", "sandwich", "lemonade", "cupcake", "umbrella", "backpack", "notebook", "crayon", "camera"],
   "topics": [
@@ -728,6 +738,13 @@
       "steps": [
         {"pool": "trip.remember", "mood": "happy"},
         {"input": "Where should we go next time?", "max": 60, "placeholder": "the beach, a café, anywhere!", "key": "tripWish", "label": "where you want to take me next", "then": [{"pool": "trip.wish.thanks", "mood": "excited"}], "skip": [{"pool": "trip.moment.skip"}]}
+      ]
+    },
+    {
+      "id": "water_log", "category": "tell", "title": "💧 I took a water break", "affection": 0,
+      "steps": [
+        {"pool": "water.intro", "mood": "happy"},
+        {"input": "How much did you drink?", "inputPool": "water.askSips", "kind": "number", "max": 3, "prefix": "I took", "suffix": "sips of water this water break", "placeholder": "?", "log": "sips", "ranges": [{"max": 0, "steps": [{"pool": "water.sips.zero", "mood": "worried"}]}, {"max": 2, "steps": [{"pool": "water.sips.few", "mood": "happy"}]}, {"max": 5, "steps": [{"pool": "water.sips.some", "mood": "happy"}]}, {"max": 10, "steps": [{"pool": "water.sips.good", "mood": "proud"}]}, {"max": 20, "steps": [{"pool": "water.sips.lots", "mood": "excited"}]}, {"steps": [{"pool": "water.sips.fish", "mood": "surprised"}]}], "skip": [{"pool": "water.sips.skip"}]}
       ]
     }
   ]

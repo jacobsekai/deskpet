@@ -2287,6 +2287,8 @@ if (process.argv.includes('--snapshot')) {
           await demo('menu', { id: 'cats' }); await wait(900); await shot('ask-about');
           await demo('menu', { id: 'topic:q_chronotype' }); await wait(1600); await shot('question');
           await demo('menu', { id: 'cat:feeling' }); await wait(900); await shot('feelings');
+          await demo('menu', { id: 'topic:water_log' }); await wait(900); await demo('next'); await wait(900); await shot('water');
+          await demo('input', { value: '8' }); await wait(900); await shot('water-reply');
           for (const g of ['rps', 'ttt', 'words', 'pong']) { await demo('menu', { id: `game:${g}` }); await wait(1400); await shot(`game-${g}`); }
           console.log('talk screenshots written');
           pet.quit(); // the same path as Quit in the menu

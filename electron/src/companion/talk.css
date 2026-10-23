@@ -110,3 +110,6 @@ header { display: flex; align-items: center; gap: 10px; padding: 12px 12px 0 16p
 .pong { border-radius: 16px; background: rgba(255, 255, 255, 0.75); border: 1px solid var(--line); cursor: none; }
 
 #confetti { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.answer.fill-in { flex-wrap: wrap; }
+.answer .sentence { font-weight: 700; font-size: 14px; color: var(--ink); }
+.answer input.blank { flex: 0 0 64px; width: 64px; text-align: center; font-weight: 800; padding: 7px 6px; }

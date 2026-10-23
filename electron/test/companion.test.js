@@ -10,13 +10,13 @@ const personalities = {};
 for (const f of fs.readdirSync(dir)) personalities[path.basename(f, '.json')] = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
 
 const STEP_KEYS = new Set(['say', 'mood', 'ask', 'choices', 'key', 'label', 'input', 'placeholder', 'kind', 'then', 'skip', 'when', 'else', 'steps',
-  'affection', 'remember', 'forget', 'farewell', 'action', 'random', 'pick', 'pool', 'game', 'text', 'askPool', 'inputPool', 'max']);
+  'affection', 'remember', 'forget', 'farewell', 'action', 'random', 'pick', 'pool', 'game', 'text', 'askPool', 'inputPool', 'max', 'ranges', 'prefix', 'suffix', 'log']);
 const CHOICE_KEYS = new Set(['label', 'value', 'say', 'steps', 'affection', 'remember', 'mood', 'when', 'farewell']);
 const MOODS = new Set(['happy', 'love', 'excited', 'proud', 'thinking', 'sleepy', 'surprised', 'nervous', 'sad', 'worried', 'reading', 'idle', 'dizzy', 'typing']);
 
 function lint(steps, where) {
   for (const s of [].concat(steps || [])) {
-    if (typeof s === 'string') { assert(!/\{(?!owner|pet|name|mem:|timeOfDay|weekday|tier|value|hours|tasks|focus|time|places|count|host|home)[^}]*\}/.test(s), `${where}: unknown placeholder in "${s}"`); continue; }
+    if (typeof s === 'string') { assert(!/\{(?!owner|pet|name|mem:|timeOfDay|weekday|tier|value|hours|tasks|focus|time|places|count|host|home|sips|sipsText|today|todayText|breaks)[^}]*\}/.test(s), `${where}: unknown placeholder in "${s}"`); continue; }
     if (Array.isArray(s)) { lint(s, where); continue; }
     for (const k of Object.keys(s)) assert(STEP_KEYS.has(k), `${where}: unknown step key "${k}"`);
     if (s.mood) assert(MOODS.has(s.mood), `${where}: unknown mood ${s.mood}`);
@@ -29,6 +29,7 @@ function lint(steps, where) {
         lint(c.steps, where);
       }
     }
+    if (s.ranges) s.ranges.forEach((r) => lint(r.steps, where));
     lint(s.then, where); lint(s.skip, where); lint(s.else, where); lint(s.steps, where);
     if (s.random) s.random.forEach((r) => lint(r, where));
     if (s.game) assert(Companion.GAMES.some((g) => g.id === s.game), `${where}: unknown game ${s.game}`);
@@ -51,7 +52,7 @@ function play(e, first, pick = 0) {
     if (node.kind === 'menu' || node.kind === 'end') return node;
     let r;
     if (node.kind === 'ask') r = e.ui('choose', { index: Math.min(pick, node.choices.length - 1) });
-    else if (node.kind === 'input') r = e.ui('input', { value: node.input.kind === 'date' ? '10-22' : 'pizza' });
+    else if (node.kind === 'input') r = e.ui('input', { value: node.input.kind === 'date' ? '10-22' : node.input.kind === 'number' ? String([0, 2, 7, 30][pick]) : 'pizza' });
     else if (node.kind === 'game') r = e.ui('game', { game: node.game, outcome: 'win' });
     else r = e.ui('next');
     node = r.result;
@@ -307,6 +308,30 @@ for (const id of Object.keys(personalities)) {
     const said = e.tick({ togetherMinutes: 1500, idle: 999 }).concat(e.tick({ togetherMinutes: 1500, idle: 999 })).concat(e.tick({ togetherMinutes: 1500, idle: 999 })).filter((f) => f.type === 'say');
     assert(said.length === 1 && /24 hours/.test(said[0].text), `${id}: 24 hours milestone: ${said.map((f) => f.text)}`);
     assert.strictEqual(e._state().counters.together, 3);
+    checks++;
+  }
+}
+
+{
+  // Water breaks: the sip count picks the reaction, adds up, and the reminder offers the log.
+  for (const id of Object.keys(personalities)) {
+    const { e } = make(id);
+    const seen = {};
+    for (const [typed, pool] of [['0', 'zero'], ['I took 1 sip', 'few'], ['four', 'some'], ['8', 'good'], ['15', 'lots'], ['40', 'fish'], ['lots!', 'skip']]) {
+      const first = e._run('water_log');
+      let n = first;
+      while (n.kind !== 'input') n = e.ui('next').result;
+      assert.strictEqual(n.input.prefix, 'I took');
+      assert.strictEqual(n.input.suffix, 'sips of water this water break');
+      const r = e.ui('input', { value: typed }).result;
+      const patterns = e._persona().pools[`water.sips.${pool}`].map((l) => new RegExp(`^${l.replace(/[.*+?^$()|[\]\\]/g, '\\$&').replace(/\{[^}]+\}/g, '.+?')}$`, 'u'));
+      assert(patterns.some((re) => re.test(r.text)), `${id}: "${typed}" → ${pool}: ${r.text}`);
+      assert(!/\{[a-z]+\}/i.test(r.text), `${id}: unfilled: ${r.text}`);
+      seen[pool] = true;
+    }
+    const w = e.summary().water;
+    assert.strictEqual(w.today, 0 + 1 + 4 + 8 + 15 + 40, `${id}: sips today ${w.today}`);
+    assert.strictEqual(w.breaks, 6);
     checks++;
   }
 }

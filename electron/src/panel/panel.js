@@ -258,6 +258,11 @@
     $('#cp-ladder').innerHTML = c.tiers.map((t, i) => `<div class="rung${t.reached ? ' reached' : ''}${i === tierIndex ? ' current' : ''}"><div class="h">${i === 0 ? '🤝' : '♥'.repeat(i)}</div>${esc(t.name)}</div>`).join('');
     const s = c.settings;
     segmented($('#cp-water'), c.choices.water, s.water, (v) => (v ? `${v} min` : 'Off'), 'water');
+    const w = c.water || {};
+    const sips = (n) => `${n} sip${n === 1 ? '' : 's'}`;
+    $('#cp-water-log').textContent = w.breaks
+      ? `Today: ${sips(w.today)} over ${w.breaksToday} break${w.breaksToday === 1 ? '' : 's'} · ${sips(w.total)} all time. Log one any time: Talk → Tell ${state.names.petName}… → I took a water break.`
+      : `After a water reminder, click ${state.names.petName} and say how many sips you took (or Talk → Tell ${state.names.petName}… → I took a water break).`;
     segmented($('#cp-breaks'), c.choices.breaks, s.breaks, (v) => (v ? `${v} min` : 'Off'), 'breaks');
     segmented($('#cp-chatter'), c.choices.chatter, s.chatter, (v) => v[0].toUpperCase() + v.slice(1), 'chatter');
     document.querySelectorAll('.switch-btn[data-companion]').forEach((sw) => sw.classList.toggle('on', !!s[sw.dataset.companion]));
