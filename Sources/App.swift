@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import ServiceManagement
 import SwiftUI
 import UniformTypeIdentifiers
@@ -409,7 +410,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         if agents.scanCount > 0 { handleAgentChanges(now) }
 
         let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
-        let sinceKey = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
+        let sinceKey = secondsSinceTyping(idle: idle)
 
         if wasAsleep && idle < 1 {
             wasAsleep = false
@@ -499,17 +500,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         if perch != nil && !walkOnWindows { dropFromPerch() }
     }
 
+    private static let workingActivities: Set<AgentActivity> = [.thinking, .reading, .searching, .typing, .delegating, .tidying]
+
+    /// Seconds since the last keystroke. With Secure Keyboard Entry on (some terminals, password fields) macOS hides
+    /// keystrokes, so then any input while the mouse stays still counts as typing.
+    private func secondsSinceTyping(idle: Double) -> Double {
+        let state = CGEventSourceStateID.combinedSessionState
+        let sinceKey = CGEventSource.secondsSinceLastEventType(state, eventType: .keyDown)
+        guard IsSecureEventInputEnabled(), idle < 1.2 else { return sinceKey }
+        let pointer: [CGEventType] = [.mouseMoved, .leftMouseDown, .rightMouseDown, .leftMouseDragged, .scrollWheel, .otherMouseDown]
+        let sincePointer = pointer.map { CGEventSource.secondsSinceLastEventType(state, eventType: $0) }.min() ?? 0
+        return sincePointer > 1.5 ? min(sinceKey, idle) : sinceKey
+    }
+
     private func resolveMood(now: Double, idle: Double, sinceKey: Double) -> Mood {
         if petView.resizing { return petView.dragging ? .dragged : .idle }
         if petView.dragging { return .dragged }
         if velocity != nil { return .flying }
         if let t = transient, t.until > now { return t.mood }
-        if let top = topSession, top.activity != .idle { return Self.mood(for: top.activity) }
+        // The typing pose stays up through short pauses, so the laptop doesn't flicker in and out.
+        if sinceKey < 1.2 { typingAlongUntil = now + 2 }
+        let typing = now < typingAlongUntil
+        if let top = topSession, top.activity != .idle {
+            // While you type, the pet types with you even if an agent is busy (the caption still shows the agent);
+            // an agent that needs you, failed, or just finished still comes first.
+            if !(typing && typeAlong && Self.workingActivities.contains(top.activity)) { return Self.mood(for: top.activity) }
+        }
+        if typing && typeAlong {
+            walkTarget = nil
+            return .typing
+        }
         if idle > 240 { return .sleeping }
         if idle > 75 { return .sleepy }
         if walkTarget != nil { return .walking }
-        if sinceKey < 1.2 { typingAlongUntil = now + 2 }
-        if now < typingAlongUntil { return typeAlong ? .typing : .userTyping }
+        if typing { return .userTyping }
         return .idle
     }
 

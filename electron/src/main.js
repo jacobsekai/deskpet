@@ -422,14 +422,22 @@ class Pet {
     if (this.press && this.press.dragging) return 'dragged';
     if (this.velocity) return 'flying';
     if (this.transient && this.transient.until > t) return this.transient.mood;
+    // The typing pose stays up through short pauses, so the laptop doesn't flicker in and out.
+    if (sinceKey < 1.2) this.typingAlongUntil = t + 2;
+    const typing = t < (this.typingAlongUntil || 0);
     const top = this.topSession;
-    if (top && top.activity !== 'idle') return ACTIVITY_MOOD[top.activity];
+    // While you type, the pet types with you even if an agent is busy (the caption still shows the agent);
+    // an agent that needs you, failed, or just finished still comes first.
+    const working = ['thinking', 'reading', 'searching', 'typing', 'delegating', 'tidying'];
+    if (top && top.activity !== 'idle' && !(typing && this.typeAlong && working.includes(top.activity))) return ACTIVITY_MOOD[top.activity];
+    if (typing && this.typeAlong) {
+      this.walkTarget = null;
+      return 'typing';
+    }
     if (idle > 240) return 'sleeping';
     if (idle > 75) return 'sleepy';
     if (this.walkTarget !== null) return 'walking';
-    // The pose stays up through short pauses, so the laptop doesn't flicker in and out.
-    if (sinceKey < 1.2) this.typingAlongUntil = t + 2;
-    if (t < (this.typingAlongUntil || 0)) return this.typeAlong ? 'typing' : 'userTyping';
+    if (typing) return 'userTyping';
     return 'idle';
   }
 
