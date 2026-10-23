@@ -43,6 +43,8 @@ function write(rendered, outDir) {
       files.push(f.name);
     }
     fs.copyFileSync(path.join(dir, 'idle_1.png'), path.join(dir, 'preview.png'));
+    // Frames leave headroom for hats and bubbles; the gallery card wants just the cat.
+    if (process.platform === 'darwin') require('child_process').execFileSync('sips', ['-c', '200', '300', '--cropOffset', '125', '45', path.join(dir, 'preview.png'), '--out', path.join(dir, 'preview.png')], { stdio: 'ignore' });
     fs.writeFileSync(path.join(dir, 'pack.json'), `${JSON.stringify({ ...PACK_JSON, name: p.name }, null, 2)}\n`);
     files.push('preview.png', 'pack.json');
     index.push({ id: p.id, name: p.name, author: 'DeskPet', description: p.description, preview: 'preview.png', license: 'MIT, original DeskPet art', files });
