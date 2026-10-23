@@ -1,7 +1,7 @@
 {
   "name": "deskpet",
   "productName": "DeskPet",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "A desktop pet that reacts to you and your AI agents",
   "main": "src/main.js",
   "scripts": {
