@@ -331,7 +331,7 @@
     $('#badge-toggle').checked = state.toggles.showPrestigeBadge;
     $('#badge-toggle').parentElement.style.visibility = r.prestige ? 'visible' : 'hidden';
 
-    const key = JSON.stringify(state.rewards.map((x) => [x.id, x.unlocked, x.worn]));
+    const key = JSON.stringify([state.eventPreview, state.rewards.map((x) => [x.id, x.unlocked, x.worn])]);
     if (key === lastRewards) return;
     lastRewards = key;
     const box = $('#reward-slots');
@@ -344,8 +344,8 @@
         card.dataset.reward = rw.id;
         card.appendChild(el('canvas'));
         card.appendChild(el('div', 'name', esc(rw.title)));
-        card.appendChild(el('div', 'lvl', rw.unlocked ? (rw.worn ? 'Click to take off' : 'Click to wear') : rw.event ? `${EVENT_NAMES[rw.event] || 'Event'} reward` : `Unlocks at Lv ${rw.level}`));
-        if (rw.unlocked) card.addEventListener('click', () => call('wear', { id: rw.id }).then(refresh));
+        card.appendChild(el('div', 'lvl', rw.unlocked ? (rw.worn ? 'Click to take off' : 'Click to wear') : rw.event ? `${EVENT_NAMES[rw.event] || 'Event'} reward · click to ${state.eventPreview === false ? 'preview' : 'hide the preview'}` : `Unlocks at Lv ${rw.level}`));
+        if (rw.unlocked || rw.event) card.addEventListener('click', () => call('wear', { id: rw.id }).then(() => { lastRewards = ''; refresh(); }));
         grid.appendChild(card);
       }
       box.appendChild(grid);

@@ -518,12 +518,13 @@ class Pet {
     p.companion = (worn('companion') || {}).value || null;
     p.golden = !!worn('golden');
     p.prestige = this.settings.get('showPrestigeBadge', true) ? this.stats.prestige : 0;
-    // During an event its outfit shows in any empty slot, even before it's earned.
+    // During an event its outfit previews in slots you've never set (taking a hat off keeps it off),
+    // unless you've hidden the preview (click the locked reward).
     const ev = seasons.activeEvent();
-    if (ev) {
+    if (ev && this.settings.get('eventPreview', true)) {
       for (const id of ev.rewards) {
         const r = REWARDS.find((x) => x.id === id);
-        if (r && !p[r.slot]) p[r.slot] = r.value;
+        if (r && !p[r.slot] && this.settings.get(r.key, undefined) === undefined) p[r.slot] = r.value;
       }
     }
     if (!p.hat && this.birthdayToday()) p.hat = 'partyHat';
@@ -1156,6 +1157,7 @@ class Pet {
       sessions: card.rows.map((r, i) => ({ ...r, name: r.title.split(' · ')[0], project: r.title.split(' · ')[1] || '', precise: !r.detail.endsWith('(guessed)'), detail: r.detail.replace(' (guessed)', ''), id: i })),
       focus: { phase: this.focus.phase, label: this.focus.label, remaining: this.focus.remaining, total: (this.focus.phase === 'rest' ? Math.max(5, Math.round(this.focus.minutes / 5)) : this.focus.minutes) * 60, minutes: this.focus.minutes },
       blocklist: this.blocklist, blockDuringFocus: this.blockDuringFocus, strictBlock: this.strictBlock,
+      eventPreview: this.settings.get('eventPreview', true),
       look: { packs: listPacks(), spritePack: this.spritePackName, themeColor: this.themeHex, thoughtBubble: this.thoughtBubble, scale: this.scale },
       panicKey: { id: this.panicKeyID, ok: this.panicKeyOK !== false, options: [{ id: 'off', label: 'Off' }, ...PANIC_KEYS.map((k) => ({ id: k.id, label: k.label }))] },
       toggles: {
@@ -1211,6 +1213,13 @@ class Pet {
         return { ok: true };
       case 'wear': {
         const r = REWARDS.find((x) => x.id === payload.id);
+        // A locked event reward: show or hide its preview instead.
+        if (r && r.event && !this.isUnlocked(r)) {
+          const on = !this.settings.get('eventPreview', true);
+          this.settings.set('eventPreview', on);
+          if (on && this.settings.get(r.key, undefined) === '') { delete this.settings.values[r.key]; this.settings.set('eventPreview', on); }
+          return { ok: true };
+        }
         if (r && this.isUnlocked(r)) this.settings.set(r.key, r.slot === 'golden' ? !this.wearing(r) : (this.wearing(r) ? '' : r.value));
         return { ok: true };
       }

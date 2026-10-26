@@ -196,6 +196,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     }
     /// Rewards unlocked under the old, faster level curve stay unlocked.
     private var keptRewards: [String] { defaults.stringArray(forKey: "keptRewards") ?? [] }
+    /// Event outfits preview on the pet before they're earned (click the locked reward to hide it).
+    private var eventPreview: Bool { get { flag("eventPreview", true) } set { defaults.set(newValue, forKey: "eventPreview") } }
 
     /// Levels got harder in 1.5.1: recalculate on the new curve, keeping everything already unlocked.
     private func migrateLevelCurve() {
@@ -652,8 +654,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         p.companion = worn(.companion)?.value
         p.golden = worn(.golden) != nil
         if p.hat == nil && birthdayToday { p.hat = Reward.partyHat.value }
-        // During an event its outfit shows in empty slots, even before it's earned.
-        for r in activeEvent?.rewards ?? [] {
+        // During an event its outfit previews in slots you've never set (taking a hat off keeps it off),
+        // unless you've hidden the preview (click the locked reward).
+        for r in activeEvent?.rewards ?? [] where eventPreview && defaults.object(forKey: r.slot.key) == nil {
             switch r.slot {
             case .hat where p.hat == nil: p.hat = r.value
             case .companion where p.companion == nil: p.companion = r.value
@@ -2417,6 +2420,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             "sync": syncState(),
             "companion": companion.summary(),
             "trip": tripPanelState(),
+            "eventPreview": eventPreview,
             "preview": ["hat": pose.hat as Any, "trail": pose.trail as Any, "aura": pose.aura as Any,
                         "companion": pose.companion as Any, "golden": pose.golden, "prestige": pose.prestige],
         ]
@@ -2533,6 +2537,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             }
             return ["ok": true]
         case "wear":
+            // A locked event reward: show or hide its preview instead.
+            if let r = Reward(rawValue: payload["id"] as? String ?? ""), r.event != nil, !isUnlocked(r) {
+                eventPreview.toggle()
+                if eventPreview, defaults.string(forKey: r.slot.key) == "" { defaults.removeObject(forKey: r.slot.key) }
+                return ["ok": true]
+            }
             if let r = Reward(rawValue: payload["id"] as? String ?? ""), isUnlocked(r) {
                 if r.slot == .golden { defaults.set(!wearing(r), forKey: r.slot.key) } else { defaults.set(wearing(r) ? "" : r.value, forKey: r.slot.key) }
             }
