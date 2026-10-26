@@ -122,6 +122,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         set { defaults.set(newValue, forKey: "trip") }
     }
     private var petAway: Bool { tripState != nil }
+    private var lastScreenCheck = 0.0
     /// The .gift file being given (picked in the talk window or dropped on the pet).
     private var pendingGift: URL?
     /// Playtime: until then, throws are a game and never hurt the bond.
@@ -526,6 +527,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         mood = resolveMood(now: now, idle: idle, sinceKey: sinceKey)
         if mood == .idle && wander && !stayPut && !panel.isMiniaturized && now > nextWalkAt && velocity == nil && !petView.resizing && !talkOpen { startWalk(now) }
         if perch != nil && !walkOnWindows { dropFromPerch() }
+        if now - lastScreenCheck >= 2 {
+            lastScreenCheck = now
+            keepOnScreen()
+        }
     }
 
     private static let workingActivities: Set<AgentActivity> = [.thinking, .reading, .searching, .typing, .delegating, .tidying]
@@ -775,9 +780,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         }
         perch = (window.id, window.rect)
         let center = o.x + size.width / 2
-        if center < window.rect.minX + 4 || center > window.rect.maxX - 4 || feet + petView.bodyExtent.height > petScreen().visibleFrame.maxY {
+        let vf = petScreen().visibleFrame
+        // Also hop off a window that slides down behind the Dock.
+        if center < window.rect.minX + 4 || center > window.rect.maxX - 4 || feet + petView.bodyExtent.height > vf.maxY || feet < vf.minY {
             dropFromPerch()
         }
+    }
+
+    /// Safety net: a pet behind the Dock or off every screen (a window it rode, a display change, an old saved
+    /// position) goes back to the bottom of the nearest screen.
+    private func keepOnScreen() {
+        guard panel.isVisible, velocity == nil, !petView.dragging, !petView.resizing else { return }
+        let f = panel.frame
+        let center = NSPoint(x: f.midX, y: f.minY + PetView.ground)
+        let screen = NSScreen.screens.first { $0.frame.contains(center) } ?? NSScreen.main ?? NSScreen.screens[0]
+        let vf = screen.visibleFrame
+        let body = petView.bodyExtent
+        let below = f.minY < vf.minY - 1
+        let sideways = f.midX + body.halfWidth < vf.minX + 10 || f.midX - body.halfWidth > vf.maxX - 10
+        let above = f.minY + PetView.ground + body.height > vf.maxY + 1
+        guard below || sideways || above || !screen.frame.contains(center) else { return }
+        perch = nil
+        walkTarget = nil
+        let x = min(max(f.minX, vf.minX - (f.width / 2 - body.halfWidth)), vf.maxX - (f.width / 2 + body.halfWidth))
+        let y = min(max(f.minY, vf.minY), vf.maxY - PetView.ground - body.height)
+        panel.setFrameOrigin(NSPoint(x: x, y: y))
+        saveOrigin(panel.frame.origin)
     }
 
     private func dropFromPerch() {
@@ -2989,6 +3017,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         let screen = NSScreen.screens.first { $0.frame.contains(m) } ?? NSScreen.main!
         let origin = NSPoint(x: m.x - size.width / 2, y: screen.visibleFrame.minY)
         walkTarget = nil
+        perch = nil // otherwise it snaps straight back onto the window it was standing on
         panel.setFrameOrigin(origin)
         panel.orderFrontRegardless()
         saveOrigin(origin)

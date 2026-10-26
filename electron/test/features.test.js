@@ -221,6 +221,22 @@ const ok = (name, fn) => Promise.resolve().then(fn).then(() => { checks++; conso
     assert.strictEqual(presence.playdateStep({ me, other: null, state: { pid: 7 }, met, t: 1, nextAt: 0 }).state, null);
   });
 
+  await ok('on screen: a pet behind the taskbar, off to the side, or above the screen comes back', () => {
+    const { screenFix } = require('../src/onscreen');
+    const wa = { x: 0, y: 0, width: 1920, height: 1040 }; // a 1080p screen with a 40px taskbar
+    const body = { halfWidth: 46, height: 84 };
+    const at = (x, bottom) => ({ x, y: bottom - 260, width: 260, height: 260 });
+    assert.strictEqual(screenFix(at(800, 1040), wa, body, 34), null, 'standing on the taskbar edge is fine');
+    assert.strictEqual(screenFix(at(800, 600), wa, body, 34), null, 'up on a window is fine');
+    assert.deepStrictEqual(screenFix(at(800, 1080), wa, body, 34), { x: 800, bottom: 1040 }, 'behind the taskbar → back on top of it');
+    assert.deepStrictEqual(screenFix(at(800, 1400), wa, body, 34), { x: 800, bottom: 1040 }, 'far below');
+    assert.deepStrictEqual(screenFix(at(-500, 1040), wa, body, 34), { x: -84, bottom: 1040 }, 'off the left edge');
+    assert.deepStrictEqual(screenFix(at(2500, 1040), wa, body, 34), { x: 1920 - 176, bottom: 1040 }, 'off the right edge');
+    assert.deepStrictEqual(screenFix(at(800, 50), wa, body, 34), { x: 800, bottom: 118 }, 'above the top');
+    const second = { x: 1920, y: 0, width: 1920, height: 1040 };
+    assert.strictEqual(screenFix(at(2600, 1040), second, body, 34), null, 'fine on a second monitor');
+  });
+
   console.log(`\n${checks} checks passed`);
   fs.rmSync(home, { recursive: true, force: true });
 })().catch((e) => { console.error(e); process.exit(1); });

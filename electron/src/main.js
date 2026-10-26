@@ -15,6 +15,7 @@ const fs = require('fs');
 const path = require('path');
 const { AgentMonitor, PRIORITY, TranscriptTokens, codexState } = require('./agents');
 const gifts = require('./gifts');
+const { screenFix } = require('./onscreen');
 const {
   REWARDS, SLOTS, PRESTIGE, Stats, FocusTimer, Updater, importPack, exportPack, kiroHooks, jumpTo, WindowPlatforms, loginItem,
   BLOCK_DEFAULTS, BROWSERS, TITLE_WORDS, parseBlocklist, matchTitle, closeBlockedTab, transferKey, TRANSFER_SETTINGS,
@@ -418,6 +419,7 @@ class Pet {
       kiroHooks.apply(true); // tools like `aim` regenerate Kiro agent files
     }
     if (this.perch && !this.walkOnWindows) this.dropFromPerch();
+    if (t - (this.lastScreenCheck || 0) >= 2) { this.lastScreenCheck = t; this.keepOnScreen(); }
 
     this.mood = this.resolveMood(t, idle, sinceKey);
     if (t - this.lastPresence >= 1) {
@@ -648,6 +650,9 @@ class Pet {
     if (!w) return this.dropFromPerch();
     const dx = w.rect.x - this.perch.rect.x;
     const bottom = w.rect.y + GROUND;
+    // A window sliding down past the taskbar: hop off instead of riding it underneath.
+    const wa = this.display().workArea;
+    if (bottom > wa.y + wa.height) return this.dropFromPerch();
     if (dx !== 0 || Math.abs(this.pos.bottom - bottom) > 0.5) {
       this.pos.x += dx;
       this.pos.bottom = bottom;
@@ -756,6 +761,23 @@ class Pet {
     const b = this.win.getBounds();
     this.pos = { x: b.x, bottom: b.y + b.height };
     this.settings.set('position', { x: b.x, y: b.y });
+  }
+
+  /**
+   * Safety net: if the pet ended up behind the taskbar or off every screen (a window it rode, a taskbar or
+   * resolution change, an old saved position), put it back at the bottom of the nearest screen.
+   */
+  keepOnScreen() {
+    if (!this.win || this.win.isDestroyed() || this.press || this.velocity || this.resizing || this.away) return;
+    const b = this.win.getBounds();
+    const wa = screen.getDisplayNearestPoint({ x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height - GROUND) }).workArea;
+    const fix = screenFix(b, wa, this.geometry ? this.geometry.bodyExtent : { halfWidth: 46, height: 84 }, GROUND);
+    if (!fix) return;
+    this.perch = null;
+    this.walkTarget = null;
+    this.pos = fix;
+    this.applyPosition();
+    this.savePosition();
   }
 
   // MARK: Reactions
@@ -1983,6 +2005,7 @@ class Pet {
     const wa = display.workArea;
     this.walkTarget = null;
     this.velocity = null;
+    this.perch = null; // otherwise it snaps straight back onto the window it was standing on
     this.pos = { x: this.cursor.x - this.size.width / 2, bottom: wa.y + wa.height };
     this.applyPosition();
     this.win.showInactive();
@@ -2571,6 +2594,8 @@ if (process.argv.includes('--snapshot') || process.argv.includes('--make-gallery
   app.whenReady().then(() => {
     pet = new Pet();
     pet.registerPanicKey();
+    // Taskbar moved or resized, resolution or scaling changed, a monitor unplugged: keep the pet visible.
+    for (const ev of ['display-metrics-changed', 'display-removed', 'display-added']) screen.on(ev, () => setTimeout(() => pet.keepOnScreen(), 500));
     app.on('will-quit', () => globalShortcut.unregisterAll());
     ipcMain.on('press', () => pet.onPress());
     ipcMain.on('release', () => pet.onRelease());
