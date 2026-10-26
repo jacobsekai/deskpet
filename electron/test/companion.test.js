@@ -171,8 +171,14 @@ for (const id of Object.keys(personalities)) {
     e.ui('setting', { key: 'lateNight', value: false });
     e.ui('setting', { key: 'recap', value: false });
     const said = [];
-    for (let i = 0; i < 95 * 12; i++) { t += 5000; for (const f of e.tick({ idle: 3 })) if (f.type === 'say') said.push(f.text); }
+    const notified = [];
+    for (let i = 0; i < 95 * 12; i++) { t += 5000; for (const f of e.tick({ idle: 3 })) if (f.type === 'say') { said.push(f.text); if (f.notify) notified.push(f.text); } }
     assert(said.some((s) => /water|sip|hydrat/i.test(s)), `water reminder: ${said.join(' | ')}`);
+    // The reminder itself is also a notification; encouragement and the "click me" follow-up are not.
+    assert.strictEqual(notified.length, 1, `water notification: ${notified.join(' | ')}`);
+    assert(/water|sip|hydrat/i.test(notified[0]), `water notification: ${notified[0]}`);
+    e.ui('setting', { key: 'notifyReminders', value: false });
+    for (let i = 0; i < 95 * 12; i++) { t += 5000; for (const f of e.tick({ idle: 3 })) assert(!f.notify, 'no notifications when turned off'); }
     const before = said.length;
     for (let i = 0; i < 100 * 12; i++) { t += 5000; e.tick({ idle: 3, focus: 'focus' }); }
     for (let i = 0; i < 12; i++) { t += 5000; for (const f of e.tick({ idle: 3, quiet: true })) if (f.type === 'say') said.push(f.text); }

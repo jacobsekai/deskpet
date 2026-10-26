@@ -1014,7 +1014,10 @@ class Pet {
   applyCompanion(effects) {
     for (const f of effects || []) {
       switch (f.type) {
-        case 'say': this.say(f.text, f.seconds || 4); break;
+        case 'say':
+          this.say(f.text, f.seconds || 4);
+          if (f.notify) this.notify(this.config.petName, f.text, 0);
+          break;
         case 'mood': this.transient = { mood: f.mood, until: now() + (f.seconds || 6) }; break;
         case 'xp': this.gainXP(f.amount, !!f.play); break;
         case 'offer': this.transient = { mood: 'startled', until: now() + 0.8 }; this.playSound('needs-you'); break;

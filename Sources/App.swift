@@ -1001,7 +1001,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         for f in effects {
             switch f["type"] as? String ?? "" {
             case "say":
-                if let text = f["text"] as? String { say(text, for: f["seconds"] as? Double ?? 4) }
+                guard let text = f["text"] as? String else { break }
+                say(text, for: f["seconds"] as? Double ?? 4)
+                if f["notify"] as? Bool == true { post(config.petName, text, pid: 0) }
             case "mood":
                 if let mood = (f["mood"] as? String).flatMap(Companion.mood) { transient = (mood, CACurrentMediaTime() + (f["seconds"] as? Double ?? 6)) }
             case "xp":

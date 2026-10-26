@@ -28,7 +28,7 @@
   const DAILY_GAIN_CAP = 12;
   const MINUTE = 60000;
 
-  const DEFAULT_SETTINGS = { chatter: 'sometimes', water: 90, breaks: 50, lateNight: true, motivation: true, appComments: true, recap: true, journal: true, needs: false };
+  const DEFAULT_SETTINGS = { chatter: 'sometimes', water: 90, breaks: 50, lateNight: true, motivation: true, appComments: true, recap: true, journal: true, needs: false, notifyReminders: true };
 
   /** Check-ins you can turn on (custom ones are added next to them). `every` = minutes of activity; `at` = a daily time. */
   const BUILTIN_CHECKINS = [
@@ -1020,9 +1020,12 @@
 
     function later(ms, effect) { scheduled.push({ at: now() + ms, effect }); }
 
-    function say(text, seconds) {
+    /** `remind` marks reminders (water, stretch, bedtime, check-ins), which also show as notifications. */
+    function say(text, seconds, remind) {
       if (!text) return false;
-      effects.push({ type: 'say', text, seconds: seconds || Math.min(9, 3 + text.length / 18) });
+      const effect = { type: 'say', text, seconds: seconds || Math.min(9, 3 + text.length / 18) };
+      if (remind && state.settings.notifyReminders) effect.notify = true;
+      effects.push(effect);
       lastAmbient = now();
       return true;
     }
@@ -1121,13 +1124,13 @@
         const late = h >= 23 || h < 5;
         if (s.lateNight && late && ctx.idle < 10 && t - lastNight > 75 * MINUTE) {
           lastNight = t;
-          say(line(h >= 1 && h < 5 ? 'lateNight.late' : 'lateNight', "It's late, {owner}… bedtime soon? 🌙"), 6);
+          say(line(h >= 1 && h < 5 ? 'lateNight.late' : 'lateNight', "It's late, {owner}… bedtime soon? 🌙"), 6, true);
         } else if (s.breaks && t - streakStart >= s.breaks * MINUTE) {
           streakStart = t;
-          say(line('break', 'Stretch break? 🙆'), 7);
+          say(line('break', 'Stretch break? 🙆'), 7, true);
         } else if (s.water && waterMs >= s.water * MINUTE) {
           waterMs = 0;
-          say(line('water', 'Water break! 💧'), 6);
+          say(line('water', 'Water break! 💧'), 6, true);
           // Then click the pet and report how many sips you took.
           const log = persona.topics.find((x) => x.id === 'water_log');
           if (log && !offer) {
@@ -1149,7 +1152,7 @@
           const { topic, vars } = checkinTopic(dueC);
           offer = { topic, vars, until: t + 20 * MINUTE };
           effects.push({ type: 'offer' });
-          say(`${dueC.emoji} ${line('checkin.remind', '{title} time! Click me when you have 💪', { title: dueC.title })}`, 7);
+          say(`${dueC.emoji} ${line('checkin.remind', '{title} time! Click me when you have 💪', { title: dueC.title })}`, 7, true);
         } else if (s.journal && !offer && !day.journalAsked && h >= 19 && activeMs > 10 * MINUTE && !(state.journal[dayKey()] && state.journal[dayKey()].mood)) {
           day.journalAsked = true;
           dirty = true;
