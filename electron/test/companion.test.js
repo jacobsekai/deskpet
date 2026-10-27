@@ -187,6 +187,41 @@ for (const id of Object.keys(personalities)) {
   checks++;
 }
 
+// A new day while the pet stays open: overnight with the screen off (ticks keep coming, nobody's there), then a short
+// break across midnight, then a wake from sleep.
+{
+  const realNow = Date.now;
+  let t = new Date(2026, 9, 20, 22, 0).getTime();
+  Date.now = () => t;
+  let e;
+  const tickFor = (minutes, idle) => { const said = []; for (let i = 0; i < minutes * 12; i++) { t += 5000; for (const f of e.tick({ idle: idle(), quiet: true })) if (f.type === 'say') said.push(f.text); } return said; };
+  try {
+    ({ e } = make('cat'));
+    e.event('launch');
+    tickFor(30, () => 3);
+    let idle = 0;
+    assert.deepStrictEqual(tickFor(9 * 60, () => (idle += 5)), [], 'quiet while nobody is there'); // 10:30pm → 7:30am
+    const before = e._state().affection;
+    const morning = tickFor(1, () => 2);
+    assert.strictEqual(morning.length, 1, `greeted when you're back: ${morning.join(' | ')}`);
+    assert(e._state().affection >= before, 'no penalty for leaving the pet open overnight');
+
+    // 11:50pm, away 20 minutes past midnight: no new-day greeting.
+    t = new Date(2026, 9, 21, 23, 50).getTime();
+    tickFor(1, () => 2);
+    idle = 0; tickFor(20, () => (idle += 5));
+    assert.deepStrictEqual(tickFor(1, () => 2), [], 'no greeting after a short break across midnight');
+
+    // Asleep 12:15am → 6:15am (no ticks at all): waking up greets once, with no "welcome back" on top.
+    t = new Date(2026, 9, 22, 6, 15).getTime();
+    const said = e.event('resume').filter((f) => f.type === 'say').map((f) => f.text);
+    assert.strictEqual(said.length, 1, `one greeting on wake: ${said.join(' | ')}`);
+    assert.notStrictEqual(said[0], e.line('resume'), 'a greeting, not "welcome back"');
+    assert.strictEqual(e.event('resume').filter((f) => f.type === 'say').length, 0, 'second wake notification stays quiet');
+  } finally { Date.now = realNow; }
+  checks++;
+}
+
 // App comments and categories.
 assert.strictEqual(Companion.categorize('Google Chrome', 'Lofi beats - YouTube'), 'video');
 assert.strictEqual(Companion.categorize('Code'), 'code');

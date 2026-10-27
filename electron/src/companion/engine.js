@@ -266,6 +266,7 @@
     let lastPlaydate = 0;
     let treatTimes = [];
     let lastNight = 0;
+    let lastGreet = 0;
     let lastCategory = '';
     const appCooldown = {};
 
@@ -1035,7 +1036,8 @@
       return !ctx.quiet && !ctx.talking && !ctx.speaking && !ctx.attention && ctx.focus !== 'focus' && ctx.idle < 60 && t - lastAmbient > gap;
     }
 
-    function greeting() {
+    /** `stayedOpen`: the pet kept running while you were gone (sleep, a locked screen), so nobody left without a goodbye. */
+    function greeting(stayedOpen) {
       const t = now();
       const away = state.lastSeen ? (t - state.lastSeen) / 1000 : null;
       const f = state.farewell;
@@ -1048,7 +1050,7 @@
       // Disappearing for a long time hurts a little; leaving without a goodbye stings a bit too.
       if (away > 30 * 86400) changeAffection(-8);
       else if (away > 7 * 86400) changeAffection(-3);
-      if (!saidBye && !f && away > 3600) changeAffection(-0.5);
+      if (!saidBye && !f && !stayedOpen && away > 3600) changeAffection(-0.5);
       if (tierIndex() < BASE_TIER) return line('greeting.upset', null) || line(`greeting.${tod}`, 'Oh. Hi, {owner}.');
       if (away < 600) return line('greeting.again', 'hi {owner}! 👋');
       if (f && t - f.at < 20 * 3600 * 1000 && poolLines(`greeting.after.${f.reason}`).length) return line(`greeting.after.${f.reason}`);
@@ -1058,9 +1060,12 @@
       return line(`greeting.${tod}`, 'Hi {owner}! 👋');
     }
 
-    function greet() {
-      const text = greeting();
+    function greet(stayedOpen) {
+      const text = greeting(stayedOpen);
       say(text, 6);
+      lastGreet = now();
+      // A fresh start: reminders count from now, not from before you left.
+      activeMs = 0; waterMs = 0; streakStart = lastGreet;
       const day = dayFlags();
       if (!day.greeted) { day.greeted = true; changeAffection(1); }
       const special = specialToday();
@@ -1085,6 +1090,14 @@
       dirty = true;
     }
 
+    /**
+     * Back after over 4 hours away. `lastSeen` only moves while you're using the computer, so a pet left running
+     * overnight (sleep, a locked screen, the screen off, Power Nap) still notices a new day.
+     */
+    function returned(t) {
+      return !!state.lastSeen && t - state.lastSeen > 4 * 3600 * 1000;
+    }
+
     function tick(c) {
       ctx = { idle: 0, ...(c || {}) };
       if (ctx.owner) names.owner = ctx.owner;
@@ -1093,9 +1106,10 @@
       const t = now();
       const dt = Math.max(0, Math.min(MINUTE, t - lastTick));
       lastTick = t;
-      // A long gap between ticks means the computer slept.
-      if (dt >= MINUTE && t - state.lastSeen > 4 * 3600 * 1000) greet();
-      state.lastSeen = t;
+      if (ctx.idle < 60) {
+        if (returned(t)) greet(true);
+        state.lastSeen = t;
+      }
       if (t - lastSave > 60000) dirty = true;
 
       for (const s of scheduled.filter((x) => x.at <= t)) {
@@ -1269,12 +1283,10 @@
           state.lastSeen = now();
           save();
           break;
-        case 'resume': {
-          const away = state.lastSeen ? (now() - state.lastSeen) / 1000 : 0;
-          if (away > 4 * 3600) greet();
-          else say(line('resume', 'welcome back! ☀️'), 4);
+        case 'resume':
+          if (returned(now())) greet(true);
+          else if (now() - lastGreet > MINUTE) say(line('resume', 'welcome back! ☀️'), 4);
           break;
-        }
         case 'app': return appChanged(data.name, data.title);
         case 'playtimeStart':
           effects.push({ type: 'mood', mood: 'done', seconds: 2.5 });
