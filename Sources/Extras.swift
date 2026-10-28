@@ -27,6 +27,9 @@ enum SessionJumper {
 
 final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     var onClick: ((pid_t) -> Void)?
+    /// A reminder was answered: "done", "snooze", or "dismiss".
+    var onReminder: ((String) -> Void)?
+    private static let reminderID = "deskpet.reminder"
     private var center: UNUserNotificationCenter? {
         // Only available when running from an app bundle.
         Bundle.main.bundleIdentifier == nil ? nil : UNUserNotificationCenter.current()
@@ -35,6 +38,13 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     override init() {
         super.init()
         center?.delegate = self
+        // Reminders get Done / Snooze. They stay on screen when DeskPet's notification style is Alerts (the default
+        // asked for in Info.plist; System Settings → Notifications → DeskPet if it was set to Banners before).
+        let reminder = UNNotificationCategory(identifier: "reminder", actions: [
+            UNNotificationAction(identifier: "done", title: "Done ✓"),
+            UNNotificationAction(identifier: "snooze", title: "Snooze 10 min"),
+        ], intentIdentifiers: [], options: [.customDismissAction])
+        center?.setNotificationCategories([reminder])
     }
 
     func requestPermission() {
@@ -53,8 +63,35 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
+    /// A reminder that waits for Done or Snooze. A newer one replaces it.
+    func postReminder(title: String, body: String) {
+        guard let center else { return }
+        center.getNotificationSettings { settings in
+            guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else { return }
+            let content = UNMutableNotificationContent()
+            content.title = title
+            content.body = body
+            content.categoryIdentifier = "reminder"
+            center.add(UNNotificationRequest(identifier: Self.reminderID, content: content, trigger: nil))
+        }
+    }
+
+    /// Takes the reminder down (answered from the pet, or turned off).
+    func clearReminder() {
+        center?.removeDeliveredNotifications(withIdentifiers: [Self.reminderID])
+    }
+
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                 withCompletionHandler done: @escaping () -> Void) {
+        if response.notification.request.content.categoryIdentifier == "reminder" {
+            let answer = switch response.actionIdentifier {
+            case "snooze": "snooze"
+            case UNNotificationDismissActionIdentifier: "dismiss"
+            default: "done"
+            }
+            DispatchQueue.main.async { self.onReminder?(answer) }
+            return done()
+        }
         let pid = pid_t(response.notification.request.content.userInfo["pid"] as? Int ?? 0)
         DispatchQueue.main.async { self.onClick?(pid) }
         done()

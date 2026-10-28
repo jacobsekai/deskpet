@@ -88,6 +88,7 @@ class Pet {
     this.known = new Map();
     this.busySince = new Map();
     this.transient = null;
+    this.reminderNote = null;
     this.speech = null;
     this.accessory = 'none';
     this.night = false;
@@ -1016,8 +1017,10 @@ class Pet {
       switch (f.type) {
         case 'say':
           this.say(f.text, f.seconds || 4);
-          if (f.notify) this.notify(this.config.petName, f.text, 0);
+          if (f.notify && f.reminder) this.notifyReminder(this.config.petName, f.text);
+          else if (f.notify) this.notify(this.config.petName, f.text, 0);
           break;
+        case 'clearReminder': this.closeReminder(); break;
         case 'mood': this.transient = { mood: f.mood, until: now() + (f.seconds || 6) }; break;
         case 'xp': this.gainXP(f.amount, !!f.play); break;
         case 'offer': this.transient = { mood: 'startled', until: now() + 0.8 }; this.playSound('needs-you'); break;
@@ -1472,6 +1475,38 @@ class Pet {
     const n = new Notification({ title, body, silent: true, icon: path.join(__dirname, '..', 'assets', 'icon.png') });
     if (pid) n.on('click', () => this.jump(pid));
     n.show();
+  }
+
+  /**
+   * A reminder that stays on screen until you answer it: Done, Snooze, or closing it. A newer one replaces it.
+   * Windows shows the buttons; on Linux clicking it counts as Done.
+   */
+  notifyReminder(title, body) {
+    this.closeReminder();
+    if (this.visitor || this.panicHidden || !this.notificationsOn || !Notification.isSupported()) return;
+    if (this.quietHoursOn && !this.quietHours.notifications) return;
+    const n = new Notification({
+      title, body, silent: true, icon: path.join(__dirname, '..', 'assets', 'icon.png'),
+      timeoutType: 'never', urgency: 'critical',
+      actions: [{ type: 'button', text: 'Done ✓' }, { type: 'button', text: 'Snooze 10 min' }],
+    });
+    const answer = (a) => {
+      if (this.reminderNote !== n) return;
+      this.reminderNote = null;
+      this.applyCompanion(this.companion.ui('reminder', { answer: a }).effects);
+    };
+    n.on('click', () => answer('done'));
+    n.on('action', (_e, index) => answer(index === 1 ? 'snooze' : 'done'));
+    n.on('close', () => answer('dismiss'));
+    this.reminderNote = n;
+    n.show();
+  }
+
+  /** Takes the reminder down (answered from the pet, or replaced) without counting it as an answer. */
+  closeReminder() {
+    const n = this.reminderNote;
+    this.reminderNote = null;
+    if (n) n.close();
   }
 
   /** Notifies unless you're already looking at the app the agent runs in. */

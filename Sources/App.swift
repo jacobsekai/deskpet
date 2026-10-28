@@ -350,6 +350,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         sounds.enabled = soundsOn
         panicKeyOK = panicKey.register(panicKeyID)
         notifier.onClick = { [weak self] pid in self?.jump(to: pid) }
+        notifier.onReminder = { [weak self] answer in
+            guard let self else { return }
+            self.apply(self.companion.ui("reminder", ["answer": answer]).effects)
+        }
         if notificationsOn && defaults.bool(forKey: "setupComplete") && !Visitor.active { notifier.requestPermission() }
         hoverCard.model.onSelect = { [weak self] pid in self?.jump(to: pid) }
         if kiroHooksOn && !Visitor.active { KiroHooks.apply(true) }
@@ -1003,7 +1007,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             case "say":
                 guard let text = f["text"] as? String else { break }
                 say(text, for: f["seconds"] as? Double ?? 4)
-                if f["notify"] as? Bool == true { post(config.petName, text, pid: 0) }
+                if f["notify"] as? Bool == true {
+                    if f["reminder"] as? Bool == true { postReminder(config.petName, text) } else { post(config.petName, text, pid: 0) }
+                }
+            case "clearReminder":
+                notifier.clearReminder()
             case "mood":
                 if let mood = (f["mood"] as? String).flatMap(Companion.mood) { transient = (mood, CACurrentMediaTime() + (f["seconds"] as? Double ?? 6)) }
             case "xp":
@@ -1171,6 +1179,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     private func post(_ title: String, _ body: String, pid: pid_t) {
         guard notificationsOn, !panicHidden, !(quietHoursActive && !quietHours.notifications) else { return }
         notifier.post(title: title, body: body, pid: pid)
+    }
+
+    private func postReminder(_ title: String, _ body: String) {
+        notifier.clearReminder()
+        guard notificationsOn, !panicHidden, !(quietHoursActive && !quietHours.notifications) else { return }
+        notifier.postReminder(title: title, body: body)
     }
 
     /// Notifies unless you're already looking at the app the agent runs in.

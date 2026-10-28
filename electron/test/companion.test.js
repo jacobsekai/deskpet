@@ -187,6 +187,57 @@ for (const id of Object.keys(personalities)) {
   checks++;
 }
 
+// Reminders wait for an answer: they come back every 10 minutes until Done, Snooze pushes them back, and Done on water
+// opens the sips chat. Turning it off (or answering the pet) takes the notification down.
+{
+  const realNow = Date.now;
+  let t = realNow();
+  Date.now = () => t;
+  try {
+    const { e } = make('cat');
+    for (const [key, value] of [['breaks', 0], ['chatter', 'off'], ['motivation', false], ['lateNight', false], ['recap', false]]) e.ui('setting', { key, value });
+    const run = (minutes, ctx = { idle: 3 }) => { const out = []; for (let i = 0; i < minutes * 12; i++) { t += 5000; out.push(...e.tick(ctx)); } return out; };
+    const reminders = (out) => out.filter((f) => f.type === 'say' && f.notify && f.reminder);
+    const first = reminders(run(95));
+    assert.strictEqual(first.length, 1, 'water reminder waits for an answer');
+    const again = reminders(run(14));
+    assert.strictEqual(again.length, 1, 'unanswered reminder comes back');
+    assert(again[0].text.endsWith(first[0].text), `again: ${again[0].text}`);
+    assert(e.hasOffer(), 'the sips chat stays open while it waits');
+    assert.strictEqual(reminders(run(5, { idle: 600 })).length, 0, 'not while you are away');
+
+    e.ui('reminder', { answer: 'snooze' });
+    assert.strictEqual(reminders(run(9)).length, 0, 'snoozed for 10 minutes');
+    assert.strictEqual(reminders(run(5)).length, 1, 'back after the snooze');
+
+    const done = e.ui('reminder', { answer: 'done' }).effects;
+    assert(done.some((f) => f.type === 'openTalk' && f.topic === 'offer'), 'Done on water opens the sips chat');
+    assert.strictEqual(reminders(run(20)).length, 0, 'answered reminders stay answered');
+
+    // A stretch break (no chat): Done just thanks you. Answering the pet clears the notification.
+    e.ui('setting', { key: 'water', value: 0 });
+    e.ui('setting', { key: 'breaks', value: 50 });
+    assert.strictEqual(reminders(run(54)).length, 1, 'stretch reminder');
+    const thanks = e.ui('reminder', { answer: 'done' }).effects;
+    assert(thanks.some((f) => f.type === 'say') && !thanks.some((f) => f.type === 'openTalk'), 'Done on a stretch says thanks');
+    assert.strictEqual(reminders(run(38)).length, 0, 'no repeat after Done');
+    assert.strictEqual(reminders(run(15)).length, 1, 'next stretch');
+    assert(e.ui('open', {}).effects.some((f) => f.type === 'clearReminder'), 'talking to the pet answers it');
+    assert.strictEqual(reminders(run(20)).length, 0, 'no repeat after talking');
+
+    // Closing the notification counts as an answer; turning the setting off goes back to plain notifications.
+    run(32);
+    e.ui('reminder', { answer: 'dismiss' });
+    assert.strictEqual(reminders(run(20)).length, 0, 'closed reminders stay closed');
+    run(32);
+    assert(e.ui('setting', { key: 'remindUntilDone', value: false }).effects.some((f) => f.type === 'clearReminder'), 'turning it off clears it');
+    const plain = run(51).filter((f) => f.type === 'say' && f.notify);
+    assert(plain.length === 1 && !plain[0].reminder, 'plain notification when off');
+    assert.strictEqual(run(20).filter((f) => f.type === 'say' && f.notify).length, 0, 'no repeats when off');
+  } finally { Date.now = realNow; }
+  checks++;
+}
+
 // A new day while the pet stays open: overnight with the screen off (ticks keep coming, nobody's there), then a short
 // break across midnight, then a wake from sleep.
 {

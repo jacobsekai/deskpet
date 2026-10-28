@@ -27,8 +27,10 @@
   /** Affection can only grow this much a day, so it reflects time together rather than clicking. */
   const DAILY_GAIN_CAP = 12;
   const MINUTE = 60000;
+  /** An unanswered (or snoozed) reminder comes back after this long. */
+  const REMIND_AGAIN = 10 * MINUTE;
 
-  const DEFAULT_SETTINGS = { chatter: 'sometimes', water: 90, breaks: 50, lateNight: true, motivation: true, appComments: true, recap: true, journal: true, needs: false, notifyReminders: true };
+  const DEFAULT_SETTINGS = { chatter: 'sometimes', water: 90, breaks: 50, lateNight: true, motivation: true, appComments: true, recap: true, journal: true, needs: false, notifyReminders: true, remindUntilDone: true };
 
   /** Check-ins you can turn on (custom ones are added next to them). `every` = minutes of activity; `at` = a daily time. */
   const BUILTIN_CHECKINS = [
@@ -245,6 +247,8 @@
     let effects = [];
     let convo = null;
     let offer = null;
+    /** The reminder waiting for Done: `{ kind, text, at, offer }` (`at` = when it comes back; `offer` = the chat that logs it). */
+    let reminder = null;
     let scheduled = [];
     const recent = new Map();
 
@@ -1021,14 +1025,63 @@
 
     function later(ms, effect) { scheduled.push({ at: now() + ms, effect }); }
 
-    /** `remind` marks reminders (water, stretch, bedtime, check-ins), which also show as notifications. */
+    /**
+     * `remind` marks reminders ('water', 'break', 'bedtime', 'checkin'), which also show as notifications. With
+     * "until you answer" on, the notification stays up with Done / Snooze and comes back every 10 minutes until answered.
+     */
     function say(text, seconds, remind) {
       if (!text) return false;
       const effect = { type: 'say', text, seconds: seconds || Math.min(9, 3 + text.length / 18) };
-      if (remind && state.settings.notifyReminders) effect.notify = true;
+      if (remind && state.settings.notifyReminders) { effect.notify = true; effect.reminder = !!state.settings.remindUntilDone; }
+      if (remind && state.settings.remindUntilDone) reminder = { kind: remind, text, at: now() + REMIND_AGAIN, offer: null };
       effects.push(effect);
       lastAmbient = now();
       return true;
+    }
+
+    /** The reminder was answered: take its notification down. */
+    function clearReminder() {
+      if (!reminder) return;
+      reminder = null;
+      effects.push({ type: 'clearReminder' });
+    }
+
+    /** Still unanswered: say it again (and notify again), and keep its "click me" chat open. */
+    function remindAgain(t) {
+      reminder.at = t + REMIND_AGAIN;
+      const effect = { type: 'say', text: `${line('remind.again', 'Still waiting… ⏰')} ${reminder.text}`, seconds: 7 };
+      if (state.settings.notifyReminders) { effect.notify = true; effect.reminder = true; }
+      effects.push(effect);
+      lastAmbient = t;
+      if (reminder.offer && (!offer || offer === reminder.offer)) {
+        offer = reminder.offer;
+        offer.until = Math.max(offer.until, t + 20 * MINUTE);
+        effects.push({ type: 'offer' });
+      }
+    }
+
+    /** Done / Snooze / closed, from the reminder's notification. Done on water or a check-in opens the chat that logs it. */
+    function answerReminder(answer) {
+      const r = reminder;
+      if (!r) return;
+      const t = now();
+      if (answer === 'snooze') {
+        r.at = t + REMIND_AGAIN;
+        if (r.offer && offer === r.offer) offer.until = Math.max(offer.until, r.at + 20 * MINUTE);
+        say(line('remind.snooze', 'Okay, 10 more minutes! ⏰'), 3);
+        return;
+      }
+      reminder = null;
+      if (answer !== 'done') return;
+      if (r.offer && (!offer || offer === r.offer)) {
+        offer = r.offer;
+        offer.until = Math.max(offer.until, t + 20 * MINUTE);
+        effects.push({ type: 'openTalk', topic: 'offer' });
+        return;
+      }
+      const fallback = { water: 'Yay, hydrated! 💧', break: 'Feels better, right? 🌿', bedtime: 'Goodnight, {owner} 🌙' }[r.kind] || 'Done! Proud of you 💕';
+      effects.push({ type: 'mood', mood: 'done', seconds: 3 });
+      say(line(`remind.done.${r.kind}`, fallback), 4);
     }
 
     /** Ambient lines wait for a moment when you're around and nothing more important is on screen. */
@@ -1136,19 +1189,22 @@
       let dueC = null;
       if (t - startedAt > 45000 && canSpeak(t, 3 * MINUTE)) {
         const late = h >= 23 || h < 5;
-        if (s.lateNight && late && ctx.idle < 10 && t - lastNight > 75 * MINUTE) {
+        if (reminder && t >= reminder.at) {
+          remindAgain(t);
+        } else if (s.lateNight && late && ctx.idle < 10 && t - lastNight > 75 * MINUTE) {
           lastNight = t;
-          say(line(h >= 1 && h < 5 ? 'lateNight.late' : 'lateNight', "It's late, {owner}… bedtime soon? 🌙"), 6, true);
+          say(line(h >= 1 && h < 5 ? 'lateNight.late' : 'lateNight', "It's late, {owner}… bedtime soon? 🌙"), 6, 'bedtime');
         } else if (s.breaks && t - streakStart >= s.breaks * MINUTE) {
           streakStart = t;
-          say(line('break', 'Stretch break? 🙆'), 7, true);
+          say(line('break', 'Stretch break? 🙆'), 7, 'break');
         } else if (s.water && waterMs >= s.water * MINUTE) {
           waterMs = 0;
-          say(line('water', 'Water break! 💧'), 6, true);
+          say(line('water', 'Water break! 💧'), 6, 'water');
           // Then click the pet and report how many sips you took.
           const log = persona.topics.find((x) => x.id === 'water_log');
           if (log && !offer) {
             offer = { topic: log, until: t + 20 * MINUTE };
+            if (reminder) reminder.offer = offer;
             effects.push({ type: 'offer' });
             later(6500, { type: 'say', text: line('water.ask', 'click me after your drink and tell me how many sips! 💧'), seconds: 6 });
           }
@@ -1166,7 +1222,8 @@
           const { topic, vars } = checkinTopic(dueC);
           offer = { topic, vars, until: t + 20 * MINUTE };
           effects.push({ type: 'offer' });
-          say(`${dueC.emoji} ${line('checkin.remind', '{title} time! Click me when you have 💪', { title: dueC.title })}`, 7, true);
+          say(`${dueC.emoji} ${line('checkin.remind', '{title} time! Click me when you have 💪', { title: dueC.title })}`, 7, 'checkin');
+          if (reminder) reminder.offer = offer;
         } else if (s.journal && !offer && !day.journalAsked && h >= 19 && activeMs > 10 * MINUTE && !(state.journal[dayKey()] && state.journal[dayKey()].mood)) {
           day.journalAsked = true;
           dirty = true;
@@ -1341,6 +1398,7 @@
       switch (action) {
         case 'open': {
           const topicId = payload.topic;
+          clearReminder();
           if (topicId === 'offer' && offer) { const o = offer; offer = null; dayFlags()[`special:${o.topic.id}`] = true; result = startTopic(o.topic, o.vars); }
           else if (topicId && topicId !== 'offer') result = selectMenu(topicId);
           else result = menuNode('main');
@@ -1359,6 +1417,7 @@
           convo = null;
           break;
         case 'summary': result = summary(); break;
+        case 'reminder': answerReminder(String(payload.answer || '')); break;
         case 'checkinSet': {
           const c = checkinById(String(payload.id || ''));
           const p = isObj(payload.patch) ? payload.patch : {};
@@ -1415,6 +1474,7 @@
       if (key === 'chatter') chatterDue = CHATTER[state.settings.chatter] ? between(CHATTER[state.settings.chatter]) : 0;
       if (key === 'water') waterMs = 0;
       if (key === 'breaks') streakStart = now();
+      if (key === 'remindUntilDone' && !state.settings.remindUntilDone) clearReminder();
       dirty = true;
       return summary();
     }
