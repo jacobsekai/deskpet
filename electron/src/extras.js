@@ -211,8 +211,68 @@ function isNewer(a, b) {
   return false;
 }
 
+const STALL_MS = 60 * 1000;
+
+/** Streams url into file, reporting progress (0–1); gives up when no data arrives for a minute. */
+async function downloadTo(url, file, onProgress = () => {}, fetcher = fetch, stallMs = STALL_MS) {
+  const controller = new AbortController();
+  let timer = null;
+  const poke = () => { clearTimeout(timer); timer = setTimeout(() => controller.abort(), stallMs); };
+  poke();
+  try {
+    const res = await fetcher(url, { headers: { 'User-Agent': 'DeskPet' }, signal: controller.signal });
+    if (!res.ok) throw new Error(`download failed (HTTP ${res.status})`);
+    const total = Number(res.headers.get('content-length')) || 0;
+    const out = fs.createWriteStream(file);
+    let got = 0;
+    try {
+      for await (const chunk of res.body) {
+        poke();
+        got += chunk.length;
+        if (!out.write(chunk)) await new Promise((resolve) => out.once('drain', resolve));
+        if (total) onProgress(got / total);
+      }
+    } finally {
+      await new Promise((resolve) => out.end(resolve));
+    }
+    if (total && got !== total) throw new Error('the download was cut short');
+  } catch (e) {
+    throw controller.signal.aborted ? new Error('the download stalled; check your connection and try again') : e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** PowerShell that swaps in the new Windows app once every DeskPet process from `exe` has exited, logging each step. */
+function swapScript({ exe, zip, work, log, relaunch = true }) {
+  const appDir = path.dirname(exe), x = path.join(work, 'x');
+  return `
+    function Log($m) { Add-Content -Path ${psQuote(log)} -Value "$(Get-Date -Format s) $m" }
+    $deadline = (Get-Date).AddSeconds(60)
+    while ((Get-Process DeskPet -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq ${psQuote(exe)} }) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 200 }
+    Log 'DeskPet exited, unpacking'
+    New-Item -ItemType Directory -Force -Path ${psQuote(x)} | Out-Null
+    # Windows' own tar unzips far faster than Expand-Archive; older Windows falls back.
+    tar.exe -xf ${psQuote(zip)} -C ${psQuote(x)} 2>&1 | Out-Null
+    if (-not (Get-ChildItem ${psQuote(x)} -Recurse -Filter DeskPet.exe)) {
+      Log "tar didn't work (exit code $LASTEXITCODE), using Expand-Archive"
+      try { Expand-Archive -Force -Path ${psQuote(zip)} -DestinationPath ${psQuote(x)} } catch { Log "Expand-Archive failed: $_" }
+    }
+    $src = Get-ChildItem ${psQuote(x)} -Recurse -Filter DeskPet.exe | Select-Object -First 1
+    if ($src) {
+      # Copy over, never mirror: the folder may hold more than DeskPet.
+      robocopy $src.DirectoryName ${psQuote(appDir)} /E /R:10 /W:1 /NFL /NDL /NJH /NJS | Out-Null
+      if ($LASTEXITCODE -lt 8) { Log 'copied the new version' } else { Log "copying failed (robocopy exit code $LASTEXITCODE)" }
+    } else {
+      Log 'no DeskPet.exe in the update'
+    }
+    ${relaunch ? `Start-Process ${psQuote(exe)}` : ''}
+    Log 'done'
+    Remove-Item -Recurse -Force ${psQuote(work)} -ErrorAction SilentlyContinue`;
+}
+
 class Updater {
-  constructor(currentVersion) { this.current = currentVersion; this.available = null; this.installing = false; }
+  constructor(currentVersion) { this.current = currentVersion; this.available = null; this.installing = false; this.progress = 0; }
 
   async check() {
     try {
@@ -227,27 +287,21 @@ class Updater {
   }
 
   /** Downloads the zip and swaps the app folder once DeskPet exits, then relaunches. */
-  async install(app, shell) {
+  async install(app, shell, onProgress = () => {}) {
     const update = this.available;
-    if (!update || this.installing) return 'no update';
-    if (process.platform === 'linux' && process.env.APPIMAGE) return this.installAppImage(app, update);
+    if (!update) return 'no update';
+    if (this.installing) return 'already updating';
+    if (process.platform === 'linux' && process.env.APPIMAGE) return this.installAppImage(app, update, onProgress);
     if (!isWindows || !app.isPackaged) { shell.openExternal(update.page); return 'opened the release page'; }
     this.installing = true;
+    this.progress = 0;
     try {
       const work = fs.mkdtempSync(path.join(os.tmpdir(), 'deskpet-update-'));
       const zip = path.join(work, 'update.zip');
-      const res = await fetch(update.url, { headers: { 'User-Agent': 'DeskPet' } });
-      fs.writeFileSync(zip, Buffer.from(await res.arrayBuffer()));
-      const appDir = path.dirname(process.execPath);
-      const script = `
-        while (Get-Process -Id ${process.pid} -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 200 }
-        Expand-Archive -Force -Path ${psQuote(zip)} -DestinationPath ${psQuote(path.join(work, 'x'))}
-        $src = Get-ChildItem ${psQuote(path.join(work, 'x'))} -Recurse -Filter DeskPet.exe | Select-Object -First 1
-        if ($src) {
-          robocopy $src.DirectoryName ${psQuote(appDir)} /MIR /NFL /NDL /NJH /NJS | Out-Null
-          Start-Process ${psQuote(path.join(appDir, 'DeskPet.exe'))}
-        }`;
-      powershell(script, { detached: true }).unref();
+      await downloadTo(update.url, zip, (f) => { this.progress = f; onProgress(f); });
+      const log = path.join(paths.realRoot, 'update.log');
+      fs.writeFileSync(log, `${new Date().toISOString()} updating ${this.current} to ${update.version} in ${path.dirname(process.execPath)}\n`);
+      powershell(swapScript({ exe: process.execPath, zip, work, log }), { detached: true }).unref();
       // The swap waits for this process to exit, so make sure it does.
       app.quit();
       setTimeout(() => app.exit(0), 1500).unref();
@@ -259,13 +313,13 @@ class Updater {
   }
 }
 
-Updater.prototype.installAppImage = async function installAppImage(app, update) {
+Updater.prototype.installAppImage = async function installAppImage(app, update, onProgress) {
   // An AppImage is one file: download the new one beside it, swap it in, and start it.
   this.installing = true;
+  this.progress = 0;
   try {
     const target = process.env.APPIMAGE;
-    const res = await fetch(update.url, { headers: { 'User-Agent': 'DeskPet' } });
-    fs.writeFileSync(`${target}.new`, Buffer.from(await res.arrayBuffer()));
+    await downloadTo(update.url, `${target}.new`, (f) => { this.progress = f; onProgress(f); });
     fs.chmodSync(`${target}.new`, 0o755);
     fs.renameSync(`${target}.new`, target);
     spawn(target, [], { detached: true, stdio: 'ignore' }).unref();
@@ -637,6 +691,6 @@ const PRESTIGE = {
 
 module.exports = {
   REWARDS, SLOTS, PRESTIGE,
-  Stats, FocusTimer, Updater, importPack, exportPack, kiroHooks, jumpTo, WindowPlatforms, isNewer,
+  Stats, FocusTimer, Updater, downloadTo, swapScript, importPack, exportPack, kiroHooks, jumpTo, WindowPlatforms, isNewer,
   loginItem, BLOCK_DEFAULTS, BROWSERS, TITLE_WORDS, parseBlocklist, matchTitle, closeBlockedTab, transferKey, TRANSFER_SETTINGS,
 };

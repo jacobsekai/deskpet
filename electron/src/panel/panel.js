@@ -140,8 +140,13 @@
     renderCalendar();
     renderEvent();
     document.querySelectorAll('.pet-name').forEach((n) => { n.textContent = state.names.petName; });
-    $('#about-update').textContent = state.update.available ? `Version ${state.update.available} is available!` : `You're on the latest version (${state.version}).`;
-    $('#about-update-btn').textContent = state.update.available ? `⬆️ Update to v${state.update.available}` : 'Check for updates';
+    const u = state.update;
+    const downloading = u.progress !== null && u.progress !== undefined;
+    $('#about-update').className = u.error && !downloading ? 'sub error' : 'sub';
+    $('#about-update').textContent = downloading ? `Downloading v${u.available}… ${Math.round(u.progress * 100)}%`
+      : u.error ? u.error : u.available ? `Version ${u.available} is available!` : `You're on the latest version (${state.version}).`;
+    $('#about-update-btn').disabled = downloading;
+    $('#about-update-btn').textContent = downloading ? 'Downloading…' : u.available ? `⬆️ Update to v${u.available}` : 'Check for updates';
   }
 
   function applyAccent() {

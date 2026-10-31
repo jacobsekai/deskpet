@@ -301,6 +301,7 @@ class Pet {
     if (this.kiroHooksOn) kiroHooks.apply(true); // also repoints Kiro hooks at the current command
     this.migrateLevelCurve();
     setTimeout(() => this.wearEarnedRewardsOnce(), 6000);
+    this.reportFinishedUpdate();
     if (this.autoUpdate) setTimeout(() => this.checkForUpdates(false), 20000);
     setInterval(() => { if (this.autoUpdate) this.checkForUpdates(false); }, 6 * 3600 * 1000);
     return true;
@@ -1220,7 +1221,10 @@ class Pet {
         walkOnWindowsSupported: process.platform !== 'linux',
       },
       hooks: { claudeInstalled: hooks.installed(), claudeLive: hooks.installed() && hooksLive(), kiroInstalled: this.kiroHooksOn && kiroHooks.installed(), kiroSupported: process.platform !== 'darwin' },
-      update: { available: this.updater.available ? this.updater.available.version : null },
+      update: {
+        available: this.updater.available ? this.updater.available.version : null,
+        progress: this.updater.installing ? this.updater.progress : null, error: this.updateError || null,
+      },
       sync: this.syncState(),
       companion: this.companion.summary(),
       trip: this.tripPanelState(),
@@ -1807,9 +1811,33 @@ class Pet {
   }
 
   async installUpdate() {
-    this.say('updating… see you in a sec! 🔄', 4);
-    const result = await this.updater.install(app, shell);
-    if (result !== 'updating') this.say(result, 4);
+    if (this.updater.installing) {
+      this.say(`still downloading the update… ${Math.round(this.updater.progress * 100)}% 🔄`, 3);
+      return;
+    }
+    const version = this.updater.available && this.updater.available.version;
+    this.updateError = null;
+    this.say('downloading the update… 🔄', 30);
+    let shown = 0;
+    this.settings.set('pendingUpdate', { from: app.getVersion(), to: version });
+    const result = await this.updater.install(app, shell, (f) => {
+      const step = Math.floor(f * 10) * 10;
+      if (step > shown) { shown = step; this.say(`downloading the update… ${step}% 🔄`, 30); }
+    });
+    if (result === 'updating') return this.say('installing… see you in a sec! 🔄', 4);
+    this.settings.set('pendingUpdate', null);
+    if (/^update failed/.test(result)) this.updateError = result;
+    this.say(result, 6);
+  }
+
+  /** After a Windows update restarts DeskPet: say whether it worked. */
+  reportFinishedUpdate() {
+    const pending = this.settings.get('pendingUpdate', null);
+    if (!pending) return;
+    this.settings.set('pendingUpdate', null);
+    const worked = app.getVersion() === pending.to;
+    if (!worked) this.updateError = `The update to v${pending.to} didn't finish. Details: ${path.join(paths.realRoot, 'update.log')}`;
+    setTimeout(() => this.say(worked ? `updated to v${pending.to}! ✨` : `the update to v${pending.to} didn't finish 😿 (see About)`, 6), 4000);
   }
 
   // MARK: Sprite pack files

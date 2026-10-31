@@ -89,6 +89,23 @@ jobs:
       - name: Package
         run: npx electron-packager . DeskPet --platform=win32 --arch=x64 --out=dist --overwrite --icon=assets/icon.ico --ignore=^/dist --ignore=^/test-output --ignore=^/test/
 
+      - name: Updater swap (a release-style zip over an older copy; other files kept; logged)
+        shell: powershell
+        run: |
+          $t = Join-Path $env:RUNNER_TEMP 'swap'
+          New-Item -ItemType Directory -Force -Path "$t\old\DeskPet", "$t\work" | Out-Null
+          Copy-Item dist\DeskPet-win32-x64\DeskPet.exe "$t\old\DeskPet\DeskPet.exe"
+          Set-Content "$t\old\DeskPet\keep.txt" 'mine'
+          Compress-Archive -Path dist\DeskPet-win32-x64 -DestinationPath "$t\work\update.zip"
+          $env:SWAP_DIR = $t
+          node -e "const { swapScript } = require('./src/extras'); const p = require('path'); const t = process.env.SWAP_DIR; require('fs').writeFileSync(p.join(t, 'swap.ps1'), swapScript({ exe: p.join(t, 'old', 'DeskPet', 'DeskPet.exe'), zip: p.join(t, 'work', 'update.zip'), work: p.join(t, 'work'), log: p.join(t, 'update.log'), relaunch: false }))"
+          powershell -NoProfile -ExecutionPolicy Bypass -File "$t\swap.ps1"
+          Get-Content "$t\update.log"
+          if (-not (Test-Path "$t\old\DeskPet\resources\app\package.json")) { throw 'the new version was not copied in' }
+          if ((Get-Content "$t\old\DeskPet\keep.txt") -ne 'mine') { throw 'other files in the folder were touched' }
+          if (-not (Select-String -Path "$t\update.log" -Pattern 'copied the new version' -Quiet)) { throw 'the log does not say it copied' }
+          if (Select-String -Path "$t\update.log" -Pattern "tar didn't work" -Quiet) { Write-Host "::warning::tar couldn't read the release zip; Expand-Archive was used" }
+
       - name: Smoke test (starts, detects, quits)
         continue-on-error: true
         shell: powershell
