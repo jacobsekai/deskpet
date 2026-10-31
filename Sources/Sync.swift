@@ -18,6 +18,8 @@ final class Sync {
         var remoteDays: [String: Stats.Day] = [:]
         /// Set when another device changed names/settings/prestige more recently than this one.
         var newerProfile: [String: Any]?
+        /// Set when another device took this one out of sync.
+        var removedBy: String?
     }
 
     private let defaults = appDefaults
@@ -92,19 +94,32 @@ final class Sync {
         return found
     }
 
+    /// Devices taken out of a sync folder, by id. A removed device that comes back turns its own sync off.
+    static func removed(_ folder: URL) -> [String: [String: Any]] {
+        var out: [String: [String: Any]] = [:]
+        let dir = folder.appendingPathComponent("DeskPet/removed")
+        for url in (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? [] where url.pathExtension == "json" {
+            if let obj = (try? Data(contentsOf: url)).flatMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }),
+               let id = obj["id"] as? String { out[id] = obj }
+        }
+        return out
+    }
+
     /// Other devices' totals already in a folder (before turning sync on).
-    static func inspect(_ folder: URL, excluding id: String) -> (devices: Int, xp: Int, names: [String]) {
+    static func inspect(_ folder: URL, excluding id: String) -> (devices: Int, xp: Int, names: [String], keptBy: String?) {
         let dir = folder.appendingPathComponent("DeskPet/devices")
+        let removed = removed(folder)
         var count = 0, xp = 0
         var names: [String] = []
         for url in (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? [] where url.pathExtension == "json" {
             guard let obj = (try? Data(contentsOf: url)).flatMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }),
-                  let device = obj["device"] as? [String: Any], device["id"] as? String != id else { continue }
+                  let device = obj["device"] as? [String: Any], let other = device["id"] as? String, other != id, removed[other] == nil else { continue }
             count += 1
             xp += (obj["stats"] as? [String: Any])?["xp"] as? Int ?? 0
             names.append(device["name"] as? String ?? "another device")
         }
-        return (count, xp, names)
+        let me = removed[id]
+        return (count, xp, names, me?["kept"] as? Bool == true ? me?["by"] as? String : nil)
     }
 
     /// Writes this device's file and reads everyone else's.
@@ -116,6 +131,12 @@ final class Sync {
         } catch {
             self.error = "can't write to the sync folder"
             return nil
+        }
+        let removed = folder.map(Self.removed) ?? [:]
+        if let me = removed[deviceID] {
+            var result = Result()
+            result.removedBy = me["by"] as? String ?? "another device"
+            return result
         }
 
         // Profile changes made on this device get a fresh timestamp so other devices pick them up.
@@ -137,6 +158,11 @@ final class Sync {
             guard url.pathExtension == "json",
                   let obj = (try? Data(contentsOf: url)).flatMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }),
                   let device = obj["device"] as? [String: Any], let id = device["id"] as? String else { continue }
+            // A removed device may have written once more before it noticed.
+            if removed[id] != nil {
+                try? fm.removeItem(at: url)
+                continue
+            }
             let stats = obj["stats"] as? [String: Any] ?? [:]
             seen.append(Device(id: id, name: device["name"] as? String ?? "Device", platform: device["platform"] as? String ?? "",
                                updated: obj["updated"] as? Double ?? 0, xp: stats["xp"] as? Int ?? 0))
@@ -187,9 +213,25 @@ final class Sync {
     /// Joining: whatever the other devices already have wins over this device's current settings.
     /// The first device in a folder owns the settings until someone changes them.
     func prepareJoin(profile: [String: Any], first: Bool) {
+        if let root { try? FileManager.default.removeItem(at: root.appendingPathComponent("removed/\(deviceID).json")) }
         lastProfileJSON = Self.canonical(profile)
         profileUpdatedAt = first ? Date().timeIntervalSince1970 : 1
         lastAppliedRemote = 0
+    }
+
+    /// Takes another device out of the sync folder and returns its stats, so they can be kept on this one.
+    func remove(id: String, kept: Bool) -> [String: Any] {
+        guard let root, let devicesDir else { return [:] }
+        let file = devicesDir.appendingPathComponent("\(id).json")
+        let obj = (try? Data(contentsOf: file)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+        let marker = root.appendingPathComponent("removed/\(id).json")
+        try? FileManager.default.createDirectory(at: marker.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let note: [String: Any] = ["id": id, "name": (obj["device"] as? [String: Any])?["name"] as Any, "by": deviceName,
+                                   "at": Date().timeIntervalSince1970, "kept": kept]
+        try? JSONSerialization.data(withJSONObject: note).write(to: marker, options: .atomic)
+        try? FileManager.default.removeItem(at: file)
+        devices.removeAll { $0.id == id }
+        return obj["stats"] as? [String: Any] ?? [:]
     }
 
     func disable() {

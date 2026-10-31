@@ -645,8 +645,14 @@
     }
     const list = el('div', 'devices');
     for (const d of s.devices) {
-      list.appendChild(el('div', 'device', `<span class="icon">${PLATFORM_ICONS[d.platform] || '🖥️'}</span>
-        <div><div><b>${esc(d.name)}</b> ${d.me ? '<span class="me">THIS DEVICE</span>' : ''}</div><div class="meta">${esc(d.platform)} · ${d.xp} XP · updated ${esc(d.updated)}</div></div><span></span>`));
+      const row = el('div', 'device', `<span class="icon">${PLATFORM_ICONS[d.platform] || '🖥️'}</span>
+        <div><div><b>${esc(d.name)}</b> ${d.me ? '<span class="me">THIS DEVICE</span>' : ''}</div><div class="meta">${esc(d.platform)} · ${d.xp} XP · updated ${esc(d.updated)}</div></div><span></span>`);
+      if (!d.me) {
+        const remove = el('button', 'ghost-btn small-btn', 'Remove');
+        remove.addEventListener('click', () => removeDevice(d));
+        row.lastElementChild.appendChild(remove);
+      }
+      list.appendChild(row);
     }
     if (s.devices.length < 2) {
       list.appendChild(el('div', 'empty', google.on ? `Sign in with the same Google account on your other devices and they'll show up here.`
@@ -664,6 +670,18 @@
     row.appendChild(now);
     row.appendChild(off);
     box.appendChild(row);
+  }
+
+  function removeDevice(d) {
+    $('#modal-emblem').textContent = '🗑️';
+    $('#modal-title').textContent = `Remove ${d.name}?`;
+    $('#modal-text').textContent = `${d.name} stops syncing and leaves this list. Keep its ${d.xp} XP by moving it onto this device, or remove that XP too. `
+      + `If ${d.name} comes back online, it turns its own sync off; you can turn it on there again any time.`;
+    openModal({
+      ok: 'Keep its XP', alt: 'Remove its XP too', cancel: 'Cancel',
+      onOk: () => call('syncRemove', { id: d.id, keep: true }).then(refresh),
+      onAlt: () => call('syncRemove', { id: d.id, keep: false }).then(refresh),
+    });
   }
 
   /** Waits for the browser sign-in; `then` gets the result when it worked. */
@@ -695,7 +713,8 @@
     $('#modal-emblem').textContent = '☁️';
     $('#modal-title').textContent = `Join sync in ${name}?`;
     $('#modal-text').textContent = `${found.names.join(', ')} already ${found.devices === 1 ? 'has' : 'have'} ${found.xp} XP there, and this device has ${found.localXP} XP. `
-      + 'Combine adds them together. If you already moved this progress with a transfer key, use the synced progress instead so nothing counts twice (this device\'s stats are backed up).';
+      + (found.keptBy ? `This device's XP was moved onto ${found.keptBy} when it was removed from sync, so use the synced progress to avoid counting it twice (this device's stats are backed up).`
+        : 'Combine adds them together. If you already moved this progress with a transfer key, use the synced progress instead so nothing counts twice (this device\'s stats are backed up).');
     openModal({
       ok: 'Combine', alt: 'Use synced progress', cancel: 'Cancel',
       onOk: () => call('syncEnable', { path, mode: 'merge' }).then(refresh),

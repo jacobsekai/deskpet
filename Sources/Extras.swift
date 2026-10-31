@@ -339,6 +339,17 @@ final class Stats {
         return ["xp": file.xp, "days": days]
     }
 
+    /// Keeping a removed device's progress: its XP and days move onto this device.
+    func absorbDevice(_ stats: [String: Any]) {
+        file.xp += stats["xp"] as? Int ?? 0
+        if let days = stats["days"], let data = try? JSONSerialization.data(withJSONObject: days),
+           let decoded = try? JSONDecoder().decode([String: Day].self, from: data) {
+            for (key, day) in decoded { file.days[key] = (file.days[key] ?? Day()) + day }
+        }
+        dirty = true
+        saveIfNeeded()
+    }
+
     /// Leaving sync: keep the shared prestige and current level progress on this device alone.
     func leaveSync() {
         if let synced = syncedPrestige {

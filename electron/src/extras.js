@@ -110,6 +110,15 @@ class Stats {
     this.saveIfNeeded();
   }
 
+  /** Keeping a removed device's progress: its XP and days move onto this device. */
+  absorbDevice(stats) {
+    const { addDays } = require('./sync');
+    this.data.xp += (stats && stats.xp) || 0;
+    for (const [k, d] of Object.entries((stats && stats.days) || {})) this.data.days[k] = addDays(this.data.days[k], d);
+    this.dirty = true;
+    this.saveIfNeeded();
+  }
+
   /** Leaving sync: keep the shared prestige and current level progress on this device alone. */
   leaveSync() {
     const p = this.remote.prestige;

@@ -157,6 +157,8 @@ Control center → Account → **Sync across devices**: pick a folder your cloud
 
 **Sign in with Google Drive** works without the Google Drive app (handy on Linux). Sign in in your browser, and DeskPet keeps the same per-device files, plus your sprite packs, in its private app-data space in your Drive. Only DeskPet can see that space, and DeskPet can't see your other Drive files. It syncs about once a minute. Turning sync off signs this device out; your other devices keep syncing. Builds need a Google OAuth client first: see [docs/google-drive-setup.md](docs/google-drive-setup.md).
 
+To take a device out (an old computer, say), press **Remove** next to it in the device list and choose whether to keep its XP (it moves onto the device you're using) or drop it. If the removed device comes back online, it turns its own sync off instead of being counted again; turning sync on there later rejoins.
+
 If the folder already has progress when you join, you choose **Combine** (add both) or **Use synced progress** (start this device fresh, with a backup), so progress you already moved with a transfer key isn't counted twice.
 
 ### Trips: take your pet with you

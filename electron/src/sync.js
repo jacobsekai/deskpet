@@ -41,6 +41,19 @@ class Sync {
   get root() { return this.folder ? path.join(this.folder, 'DeskPet') : null; }
   get spritesFolder() { return this.root ? path.join(this.root, 'sprites') : null; }
 
+  /** Devices taken out of a sync folder, by id. A removed device that comes back turns its own sync off. */
+  static removed(folder) {
+    const out = {};
+    const dir = path.join(folder, 'DeskPet', 'removed');
+    try {
+      for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.json'))) {
+        const o = readJSON(path.join(dir, f), null);
+        if (o && o.id) out[o.id] = o;
+      }
+    } catch (_) { /* nothing removed */ }
+    return out;
+  }
+
   /** Cloud folders found on this machine, for one-click setup. */
   static candidates() {
     const home = os.homedir();
@@ -73,18 +86,20 @@ class Sync {
   /** Other devices' totals already in a folder (before turning sync on). */
   static inspect(folder, excludeID) {
     const dir = path.join(folder, 'DeskPet', 'devices');
+    const removed = Sync.removed(folder);
     let devices = 0, xp = 0;
     const names = [];
     try {
       for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.json'))) {
         const o = readJSON(path.join(dir, f), null);
-        if (!o || !o.device || o.device.id === excludeID) continue;
+        if (!o || !o.device || o.device.id === excludeID || removed[o.device.id]) continue;
         devices++;
         xp += (o.stats && o.stats.xp) || 0;
         names.push(o.device.name || 'another device');
       }
     } catch (_) { /* empty folder */ }
-    return { devices, xp, names };
+    const me = removed[excludeID];
+    return { devices, xp, names, keptBy: me && me.kept ? me.by : null };
   }
 
   /** Writes this device's file and reads everyone else's. */
@@ -92,6 +107,8 @@ class Sync {
     const dir = this.root && path.join(this.root, 'devices');
     if (!dir) return null;
     try { fs.mkdirSync(dir, { recursive: true }); } catch (_) { this.error = "can't write to the sync folder"; return null; }
+    const removed = Sync.removed(this.folder);
+    if (removed[this.deviceID]) return { removedBy: removed[this.deviceID].by || 'another device' };
 
     // Profile changes made on this device get a fresh timestamp so other devices pick them up.
     const profileJSON = stable(profile);
@@ -108,6 +125,8 @@ class Sync {
       if (!f.endsWith('.json')) continue;
       const o = readJSON(path.join(dir, f), null);
       if (!o || !o.device || !o.device.id) continue;
+      // A removed device may have written once more before it noticed.
+      if (removed[o.device.id]) { fs.rmSync(path.join(dir, f), { force: true }); continue; }
       const stats = o.stats || {};
       seen.push({ id: o.device.id, name: o.device.name || 'Device', platform: o.device.platform || '', updated: o.updated || 0, xp: stats.xp || 0 });
       if (o.device.id === this.deviceID) continue;
@@ -149,9 +168,23 @@ class Sync {
   /** Joining: whatever the other devices already have wins over this device's current settings.
    *  The first device in a folder owns the settings until someone changes them. */
   prepareJoin(profile, first) {
+    fs.rmSync(path.join(this.root, 'removed', `${this.deviceID}.json`), { force: true });
     this.lastProfileJSON = stable(profile);
     this.settings.set('syncProfileUpdatedAt', first ? Date.now() / 1000 : 1);
     this.settings.set('syncLastAppliedRemote', 0);
+  }
+
+  /** Takes another device out of the sync folder and returns its stats, so they can be kept on this one. */
+  remove(id, kept) {
+    const file = path.join(this.root, 'devices', `${id}.json`);
+    const o = readJSON(file, null) || {};
+    const marker = path.join(this.root, 'removed', `${id}.json`);
+    fs.mkdirSync(path.dirname(marker), { recursive: true });
+    fs.writeFileSync(`${marker}.tmp`, JSON.stringify({ id, name: (o.device && o.device.name) || null, by: this.deviceName, at: Date.now() / 1000, kept: !!kept }));
+    fs.renameSync(`${marker}.tmp`, marker);
+    fs.rmSync(file, { force: true });
+    this.devices = this.devices.filter((d) => d.id !== id);
+    return o.stats || { xp: 0, days: {} };
   }
 
   disable() {

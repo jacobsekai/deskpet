@@ -1542,6 +1542,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         let levelBefore = stats.level
         if stats.syncedPrestige == nil { stats.syncedPrestige = (stats.prestige, stats.prestigeBase) }
         guard let result = sync.sync(localStats: stats.deviceExport, profile: syncProfile()) else { return }
+        if let by = result.removedBy {
+            disableSync()
+            say("\(by) took this device out of sync, so sync is off here ☁️", for: 6)
+            return
+        }
         stats.remoteXP = result.remoteXP
         stats.remoteDays = result.remoteDays
         if let profile = result.newerProfile { applySyncProfile(profile) }
@@ -1581,7 +1586,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             "enabled": sync.enabled, "folder": sync.folder?.path as Any,
             "folderName": onGoogle ? "Google Drive" : sync.folder?.lastPathComponent as Any,
             "devices": sync.devices.map { d in
-                ["name": d.name, "platform": d.platform, "me": d.id == sync.deviceID, "xp": d.xp,
+                ["id": d.id, "name": d.name, "platform": d.platform, "me": d.id == sync.deviceID, "xp": d.xp,
                  "updated": fmt.localizedString(for: Date(timeIntervalSince1970: d.updated), relativeTo: Date())] as [String: Any]
             },
             "lastSync": (onGoogle ? google.lastSync : sync.lastSync).map { fmt.localizedString(for: $0, relativeTo: Date()) } as Any,
@@ -2508,7 +2513,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     }
 
     private func panelCall(_ action: String, _ payload: [String: Any]) -> Any? {
-        let homeOnly = ["hooks", "kiro", "transferImport", "syncEnable", "syncPacks", "googleSignIn", "importLink", "checkUpdates", "installUpdate", "openWizard",
+        let homeOnly = ["hooks", "kiro", "transferImport", "syncEnable", "syncPacks", "syncRemove", "googleSignIn", "importLink", "checkUpdates", "installUpdate", "openWizard",
                         "tripTake", "movingApply", "tripLetOut"]
         if Visitor.active && (homeOnly.contains(action) || (action == "set" && payload["key"] as? String == "startAtLogin")) {
             return ["ok": false, "error": "not while \(config.petName) is visiting"]
@@ -2688,7 +2693,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             }
         case "syncInspect":
             let found = Sync.inspect(URL(fileURLWithPath: payload["path"] as? String ?? ""), excluding: sync.deviceID)
-            return ["devices": found.devices, "xp": found.xp, "names": found.names, "localXP": stats.localXP]
+            return ["devices": found.devices, "xp": found.xp, "names": found.names, "localXP": stats.localXP, "keptBy": found.keptBy as Any]
         case "syncChoose":
             let open = NSOpenPanel()
             open.canChooseDirectories = true
@@ -2733,6 +2738,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             return later
         case "syncPacks":
             setSyncPacks(payload["on"] as? Bool ?? false)
+            return ["ok": true]
+        case "syncRemove":
+            guard sync.enabled, let id = payload["id"] as? String, id != sync.deviceID else { return ["ok": false] }
+            let keep = payload["keep"] as? Bool ?? false
+            let removed = sync.remove(id: id, kept: keep)
+            if keep { stats.absorbDevice(removed) }
+            syncTick()
+            lastDriveTick = 0
             return ["ok": true]
         case "importPack": importPack(); return ["ok": true]
         case "importLink":

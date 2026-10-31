@@ -128,6 +128,7 @@ textarea:focus { border-color: var(--accent); }
 .device .icon { font-size: 18px; text-align: center; }
 .device .meta { font-size: 11.5px; color: var(--muted); }
 .device .me { font-size: 10.5px; font-weight: 800; color: var(--accent); }
+.device .small-btn { padding: 5px 12px; font-size: 12px; }
 .folder-btn { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; }
 .folder-btn small { font-weight: 500; color: var(--muted); font-size: 11px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .modal { position: absolute; inset: 0; z-index: 10; display: grid; place-items: center; background: rgba(42, 29, 24, 0.25); backdrop-filter: blur(6px); }

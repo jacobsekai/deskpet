@@ -7,7 +7,7 @@
   "scripts": {
     "start": "electron .",
     "snapshot": "electron . --snapshot",
-    "test": "node test/companion.test.js && node test/trips.test.js && node test/features.test.js && node test/gdrive.test.js && node test/packlink.test.js && node test/updater.test.js",
+    "test": "node test/companion.test.js && node test/trips.test.js && node test/features.test.js && node test/gdrive.test.js && node test/packlink.test.js && node test/updater.test.js && node test/sync.test.js",
     "gallery-packs": "electron . --make-gallery-packs",
     "package:win": "electron-packager . DeskPet --platform=win32 --arch=x64 --out=dist --overwrite --icon=assets/icon.ico --ignore=^/dist --ignore=^/test-output --ignore=^/test/",
     "package:mac": "electron-packager . DeskPet --platform=darwin --arch=arm64 --out=dist --overwrite --ignore=^/dist --ignore=^/test-output --ignore=^/test/",

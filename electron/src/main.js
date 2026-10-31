@@ -1235,7 +1235,7 @@ class Pet {
   async panelCall(action, payload) {
     payload = payload || {};
     // A visiting pet can't change this computer's setup.
-    const hostOnly = ['hooks', 'kiro', 'transferImport', 'syncEnable', 'syncPacks', 'googleSignIn', 'importLink', 'checkUpdates', 'installUpdate', 'openWizard', 'tripTake', 'movingApply', 'tripLetOut',
+    const hostOnly = ['hooks', 'kiro', 'transferImport', 'syncEnable', 'syncPacks', 'syncRemove', 'googleSignIn', 'importLink', 'checkUpdates', 'installUpdate', 'openWizard', 'tripTake', 'movingApply', 'tripLetOut',
       'galleryInstall', 'calendarTest'];
     if (this.visitor && (hostOnly.includes(action) || (action === 'set' && payload.key === 'startAtLogin'))) {
       return { ok: false, error: `${this.config.petName} is just visiting this computer` };
@@ -1313,6 +1313,7 @@ class Pet {
       case 'googleCancel': this.google.cancelSignIn(); return { ok: true };
       case 'googleSignOut': if (!this.googleSync) await this.google.signOut(); return { ok: true };
       case 'syncPacks': this.setSyncPacks(!!payload.on); return { ok: true };
+      case 'syncRemove': return this.removeSyncDevice(payload.id, !!payload.keep);
       case 'pack': return this.wizardCall('pack', payload);
       case 'openSprites': shell.openPath(paths.sprites); return { ok: true };
       case 'importPack': await this.importPackDialog(); return { ok: true };
@@ -1921,6 +1922,11 @@ class Pet {
     let result;
     try { result = this.sync.sync(this.stats.deviceExport, this.syncProfile()); } catch (e) { this.sync.error = e.message; return; }
     if (!result) return;
+    if (result.removedBy) {
+      this.disableSync();
+      this.say(`${result.removedBy} took this device out of sync, so sync is off here ☁️`, 6);
+      return;
+    }
     remote.xp = result.remoteXP;
     remote.days = result.remoteDays;
     if (result.newerProfile) this.applySyncProfile(result.newerProfile);
@@ -1951,7 +1957,7 @@ class Pet {
     const last = google ? this.google.lastSync : this.sync.lastSync;
     return {
       enabled: this.sync.enabled, folder: this.sync.folder, folderName: google ? 'Google Drive' : this.sync.folder ? path.basename(this.sync.folder) : null,
-      devices: this.sync.devices.map((d) => ({ name: d.name, platform: d.platform, me: d.id === this.sync.deviceID, xp: d.xp, updated: ago(d.updated * 1000) })),
+      devices: this.sync.devices.map((d) => ({ id: d.id, name: d.name, platform: d.platform, me: d.id === this.sync.deviceID, xp: d.xp, updated: ago(d.updated * 1000) })),
       lastSync: last ? ago(last) : null, error: (google && this.google.error) || this.sync.error,
       syncPacks: this.settings.get('syncPacks', false), candidates: Sync.candidates(), deviceName: this.sync.deviceName,
       google: { available: this.google.available, on: google, signedIn: this.google.signedIn, email: this.google.email },
@@ -1970,6 +1976,15 @@ class Pet {
       this.lastDriveTick = 0;
     }
     this.say(fresh ? 'synced! picking up where you left off ☁️' : 'sync is on: progress adds up across devices ☁️', 4);
+  }
+
+  removeSyncDevice(id, keep) {
+    if (!this.sync.enabled || !id || id === this.sync.deviceID) return { ok: false };
+    const stats = this.sync.remove(id, keep);
+    if (keep) this.stats.absorbDevice(stats);
+    this.syncTick();
+    this.lastDriveTick = 0;
+    return { ok: true };
   }
 
   disableSync() {
