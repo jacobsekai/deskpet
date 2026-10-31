@@ -79,6 +79,13 @@ jobs:
           $state = Get-Content $f.FullName -Raw | ConvertFrom-Json
           if ($state.event -ne 'PreToolUse' -or $state.tool -ne 'fs_write') { throw "unexpected kiro hook state: $state" }
 
+      - name: Google sign-in client (from the GOOGLE_OAUTH_JSON secret; without it the Google Drive option stays hidden)
+        shell: bash
+        env:
+          GOOGLE_OAUTH_JSON: ${{ secrets.GOOGLE_OAUTH_JSON }}
+        run: |
+          if [ -n "$GOOGLE_OAUTH_JSON" ]; then printf '%s' "$GOOGLE_OAUTH_JSON" > src/google-oauth.json; echo "added"; else echo "::warning::GOOGLE_OAUTH_JSON isn't set; building without Google sign-in"; fi
+
       - name: Package
         run: npx electron-packager . DeskPet --platform=win32 --arch=x64 --out=dist --overwrite --icon=assets/icon.ico --ignore=^/dist --ignore=^/test-output --ignore=^/test/
 

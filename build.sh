@@ -6,7 +6,7 @@ cd "$(dirname "$0")"
 mkdir -p build
 # Universal binary: Apple Silicon and Intel.
 for arch in arm64 x86_64; do
-    swiftc -O -swift-version 5 -target "$arch-apple-macos13.0" -framework AppKit -framework WebKit -framework ServiceManagement -framework SwiftUI -framework UserNotifications -framework CoreAudio -framework CoreMediaIO -framework Carbon \
+    swiftc -O -swift-version 5 -target "$arch-apple-macos13.0" -framework AppKit -framework WebKit -framework ServiceManagement -framework SwiftUI -framework UserNotifications -framework CoreAudio -framework CoreMediaIO -framework Carbon -framework Network -framework CryptoKit \
         -o "build/DeskPet-$arch" Sources/*.swift
 done
 lipo -create -output build/DeskPet build/DeskPet-arm64 build/DeskPet-x86_64
@@ -36,6 +36,8 @@ cp electron/src/renderer/color.js electron/src/renderer/pet.js electron/src/rend
 # The companion engine runs in JavaScriptCore; the talk window is shared HTML too.
 cp electron/src/companion/engine.js electron/src/companion/talk.html electron/src/companion/talk.css electron/src/companion/talk.js electron/src/companion/games.js "$WEB/companion/"
 cp electron/src/companion/personalities/*.json "$WEB/companion/personalities/"
+# Google Drive sign-in only shows up when the OAuth client file is present (it's kept out of git).
+[ -f electron/src/google-oauth.json ] && cp electron/src/google-oauth.json "$APP/Contents/Resources/"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

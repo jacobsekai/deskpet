@@ -309,7 +309,7 @@
         : `${state.names.petName} goes back to level 1 and earns a ${r.nextEmblem} prestige badge. Every reward stays unlocked.`;
       openModal({ ok: 'Prestige', cancel: 'Not yet', onOk: async () => { await call('prestige'); burstConfetti(); refresh(); } });
     });
-    $('#modal-cancel').addEventListener('click', () => { $('#modal').hidden = true; });
+    $('#modal-cancel').addEventListener('click', () => { $('#modal').hidden = true; if (modalActions.cancel) modalActions.cancel(); });
     $('#modal-ok').addEventListener('click', () => { $('#modal').hidden = true; if (modalActions.ok) modalActions.ok(); });
     $('#modal-alt').addEventListener('click', () => { $('#modal').hidden = true; if (modalActions.alt) modalActions.alt(); });
     $('#badge-toggle').addEventListener('change', (e) => set('showPrestigeBadge', e.target.checked));
@@ -374,6 +374,31 @@
     $('#pack-import').addEventListener('click', () => call('importPack').then(refresh));
     $('#pack-export').addEventListener('click', () => call('exportPack'));
     $('#pack-folder').addEventListener('click', () => call('openSprites'));
+    $('#pack-link').addEventListener('click', () => {
+      $('#link-row').hidden = !$('#link-row').hidden;
+      if (!$('#link-row').hidden) $('#link-input').focus();
+    });
+    const importLink = async () => {
+      const link = $('#link-input').value.trim();
+      if (!link) return;
+      $('#link-go').disabled = true;
+      $('#link-note').className = 'note';
+      $('#link-note').textContent = 'Downloading…';
+      const r = await call('importLink', { link });
+      $('#link-go').disabled = false;
+      $('#link-note').className = r && r.ok ? 'note ok' : 'note error';
+      $('#link-note').textContent = r && r.ok ? `Imported ${r.name} ✨` : (r && r.error) || "Couldn't import that link.";
+      if (r && r.ok) { $('#link-input').value = ''; refresh(); }
+    };
+    $('#link-go').addEventListener('click', importLink);
+    $('#link-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') importLink(); });
+    $('#pack-refresh').addEventListener('click', async () => {
+      const b = $('#pack-refresh');
+      b.disabled = true;
+      await call('refreshCharacter');
+      b.disabled = false;
+      refresh();
+    });
     $('#look-bubble').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => set('thoughtBubble', b.dataset.value)));
     const size = $('#size');
     size.addEventListener('input', () => { $('#size-label').textContent = `${size.value}%`; });
@@ -555,8 +580,8 @@
 
   let modalActions = {};
   /** Shows the modal (title/text/emblem already filled in) with up to two actions. */
-  function openModal({ ok, alt, cancel, onOk, onAlt }) {
-    modalActions = { ok: onOk, alt: onAlt };
+  function openModal({ ok, alt, cancel, onOk, onAlt, onCancel }) {
+    modalActions = { ok: onOk, alt: onAlt, cancel: onCancel };
     $('#modal-ok').textContent = ok;
     $('#modal-cancel').textContent = cancel || 'Cancel';
     $('#modal-alt').hidden = !alt;
@@ -577,44 +602,86 @@
     lastSync = key;
     const box = $('#sync-box');
     box.innerHTML = '';
+    const google = s.google || {};
     if (!s.enabled) {
-      box.appendChild(el('p', 'sub', 'Pick a folder your cloud drive already syncs. Each device keeps its own file there, so XP and stats add up across all of them, and names, settings, rewards, and prestige follow whichever device changed them last. Nothing goes through a server.'));
+      box.appendChild(el('p', 'sub', google.available
+        ? 'Sign in with Google to sync through your Drive, or pick a folder your cloud drive already syncs. Each device keeps its own file, so XP and stats add up across all of them, and names, settings, rewards, and prestige follow whichever device changed them last.'
+        : 'Pick a folder your cloud drive already syncs. Each device keeps its own file there, so XP and stats add up across all of them, and names, settings, rewards, and prestige follow whichever device changed them last. Nothing goes through a server.'));
+      if (google.available) {
+        const g = el('div', 'actions');
+        const signIn = el('button', 'primary', '🔐 Sign in with Google Drive');
+        const note = el('span', 'note');
+        signIn.addEventListener('click', () => googleSignIn(signIn, note, (r) => startSync(r.path, 'Google Drive', () => call('googleSignOut'))));
+        g.append(signIn, note);
+        box.appendChild(g);
+      }
       const row = el('div', 'actions');
       for (const c of s.candidates) {
         const b = el('button', 'ghost-btn folder-btn', `<span>☁️ ${esc(c.name)}</span><small>${esc(c.path)}</small>`);
         b.addEventListener('click', () => startSync(c.path, c.name));
         row.appendChild(b);
       }
-      const choose = el('button', s.candidates.length ? 'ghost-btn' : 'primary', s.candidates.length ? 'Choose another folder…' : 'Choose a synced folder…');
+      const choose = el('button', s.candidates.length || google.available ? 'ghost-btn' : 'primary', s.candidates.length ? 'Choose another folder…' : 'Choose a synced folder…');
       choose.addEventListener('click', async () => { const r = await call('syncChoose'); if (r && r.path) startSync(r.path, r.path.split(/[\\/]/).pop()); });
       row.appendChild(choose);
       box.appendChild(row);
       return;
     }
-    box.appendChild(el('div', 'sync-on', `<span class="dot-live"></span>Syncing through ${esc(s.folderName || s.folder)}${s.lastSync ? `<span class="muted"> · ${esc(s.lastSync)}</span>` : ''}`));
+    const through = google.on && google.email ? `Google Drive (${google.email})` : s.folderName || s.folder;
+    box.appendChild(el('div', 'sync-on', `<span class="dot-live"></span>Syncing through ${esc(through)}${s.lastSync ? `<span class="muted"> · ${esc(s.lastSync)}</span>` : ''}`));
     if (s.error) box.appendChild(el('p', 'note error', esc(s.error)));
+    if (google.on && !google.signedIn) {
+      const again = el('div', 'actions');
+      const signIn = el('button', 'primary', '🔐 Sign in again');
+      const note = el('span', 'note');
+      signIn.addEventListener('click', () => googleSignIn(signIn, note, refresh));
+      again.append(signIn, note);
+      box.appendChild(again);
+    }
     const list = el('div', 'devices');
     for (const d of s.devices) {
       list.appendChild(el('div', 'device', `<span class="icon">${PLATFORM_ICONS[d.platform] || '🖥️'}</span>
         <div><div><b>${esc(d.name)}</b> ${d.me ? '<span class="me">THIS DEVICE</span>' : ''}</div><div class="meta">${esc(d.platform)} · ${d.xp} XP · updated ${esc(d.updated)}</div></div><span></span>`));
     }
-    if (s.devices.length < 2) list.appendChild(el('div', 'empty', `Turn on sync on your other devices with the same folder and they'll show up here.`));
+    if (s.devices.length < 2) {
+      list.appendChild(el('div', 'empty', google.on ? `Sign in with the same Google account on your other devices and they'll show up here.`
+        : `Turn on sync on your other devices with the same folder and they'll show up here.`));
+    }
     box.appendChild(list);
-    const packs = el('div', 'toggle-row', `<span>Keep sprite packs in the sync folder</span><div class="switch-btn${s.syncPacks ? ' on' : ''}"></div>`);
+    const packs = el('div', 'toggle-row', `<span>${google.on ? 'Sync sprite packs too' : 'Keep sprite packs in the sync folder'}</span><div class="switch-btn${s.syncPacks ? ' on' : ''}"></div>`);
     packs.querySelector('.switch-btn').addEventListener('click', () => call('syncPacks', { on: !s.syncPacks }).then(refresh));
     box.appendChild(packs);
     const row = el('div', 'actions');
     const now = el('button', 'ghost-btn', '🔄 Sync now');
     now.addEventListener('click', () => call('syncNow').then(refresh));
-    const off = el('button', 'ghost-btn', 'Turn off sync');
+    const off = el('button', 'ghost-btn', google.on ? 'Turn off sync and sign out' : 'Turn off sync');
     off.addEventListener('click', () => call('syncDisable').then(refresh));
     row.appendChild(now);
     row.appendChild(off);
     box.appendChild(row);
   }
 
+  /** Waits for the browser sign-in; `then` gets the result when it worked. */
+  async function googleSignIn(button, note, then) {
+    const label = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Finish signing in in your browser…';
+    note.className = 'note';
+    note.textContent = '';
+    const cancel = el('button', 'ghost-btn', 'Cancel');
+    cancel.addEventListener('click', () => call('googleCancel'));
+    button.after(cancel);
+    const r = await call('googleSignIn');
+    cancel.remove();
+    button.disabled = false;
+    button.textContent = label;
+    if (r && r.ok) return then(r);
+    note.className = 'note error';
+    note.textContent = (r && r.error) || 'Sign-in failed. Try again.';
+  }
+
   /** If the folder already has progress from other devices, ask how to join. */
-  async function startSync(path, name) {
+  async function startSync(path, name, onCancel) {
     const found = await call('syncInspect', { path });
     if (!found.devices || !found.localXP) {
       await call('syncEnable', { path, mode: 'merge' });
@@ -628,6 +695,7 @@
       ok: 'Combine', alt: 'Use synced progress', cancel: 'Cancel',
       onOk: () => call('syncEnable', { path, mode: 'merge' }).then(refresh),
       onAlt: () => call('syncEnable', { path, mode: 'fresh' }).then(refresh),
+      onCancel,
     });
   }
 

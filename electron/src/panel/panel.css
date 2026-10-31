@@ -84,6 +84,7 @@ main.content { display: block; grid-template-columns: none; gap: 0; overflow-y: 
 .reward.locked:hover { transform: none; box-shadow: none; }
 
 .row-inline { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+.row-inline[hidden] { display: none; }
 .row-inline input[type=text] { flex: 1; min-width: 220px; font: inherit; font-size: 13px; padding: 9px 12px; border-radius: 12px; border: 1px solid var(--line); background: white; outline: none; }
 .row-inline input[type=text]:focus { border-color: var(--accent); }
 input[type=range] { flex: 1; accent-color: var(--accent); min-width: 220px; }

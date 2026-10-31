@@ -6,5 +6,7 @@ DeskPet.app/
 electron/node_modules/
 electron/dist/
 electron/test-output/
+# Google sign-in client (CI writes it from the GOOGLE_OAUTH_JSON secret)
+electron/src/google-oauth.json
 
 .DS_Store

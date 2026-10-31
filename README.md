@@ -75,7 +75,9 @@ npm run package:linux              # build the AppImages and tar.gz (on Linux; C
 | Click / double-click / drag | purrs with hearts / opens the talk window / dangles from the scruff |
 | Throw (flick and release) | flies, spins, and bounces off the screen edges; dizzy after a wild throw. With Gravity off it drifts and ricochets instead of falling |
 
-**Control center:** 🐾 → **Open DeskPet…** (⌘, / Ctrl+,) has everything, in the same style as setup: Home (your pet, rank, today's stats, live agents), Companion (your bond, reminders, and what the pet remembers), Rewards (live previews of each reward on your pet, prestige), Look (sprite packs, theme, thought bubble, size), Focus (timer and blocklist), Agents (connections and live sessions), Behavior, Trips (take the pet with you on a drive), Account (rename, sync, moving homes), and About (updates). The 🐾 menu and right-clicking the pet give a quick menu: status, agents, quick focus, and Open DeskPet.
+**Control center:** 🐾 → **Open DeskPet…** (⌘, / Ctrl+,) has everything, in the same style as setup: Home (your pet, rank, today's stats, live agents), Companion (your bond, reminders, and what the pet remembers), Rewards (live previews of each reward on your pet, prestige), Look (sprite packs, theme, thought bubble, size), Focus (timer and blocklist), Agents (connections and live sessions), Behavior, Trips (take the pet with you on a drive), Account (rename, sync, moving homes), and About (updates). The 🐾 menu and right-clicking the pet give a quick menu: status, agents, quick focus, 🔄 Refresh character, and Open DeskPet.
+
+**Getting characters:** Look → Import pack (a `.zip`, a folder, or images), Browse the gallery, or **Import from a Drive link**: paste a Google Drive link to a pack `.zip` shared with "Anyone with the link" (no sign-in needed; up to 50 MB; zips with files that would land outside the pack folder are refused). Packs reload by themselves when their files change; **🔄 Refresh character** (Look or the quick menu) reloads right away, pulling from Google Drive first when you sync that way.
 
 ### Talking with your pet
 Inspired by Monika After Story. **Double-click the pet** (or 🐾 → 💬 Talk to …) to open a dialogue box beside it:
@@ -152,6 +154,8 @@ The full format (steps, questions, remembered answers, conditions, moods, games,
 
 ### Sync across devices
 Control center → Account → **Sync across devices**: pick a folder your cloud drive syncs (iCloud Drive, OneDrive, Dropbox, Google Drive, Nextcloud, Syncthing, … DeskPet lists the ones it finds). Each device writes only its own file in `DeskPet/devices/`, so devices never overwrite each other: XP and daily stats add up across all of them, while names, settings, worn rewards, and prestige follow whichever device changed them last. Works between macOS, Windows, and Linux, offline included (devices catch up when the folder syncs). Optionally keep sprite packs in the sync folder too. Nothing goes through a server.
+
+**Sign in with Google Drive** works without the Google Drive app (handy on Linux). Sign in in your browser, and DeskPet keeps the same per-device files, plus your sprite packs, in its private app-data space in your Drive. Only DeskPet can see that space, and DeskPet can't see your other Drive files. It syncs about once a minute. Turning sync off signs this device out; your other devices keep syncing. Builds need a Google OAuth client first: see [docs/google-drive-setup.md](docs/google-drive-setup.md).
 
 If the folder already has progress when you join, you choose **Combine** (add both) or **Use synced progress** (start this device fresh, with a backup), so progress you already moved with a transfer key isn't counted twice.
 

@@ -105,6 +105,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     private var lastKiroCheck = 0.0
     private var updateAnnounced = false
     private let sync = Sync()
+    private lazy var google = GoogleDrive(deviceID: sync.deviceID)
+    private var lastDriveTick = 0.0
     /// Conversations, affection, memories, and reminders (the engine shared with the Windows/Linux app).
     private let companion = Companion()
     private var talk: TalkWindow?
@@ -503,6 +505,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         if sync.enabled && now - lastSyncTick > 5 {
             lastSyncTick = now
             syncTick()
+        }
+        if googleSync && now - lastDriveTick > 60 {
+            lastDriveTick = now
+            Task { @MainActor in await self.google.tick() }
         }
         if now - lastMinute >= 60 {
             lastMinute = now
@@ -1460,14 +1466,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         }
         if let url = urls.first(where: { MovingFile.extensions.contains($0.pathExtension.lowercased()) }) { return confirmMoveIn(url) }
         do {
-            let name = try PackArchive.importItems(urls, currentPack: spritePackName)
-            spritePackName = name
-            loadSprites(announce: false)
-            transient = (.done, CACurrentMediaTime() + 2.5)
-            say("new look: \(name)! ✨", for: 3)
+            _ = try installPack(urls)
         } catch {
             say("hmm: \(error.localizedDescription)", for: 4)
         }
+    }
+
+    /// Imports a pack from dropped or downloaded files and wears it.
+    private func installPack(_ urls: [URL]) throws -> String {
+        let name = try PackArchive.importItems(urls, currentPack: spritePackName)
+        spritePackName = name
+        loadSprites(announce: false)
+        transient = (.done, CACurrentMediaTime() + 2.5)
+        say("new look: \(name)! ✨", for: 3)
+        return name
+    }
+
+    /// Reloads the pack from disk, pulling from Google Drive first when that's how it syncs.
+    @MainActor private func refreshCharacter() async {
+        if googleSync {
+            await google.tick()
+            syncTick()
+        }
+        loadSprites(announce: false)
+        say("all refreshed! ✨", for: 2.5)
     }
 
     @objc private func importPack() {
@@ -1549,20 +1571,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         sync.accept(profile: syncProfile())
     }
 
+    private var googleSync: Bool { sync.folder?.path == google.dir.path }
+
     private func syncState() -> [String: Any] {
         let fmt = RelativeDateTimeFormatter()
         fmt.unitsStyle = .short
+        let onGoogle = googleSync
         return [
-            "enabled": sync.enabled, "folder": sync.folder?.path as Any, "folderName": sync.folder?.lastPathComponent as Any,
+            "enabled": sync.enabled, "folder": sync.folder?.path as Any,
+            "folderName": onGoogle ? "Google Drive" : sync.folder?.lastPathComponent as Any,
             "devices": sync.devices.map { d in
                 ["name": d.name, "platform": d.platform, "me": d.id == sync.deviceID, "xp": d.xp,
                  "updated": fmt.localizedString(for: Date(timeIntervalSince1970: d.updated), relativeTo: Date())] as [String: Any]
             },
-            "lastSync": sync.lastSync.map { fmt.localizedString(for: $0, relativeTo: Date()) } as Any,
-            "error": sync.error as Any,
+            "lastSync": (onGoogle ? google.lastSync : sync.lastSync).map { fmt.localizedString(for: $0, relativeTo: Date()) } as Any,
+            "error": (onGoogle ? google.error : nil) ?? sync.error as Any,
             "syncPacks": defaults.bool(forKey: "syncPacks"),
             "candidates": Sync.candidates().map { ["name": $0.name, "path": $0.path] },
             "deviceName": sync.deviceName,
+            "google": ["available": google.available, "on": onGoogle, "signedIn": google.signedIn, "email": google.email as Any],
         ]
     }
 
@@ -1575,16 +1602,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         sync.prepareJoin(profile: syncProfile(), first: first)
         lastSyncTick = 0
         syncTick()
+        if googleSync {
+            if !defaults.bool(forKey: "syncPacks") { setSyncPacks(true) }
+            lastDriveTick = 0
+        }
         say(fresh ? "synced! picking up where you left off ☁️" : "sync is on: progress adds up across devices ☁️", for: 4)
     }
 
     private func disableSync() {
+        let onGoogle = googleSync
+        if onGoogle { google.bringPacksHome(to: DeskPetPaths.root.appendingPathComponent("sprites")) }
         stats.leaveSync()
         sync.disable()
         if defaults.bool(forKey: "syncPacks") {
             defaults.set(false, forKey: "syncPacks")
             loadSprites(announce: false)
         }
+        if onGoogle { Task { @MainActor in await self.google.signOut() } }
         say("sync is off ☁️", for: 2.5)
     }
 
@@ -1871,6 +1905,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
         }
         menu.addItem(item("💬 Talk to \(config.petName)…", #selector(openTalkAction)))
         menu.addItem(item("Open DeskPet…", #selector(openControlCenterAction), key: ","))
+        menu.addItem(item("🔄 Refresh character", #selector(refreshCharacterAction)))
         if focus.phase == .off {
             let f = item("🍅 Focus for 25 minutes", #selector(startFocus(_:)))
             f.tag = 25
@@ -2473,7 +2508,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
     }
 
     private func panelCall(_ action: String, _ payload: [String: Any]) -> Any? {
-        let homeOnly = ["hooks", "kiro", "transferImport", "syncEnable", "syncPacks", "checkUpdates", "installUpdate", "openWizard",
+        let homeOnly = ["hooks", "kiro", "transferImport", "syncEnable", "syncPacks", "googleSignIn", "importLink", "checkUpdates", "installUpdate", "openWizard",
                         "tripTake", "movingApply", "tripLetOut"]
         if Visitor.active && (homeOnly.contains(action) || (action == "set" && payload["key"] as? String == "startAtLogin")) {
             return ["ok": false, "error": "not while \(config.petName) is visiting"]
@@ -2670,12 +2705,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
             disableSync()
             return ["ok": true]
         case "syncNow":
-            syncTick()
+            guard googleSync else {
+                syncTick()
+                return ["ok": true]
+            }
+            let later = DeferredReply()
+            Task { @MainActor in
+                await google.tick()
+                self.syncTick()
+                later.resolve(["ok": true])
+            }
+            return later
+        case "googleSignIn":
+            let later = DeferredReply()
+            Task { @MainActor in later.resolve(await self.google.signIn()) }
+            return later
+        case "googleCancel":
+            google.cancelSignIn()
             return ["ok": true]
+        case "googleSignOut":
+            guard !googleSync else { return ["ok": true] }
+            let later = DeferredReply()
+            Task { @MainActor in
+                await self.google.signOut()
+                later.resolve(["ok": true])
+            }
+            return later
         case "syncPacks":
             setSyncPacks(payload["on"] as? Bool ?? false)
             return ["ok": true]
         case "importPack": importPack(); return ["ok": true]
+        case "importLink":
+            let later = DeferredReply()
+            Task { @MainActor in
+                do {
+                    let file = try await PackLink.download(payload["link"] as? String ?? "")
+                    defer { try? FileManager.default.removeItem(at: file.deletingLastPathComponent()) }
+                    later.resolve(["ok": true, "name": try self.installPack([file])])
+                } catch {
+                    later.resolve(["ok": false, "error": error.localizedDescription])
+                }
+            }
+            return later
+        case "refreshCharacter":
+            let later = DeferredReply()
+            Task { @MainActor in
+                await self.refreshCharacter()
+                later.resolve(["ok": true])
+            }
+            return later
         case "exportPack": exportPack(); return ["ok": true]
         case "previewPoses": previewPoses(); return ["ok": true]
         case "talk": openTalk(topic: payload["topic"] as? String); return ["ok": true]
@@ -2756,7 +2834,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, PetVie
 
     @objc private func toggleWander() { wander.toggle(); walkTarget = nil }
     @objc private func toggleGravity() { gravity.toggle() }
-    @objc private func reloadSprites() { loadSprites(announce: true) }
+    @objc private func refreshCharacterAction() { Task { @MainActor in await self.refreshCharacter() } }
 
     @objc private func chooseThoughtBubble(_ sender: NSMenuItem) {
         thoughtBubble = ThoughtBubbleSize(rawValue: sender.representedObject as? String ?? "") ?? .large

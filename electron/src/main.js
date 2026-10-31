@@ -2,7 +2,7 @@
 //
 // The main process owns all behavior: agent detection, moods, walking, throwing, resizing, and menus.
 // The renderer only draws the pose it's sent and reports where the pet is for hit testing.
-const { app, BrowserWindow, Tray, Menu, nativeImage, screen, powerMonitor, ipcMain, shell, dialog, Notification, clipboard, globalShortcut } = require('electron');
+const { app, BrowserWindow, Tray, Menu, nativeImage, screen, powerMonitor, ipcMain, shell, dialog, Notification, clipboard, globalShortcut, safeStorage } = require('electron');
 
 /** Emergency-hide shortcuts (same choices as PanicKey.swift). */
 const PANIC_KEYS = [
@@ -22,6 +22,8 @@ const {
 } = require('./extras');
 const { paths, Settings, loadConfig, saveConfig, hooksLive, readJSON, setSpritesOverride } = require('./settings');
 const { Sync } = require('./sync');
+const { GoogleDrive } = require('./gdrive');
+const { downloadDriveZip } = require('./packlink');
 const hooks = require('./hooks');
 const { createCompanion, personalityFor } = require('./companion-host');
 const trips = require('./trips');
@@ -75,6 +77,21 @@ const ACTIVITY_MOOD = {
   idle: 'idle', done: 'done', tidying: 'tidying', thinking: 'thinking', reading: 'reading', searching: 'searching',
   delegating: 'delegating', typing: 'typing', oops: 'oops', error: 'error', needsYou: 'needsYou',
 };
+
+/** Where the Google account is kept: encrypted by the OS keychain/DPAPI/libsecret when available, owner-only either way. */
+const googleVault = (file) => ({
+  read() {
+    try {
+      const raw = fs.readFileSync(file);
+      return raw[0] === 0x7b ? raw.toString() : safeStorage.decryptString(raw);
+    } catch (_) { return null; }
+  },
+  write(text) {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, safeStorage.isEncryptionAvailable() ? safeStorage.encryptString(text) : text, { mode: 0o600 });
+  },
+  clear() { fs.rmSync(file, { force: true }); },
+});
 
 class Pet {
   constructor() {
@@ -137,6 +154,8 @@ class Pet {
     this.talk = null;
     this.sync = new Sync(this.settings);
     this.lastSyncTick = 0;
+    this.google = new GoogleDrive({ dir: path.join(paths.root, 'google-drive'), deviceID: this.sync.deviceID, vault: googleVault(path.join(paths.root, 'google-account')) });
+    this.lastDriveTick = 0;
     if (this.settings.get('syncPacks', false) && this.sync.enabled) setSpritesOverride(this.sync.spritesFolder);
     // Trips. A visitor's own settings are temporary, so "this computer" is the id in the real ~/.deskpet.
     this.visitor = !!paths.trip;
@@ -393,6 +412,10 @@ class Pet {
     if (this.sync.enabled && t - this.lastSyncTick > 5) {
       this.lastSyncTick = t;
       this.syncTick();
+    }
+    if (this.googleSync && t - this.lastDriveTick > 60) {
+      this.lastDriveTick = t;
+      this.google.tick();
     }
     if (t - this.lastTripWatch >= 3) {
       this.lastTripWatch = t;
@@ -971,6 +994,7 @@ class Pet {
       { type: 'separator' },
       ...(away ? [] : [{ label: `💬 Talk to ${pet}…`, click: () => this.openTalk() }]),
       { label: 'Open DeskPet…', accelerator: 'CmdOrCtrl+,', click: () => this.openPanel() },
+      ...(away ? [] : [{ label: '🔄 Refresh character', click: () => this.refreshCharacter() }]),
       this.focus.phase === 'off'
         ? { label: '🍅 Focus for 25 minutes', click: () => this.startFocus(25) }
         : { label: `⏹ Stop focus (${this.focus.label})`, click: () => this.focus.stop() },
@@ -1207,7 +1231,7 @@ class Pet {
   async panelCall(action, payload) {
     payload = payload || {};
     // A visiting pet can't change this computer's setup.
-    const hostOnly = ['hooks', 'kiro', 'transferImport', 'syncEnable', 'syncPacks', 'checkUpdates', 'installUpdate', 'openWizard', 'tripTake', 'movingApply', 'tripLetOut',
+    const hostOnly = ['hooks', 'kiro', 'transferImport', 'syncEnable', 'syncPacks', 'googleSignIn', 'importLink', 'checkUpdates', 'installUpdate', 'openWizard', 'tripTake', 'movingApply', 'tripLetOut',
       'galleryInstall', 'calendarTest'];
     if (this.visitor && (hostOnly.includes(action) || (action === 'set' && payload.key === 'startAtLogin'))) {
       return { ok: false, error: `${this.config.petName} is just visiting this computer` };
@@ -1277,11 +1301,19 @@ class Pet {
       }
       case 'syncEnable': this.enableSync(payload.path, payload.mode === 'fresh'); return { ok: true };
       case 'syncDisable': this.disableSync(); return { ok: true };
-      case 'syncNow': this.syncTick(); return { ok: true };
+      case 'syncNow':
+        if (this.googleSync) await this.google.tick();
+        this.syncTick();
+        return { ok: true };
+      case 'googleSignIn': return this.google.signIn((url) => shell.openExternal(url));
+      case 'googleCancel': this.google.cancelSignIn(); return { ok: true };
+      case 'googleSignOut': if (!this.googleSync) await this.google.signOut(); return { ok: true };
       case 'syncPacks': this.setSyncPacks(!!payload.on); return { ok: true };
       case 'pack': return this.wizardCall('pack', payload);
       case 'openSprites': shell.openPath(paths.sprites); return { ok: true };
       case 'importPack': await this.importPackDialog(); return { ok: true };
+      case 'importLink': return this.importFromLink(payload.link);
+      case 'refreshCharacter': await this.refreshCharacter(); return { ok: true };
       case 'exportPack': await this.exportPackDialog(); return { ok: true };
       case 'previewPoses': this.previewPoses(); return { ok: true };
       case 'bringHere': this.bringHere(); return { ok: true };
@@ -1798,6 +1830,32 @@ class Pet {
     }
   }
 
+  async importFromLink(link) {
+    let file = null;
+    try {
+      file = await downloadDriveZip(link);
+      const name = await importPack([file], this.spritePackName);
+      this.chooseSprites(name);
+      this.transient = { mood: 'done', until: now() + 2.5 };
+      this.say(`new look: ${name}! ✨`, 3);
+      return { ok: true, name };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    } finally {
+      if (file) fs.rmSync(path.dirname(file), { recursive: true, force: true });
+    }
+  }
+
+  /** Reloads the pack from disk, pulling from Google Drive first when that's how it syncs. */
+  async refreshCharacter() {
+    if (this.googleSync) {
+      await this.google.tick();
+      this.syncTick();
+    }
+    this.loadSprites(false);
+    this.say('all refreshed! ✨', 2.5);
+  }
+
   async importPackDialog() {
     const result = await dialog.showOpenDialog({
       title: 'Import a sprite pack', properties: ['openFile', 'openDirectory', 'multiSelections'],
@@ -1857,13 +1915,18 @@ class Pet {
     this.sync.accept(this.syncProfile());
   }
 
+  get googleSync() { return this.sync.folder === this.google.folder; }
+
   syncState() {
     const ago = (ms) => { const s = Math.round((Date.now() - ms) / 1000); return s < 60 ? `${s} sec. ago` : s < 3600 ? `${Math.round(s / 60)} min. ago` : `${Math.round(s / 3600)} hr. ago`; };
+    const google = this.googleSync;
+    const last = google ? this.google.lastSync : this.sync.lastSync;
     return {
-      enabled: this.sync.enabled, folder: this.sync.folder, folderName: this.sync.folder ? path.basename(this.sync.folder) : null,
+      enabled: this.sync.enabled, folder: this.sync.folder, folderName: google ? 'Google Drive' : this.sync.folder ? path.basename(this.sync.folder) : null,
       devices: this.sync.devices.map((d) => ({ name: d.name, platform: d.platform, me: d.id === this.sync.deviceID, xp: d.xp, updated: ago(d.updated * 1000) })),
-      lastSync: this.sync.lastSync ? ago(this.sync.lastSync) : null, error: this.sync.error,
+      lastSync: last ? ago(last) : null, error: (google && this.google.error) || this.sync.error,
       syncPacks: this.settings.get('syncPacks', false), candidates: Sync.candidates(), deviceName: this.sync.deviceName,
+      google: { available: this.google.available, on: google, signedIn: this.google.signedIn, email: this.google.email },
     };
   }
 
@@ -1874,13 +1937,20 @@ class Pet {
     this.stats.remote.prestige = { rank: this.stats.prestige, base: this.stats.prestigeBase };
     this.sync.prepareJoin(this.syncProfile(), first);
     this.syncTick();
+    if (this.googleSync) {
+      if (!this.settings.get('syncPacks', false)) this.setSyncPacks(true);
+      this.lastDriveTick = 0;
+    }
     this.say(fresh ? 'synced! picking up where you left off ☁️' : 'sync is on: progress adds up across devices ☁️', 4);
   }
 
   disableSync() {
+    const google = this.googleSync;
+    if (google) this.google.bringPacksHome(paths.localSprites);
     this.stats.leaveSync();
     this.sync.disable();
     if (this.settings.get('syncPacks', false)) this.setSyncPacks(false);
+    if (google) this.google.signOut();
     this.say('sync is off ☁️', 2.5);
   }
 
